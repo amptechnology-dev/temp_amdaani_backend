@@ -4,7 +4,7 @@ import * as yup from 'yup';
 const envVarsSchema = yup.object({
   NODE_ENV: yup.string().oneOf(['production', 'development', 'test']).required(),
   PORT: yup.number().default(3000),
-  APP_BASE_URL: yup.string().url(),
+  APP_BASE_URL: yup.string(),
   MONGODB_URL: yup.string().required('MongoDB URL is required'),
   JWT_SECRET: yup.string().required('JWT secret key is required'),
   JWT_ACCESS_EXPIRATION: yup.string().default('30m'),

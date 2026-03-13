@@ -1,18 +1,21 @@
-FROM oven/bun:1 AS base
+# Base image
+FROM oven/bun:1
 WORKDIR /usr/src/app
 
-FROM base AS install
-
+# Copy dependency files
 COPY package.json bun.lock ./
 
-RUN mkdir -p /temp/prod
-RUN cp package.json bun.lock /temp/prod/
-RUN cd /temp/prod && bun install --frozen-lockfile --production
+# Install ALL dependencies (important)
+RUN bun install --frozen-lockfile
 
-FROM base AS release
-COPY --from=install /temp/prod/node_modules node_modules
-COPY . . 
+# Copy project
+COPY . .
 
-ENV NODE_ENV=production
+# Environment
+ENV NODE_ENV=development
+
+# Expose API port
 EXPOSE 8001
-CMD ["bun", "start"]
+
+# Start server
+CMD ["bun", "run", "start"]

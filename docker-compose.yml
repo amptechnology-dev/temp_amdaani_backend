@@ -3,7 +3,7 @@ services:
     build: .
     container_name: bun-app
     ports:
-      - "8001:8001"
+      - '8000:8000'
     env_file:
       - .env
     depends_on:
@@ -15,7 +15,8 @@ services:
     image: mongo:7
     container_name: mongodb
     ports:
-      - "27017:27017"
+      - '27017:27017'
+    command: ['--replSet', 'rs0']
     volumes:
       - mongodb-data:/data/db
     restart: unless-stopped
@@ -24,7 +25,7 @@ services:
     image: redis:7
     container_name: redis
     ports:
-      - "6379:6379"
+      - '6379:6379'
     volumes:
       - redis-data:/data
     restart: unless-stopped

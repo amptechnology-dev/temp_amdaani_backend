@@ -45,7 +45,7 @@ const envVars = validateEnv(envVarsSchema, process.env);
 const config = {
   env: envVars.NODE_ENV,
   port: envVars.PORT,
-  appBaseUrl: envVars.APP_BASE_URL || 'http://localhost:8001',
+  appBaseUrl: envVars.APP_BASE_URL || 'http://localhost:3000',
   mongoose: {
     url: `${envVars.MONGODB_URL}${envVars.NODE_ENV === 'test' ? '-test' : ''}`,
   },

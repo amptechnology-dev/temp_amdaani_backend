@@ -34,6 +34,7 @@ export const verifyAuthOtp = asyncHandler(async (req, res) => {
 export const register = asyncHandler(async (req, res) => {
   const { storeData, userData } = req.body;
   const regToken = req.headers.authorization?.split(' ')[1];
+
   if (!regToken) {
     throw new ApiError(400, 'Invalid token', [{ source: 'headers', field: 'authorization', message: 'Invalid token' }]);
   }

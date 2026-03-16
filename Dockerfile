@@ -15,7 +15,7 @@ COPY . .
 ENV NODE_ENV=development
 
 # Expose API port
-EXPOSE 8001
+EXPOSE 8000
 
 # Start server
 CMD ["bun", "run", "start"]

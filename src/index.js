@@ -10,6 +10,7 @@ mongoose.connect(config.mongoose.url).then(() => {
   logger.info(`Connected to MongoDB at ${mongoose.connection.host}`);
   server = app.listen(config.port, () => {
     logger.info(`Listening to port ${config.port}`);
+    console.log('POrt', config.port);
     cronJobs.bakeAll();
   });
 });

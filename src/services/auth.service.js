@@ -77,8 +77,8 @@ export const verifyOtp = async (phone, otp) => {
 };
 
 export const verifySuperAdminLogin = async (otp) => {
-  const phone = '8697972001'; //NOTE: Static
-  const userId = '68d13689f090c34540a88fe3'; //NOTE: Static and hardcoded
+  const phone = '9903419235'; 
+  const userId = '68c528eba90e946a9e5026ac'; 
 
   if (otp != '000000') {
     //TODO: Remove

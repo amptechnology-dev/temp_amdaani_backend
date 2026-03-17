@@ -1,7 +1,14 @@
-import { RedisClient } from 'bun';
+// import { RedisClient } from 'bun';
+import { createClient } from "redis";
 
-const client = new RedisClient(process.env.REDIS_URL, {
+const client = createClient(process.env.REDIS_URL, {
   enableOfflineQueue: false,
 });
+try {
+  await client.connect();
+  console.log("✅ Redis Connected");
+} catch (err) {
+  console.log("❌ Redis Connection Failed:", err);
+}
 
 export default client;

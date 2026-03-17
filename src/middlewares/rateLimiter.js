@@ -11,7 +11,7 @@ import { ApiError } from '../utils/responseHandler.js';
 
 export const authOtpLimiter = async (req, res, next) => {
   const phone = req.body.phone;
-  if (phone === '8697972001') return next(); //NOTE: No rate for super admin
+  if (phone === '9903419235') return next(); //NOTE: No rate for super admin
   if (phone === '9999999999') return next(); //NOTE: No rate for testing
   const hourlyKey = `otp:hourly:${phone}`; // 1-hour counter
   const dailyKey = `otp:daily:${phone}`; // 24h counter

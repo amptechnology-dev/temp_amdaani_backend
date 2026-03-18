@@ -1,21 +1,23 @@
-# Base image
+# Use official Bun image
 FROM oven/bun:1
+
+# Set working directory
 WORKDIR /usr/src/app
 
-# Copy dependency files
+# Copy dependency files first (better caching)
 COPY package.json bun.lock ./
 
-# Install ALL dependencies (important)
-RUN bun install --frozen-lockfile
+# Install only production dependencies
+RUN bun install --frozen-lockfile --production
 
-# Copy project
+# Copy application source
 COPY . .
 
-# Environment
-ENV NODE_ENV=development
+# Set production environment
+ENV NODE_ENV=production
 
-# Expose API port
+# Expose app port
 EXPOSE 8000
 
-# Start server
+# Start application
 CMD ["bun", "run", "start"]

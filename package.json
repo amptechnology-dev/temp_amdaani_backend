@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "bun ./src/index.js",
+    "cron": "bun src/jobs/cron.jobs.js",
     "dev": "bun --watch ./src/index.js"
   },
   "dependencies": {

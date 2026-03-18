@@ -9,8 +9,30 @@ import {
   verifySuperAdminLogin,
 } from '../services/auth.service.js';
 import { verifyRegistrationToken, generateAuthTokens } from '../services/token.service.js';
-import { getUserById } from '../services/user.services.js';
+import { createSuperAdmin, getUserById } from '../services/user.services.js';
 import { createOrRenewFreePlan } from '../services/subscription.services.js';
+
+export const createSuperAdminUser = asyncHandler(async (req, res) => {
+  const { phone, name, email } = req.body;
+
+  if (!phone || !name) {
+    throw new ApiError(400, 'Missing required fields', [
+      { source: 'body', field: 'phone/name', message: 'Required fields missing' },
+    ]);
+  }
+
+  try {
+    const user = await createSuperAdmin({
+      phone,
+      name,
+      email,
+    });
+
+    return new ApiResponse(201, user, 'Super Admin created successfully').send(res);
+  } catch (error) {
+    throw new ApiError(400, error.message || 'Failed to create Super Admin');
+  }
+});
 
 export const sendAuthOtp = asyncHandler(async (req, res) => {
   const { phone } = req.body;

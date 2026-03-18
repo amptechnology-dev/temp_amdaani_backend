@@ -22,6 +22,7 @@ router.post(
 router.post('/logout', authenticate, authController.logoutAuth);
 router.post('/refresh-tokens', validate(authSchema.refreshToken), authController.refreshTokens);
 router.get('/me', authenticate, authController.getProfile);
+router.post('/register-superadmin', authController.createSuperAdminUser);
 router.post('/verify-otp-superadmin', authController.superAdminAuth);
 // router.post('/login', validate(authSchema.login), authController.login);
 // router.post('/forgot-password', validate(authSchema.forgotPassword), authController.forgotPassword);

@@ -19,18 +19,27 @@ import config from '../config/config.js';
 import axios from 'axios';
 import { roles } from '../config/roles.js';
 import { Role } from '../models/role.model.js';
+import { User } from '../models/user.model.js';
 
-/**
- * Generate a 6-digit OTP and store it temporarily
- */
+
 export const sendOtp = async (phone) => {
-  if (phone == '9999999999') return true; //NOTE: For testing
+  if (!phone) {
+    throw new ApiError(400, 'Phone number is required', [
+      { source: 'body', field: 'phone', message: 'Phone is required' },
+    ]);
+  }
+  const userExists = await User.exists({ phone });
+  if (!userExists) {
+    throw new ApiError(404, 'User not found', [
+      { source: 'body', field: 'phone', message: 'No account found with this phone number' },
+    ]);
+  }
+  if (phone === '9999999999') return true;
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const hash = crypto.createHash('sha256').update(otp).digest('hex');
-  await redis.set(`otp:${phone}`, hash);
-  await redis.expire(`otp:${phone}`, 60 * 5); // 5 mins TTL
-  // Send OTP via SMS
+  await redis.set(`otp:${phone}`, hash, 'EX', 60 * 5); // 5 min TTL
   const message = `${otp} is your OTP to login into AMDANI. Please do not share this OTP with anyone.- AMPTECH`;
+
   const params = {
     username: 'MTECHTRANS',
     apikey: '38892-B2424',
@@ -43,55 +52,76 @@ export const sendOtp = async (phone) => {
     format: 'JSON',
   };
 
-  const smsResponse = await axios.get('http://text.mboxsolution.com/sms-panel/api/http/index.php', { params });
+  const smsResponse = await axios.get(
+    'http://text.mboxsolution.com/sms-panel/api/http/index.php',
+    { params }
+  );
+
   if (smsResponse.data.status !== 'success') {
     console.error('Failed to send SMS:', smsResponse.data);
-    throw new ApiError(500, 'Failed to send SMS.', [{ message: 'Failed to send SMS' }]);
+    throw new ApiError(500, 'Failed to send SMS.', [
+      { message: 'Failed to send SMS' },
+    ]);
   }
+
   return true;
 };
 
-/**
- * Verify OTP and check user existence
- */
-export const verifyOtp = async (phone, otp) => {
-  if (otp != '000000') {
-    // TODO: Remove this
-    const data = await redis.get(`otp:${phone}`);
-    if (!data) {
-      throw new ApiError(400, 'Invalid OTP!', [{ source: 'body', field: 'otp', message: 'OTP not found or expired' }]);
-    }
-    const incomingHash = crypto.createHash('sha256').update(otp).digest('hex');
-    if (incomingHash !== data) throw new Error('Invalid OTP');
-    redis.del(`otp:${phone}`);
-  }
 
+export const verifyOtp = async (phone, otp) => {
+  const storedHash = await redis.get(`otp:${phone}`);
+  if (!storedHash) {
+    throw new ApiError(400, 'Invalid OTP!', [
+      { source: 'body', field: 'otp', message: 'OTP not found or expired' },
+    ]);
+  }
+  const incomingHash = crypto
+    .createHash('sha256')
+    .update(otp)
+    .digest('hex');
+  if (incomingHash !== storedHash) {
+    throw new ApiError(400, 'Invalid OTP!', [
+      { source: 'body', field: 'otp', message: 'Incorrect OTP' },
+    ]);
+  }
+  await redis.del(`otp:${phone}`);
   const user = await getUserByPhone(phone);
   if (user) {
     const tokens = await generateAuthTokens(user);
     return { status: 'logged_in', user, tokens };
   }
-  // User doesn't exist yet → return temporary token
   const tempToken = await generateRegistrationToken(phone);
   return { status: 'new_user', tempToken };
 };
 
 export const verifySuperAdminLogin = async (otp) => {
-  const phone = '9903419235'; 
-  const userId = '68c528eba90e946a9e5026ac'; 
-
-  if (otp != '000000') {
-    //TODO: Remove
-    const data = await redis.get(`otp:${phone}`);
-    if (!data) {
-      throw new ApiError(400, 'Invalid OTP!', [{ source: 'body', field: 'otp', message: 'OTP not found or expired' }]);
-    }
-    const incomingHash = crypto.createHash('sha256').update(otp).digest('hex');
-    if (incomingHash !== data) throw new Error('Invalid OTP');
-    redis.del(`otp:${phone}`);
+  const role = await Role.findOne({ name: roles.SUPERADMIN });
+  if (!role) {
+    throw new ApiError(400, 'Super Admin role not found');
   }
+  const user = await User.findOne({ role: role._id });
+  if (!user) {
+    throw new ApiError(400, 'Super Admin user not found');
+  }
+  const phone = user.phone;
+  const storedHash = await redis.get(`otp:${phone}`);
+  if (!storedHash) {
+    throw new ApiError(400, 'Invalid OTP!', [
+      { source: 'body', field: 'otp', message: 'OTP not found or expired' },
+    ]);
+  }
+  const incomingHash = crypto
+    .createHash('sha256')
+    .update(otp)
+    .digest('hex');
 
-  const token = await generateSuperAdminToken(userId);
+  if (incomingHash !== storedHash) {
+    throw new ApiError(400, 'Invalid OTP!', [
+      { source: 'body', field: 'otp', message: 'Incorrect OTP' },
+    ]);
+  }
+  await redis.del(`otp:${phone}`);
+  const token = await generateSuperAdminToken(user._id);
   return { token };
 };
 

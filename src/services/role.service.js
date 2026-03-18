@@ -1,5 +1,6 @@
 import { Role } from '../models/role.model.js';
 
 export const getRoles = async () => {
-  return Role.find();
+  const roles = await Role.find({ name: 'staff' }).select('-permissions');
+  return roles;
 };

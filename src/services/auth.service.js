@@ -28,12 +28,12 @@ export const sendOtp = async (phone) => {
       { source: 'body', field: 'phone', message: 'Phone is required' },
     ]);
   }
-  const userExists = await User.exists({ phone });
-  if (!userExists) {
-    throw new ApiError(404, 'User not found', [
-      { source: 'body', field: 'phone', message: 'No account found with this phone number' },
-    ]);
-  }
+  // const userExists = await User.exists({ phone });
+  // if (!userExists) {
+  //   throw new ApiError(404, 'User not found', [
+  //     { source: 'body', field: 'phone', message: 'No account found with this phone number' },
+  //   ]);
+  // }
   if (phone === '9999999999') return true;
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const hash = crypto.createHash('sha256').update(otp).digest('hex');

@@ -1,40 +1,77 @@
 version: '3.9'
 
 services:
+  # ── Bun/Express App ─────────────────────────────
   app:
     build: .
+    container_name: bun-app
     restart: unless-stopped
     env_file:
       - .env
-    depends_on:
-      - mongodb
-      - redis
     expose:
-      - '8000'
-
-  cron:
-    build: .
-    restart: unless-stopped
-    command: ['bun', 'run', 'cron']
-    env_file:
-      - .env
+      - '8000' # Internal only
     depends_on:
       - mongodb
       - redis
 
+  # ── MongoDB Replica Set ──────────────────────────
   mongodb:
     image: mongo:7
+    container_name: mongodb
     restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB}
     command: ['--replSet', 'rs0']
     volumes:
       - mongodb-data:/data/db
+    expose:
+      - '27017'
 
+  # ── Redis ───────────────────────────────────────
   redis:
     image: redis:7
+    container_name: redis
     restart: unless-stopped
     volumes:
       - redis-data:/data
+    expose:
+      - '6379'
+
+  # ── Nginx Reverse Proxy ─────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs # SSL certificates
+      - ./certbot-webroot:/var/www/certbot
+    depends_on:
+      - app
+
+  # ── Certbot: Let's Encrypt SSL ─────────────────
+  certbot:
+    image: certbot/certbot:latest
+    container_name: certbot
+    volumes:
+      - ./certs:/etc/letsencrypt
+      - ./certbot-webroot:/var/www/certbot
+    entrypoint: >
+      /bin/sh -c '
+        trap exit TERM;
+        while :; do
+          certbot renew --webroot -w /var/www/certbot --deploy-hook "nginx -s reload";
+          sleep 12h & wait $${!};
+        done
+      '
 
 volumes:
   mongodb-data:
   redis-data:
+  certbot-webroot:
+  certs:

@@ -1,5 +1,5 @@
 services:
-  # ── Bun/Express App ─────────────────────────────
+  # ── Bun / Express App ───────────────────────────
   app:
     build: .
     container_name: bun-app
@@ -11,26 +11,24 @@ services:
     labels:
       - 'traefik.enable=true'
 
-      # Domain routing (handled by Coolify Traefik)
+      # Domain (Coolify will also manage this)
       - 'traefik.http.routers.app.rule=Host(`amdaani.pos-dev.amptechnology.in`)'
 
-      # Tell Coolify which port your app runs on
+      # HTTPS handled by Coolify
+      - 'traefik.http.routers.app.entrypoints=websecure'
+
+      # Internal app port
       - 'traefik.http.services.app.loadbalancer.server.port=8000'
 
     depends_on:
       - mongodb
       - redis
 
-  # ── MongoDB ─────────────────────────────────────
+  # ── MongoDB (SIMPLE - NO REPLICA, NO AUTH) ──────
   mongodb:
     image: mongo:7
     container_name: mongodb
     restart: unless-stopped
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
-      MONGO_INITDB_DATABASE: ${MONGO_DB}
-    command: ['--replSet', 'rs0']
     volumes:
       - mongodb-data:/data/db
 

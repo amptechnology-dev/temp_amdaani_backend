@@ -6,16 +6,23 @@ services:
     env_file:
       - .env
     expose:
-      - '8000'
+      - "8000"
 
     labels:
-      - 'traefik.enable=true'
+      - "traefik.enable=true"
 
-      # ONLY DOMAIN RULE (NO HTTPS RULE)
-      - 'traefik.http.routers.app.rule=Host(`amdaani.v1.amptechnology.in`)'
+      # HTTP router (required)
+      - "traefik.http.routers.app.rule=Host(`amdaani.v1.amptechnology.in`)"
+      - "traefik.http.routers.app.entrypoints=http"
 
-      # ONLY PORT
-      - 'traefik.http.services.app.loadbalancer.server.port=8000'
+      # HTTPS router (THIS triggers SSL in Coolify/Traefik)
+      - "traefik.http.routers.app-secure.rule=Host(`amdaani.v1.amptechnology.in`)"
+      - "traefik.http.routers.app-secure.entrypoints=https"
+      - "traefik.http.routers.app-secure.tls=true"
+      - "traefik.http.routers.app-secure.tls.certresolver=letsencrypt"
+
+      # Backend service port
+      - "traefik.http.services.app.loadbalancer.server.port=8000"
 
     depends_on:
       - mongodb

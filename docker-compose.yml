@@ -1,38 +1,4 @@
 services:
-  # ── Traefik Reverse Proxy ───────────────────────
-  traefik:
-    image: traefik:v3.0
-    container_name: traefik
-    restart: unless-stopped
-    env_file:
-      - ./traefik/.env
-    command:
-      - '--api.dashboard=true'
-      - '--providers.docker=true'
-      - '--providers.docker.exposedbydefault=false'
-
-      # HTTP + HTTPS
-      - '--entrypoints.web.address=:80'
-      - '--entrypoints.websecure.address=:443'
-
-      # Redirect HTTP → HTTPS
-      - '--entrypoints.web.http.redirections.entrypoint.to=websecure'
-      - '--entrypoints.web.http.redirections.entrypoint.scheme=https'
-
-      # SSL via Cloudflare DNS
-      - '--certificatesresolvers.myresolver.acme.dnschallenge=true'
-      - '--certificatesresolvers.myresolver.acme.dnschallenge.provider=cloudflare'
-      - '--certificatesresolvers.myresolver.acme.email=dev.amptechnology@gmail.com'
-      - '--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json'
-
-    ports:
-      - '80:80'
-      - '443:443'
-
-    volumes:
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-      - './traefik/acme.json:/letsencrypt/acme.json'
-
   # ── Bun/Express App ─────────────────────────────
   app:
     build: .
@@ -45,14 +11,10 @@ services:
     labels:
       - 'traefik.enable=true'
 
-      # Domain routing
+      # Domain routing (handled by Coolify Traefik)
       - 'traefik.http.routers.app.rule=Host(`amdaani.pos-dev.amptechnology.in`)'
 
-      # Use HTTPS
-      - 'traefik.http.routers.app.entrypoints=websecure'
-      - 'traefik.http.routers.app.tls.certresolver=myresolver'
-
-      # Internal port
+      # Tell Coolify which port your app runs on
       - 'traefik.http.services.app.loadbalancer.server.port=8000'
 
     depends_on:

@@ -1,6 +1,38 @@
-version: '3.9'
-
 services:
+  # ── Traefik Reverse Proxy ───────────────────────
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    restart: unless-stopped
+    env_file:
+      - ./traefik/.env
+    command:
+      - '--api.dashboard=true'
+      - '--providers.docker=true'
+      - '--providers.docker.exposedbydefault=false'
+
+      # HTTP + HTTPS
+      - '--entrypoints.web.address=:80'
+      - '--entrypoints.websecure.address=:443'
+
+      # Redirect HTTP → HTTPS
+      - '--entrypoints.web.http.redirections.entrypoint.to=websecure'
+      - '--entrypoints.web.http.redirections.entrypoint.scheme=https'
+
+      # SSL via Cloudflare DNS
+      - '--certificatesresolvers.myresolver.acme.dnschallenge=true'
+      - '--certificatesresolvers.myresolver.acme.dnschallenge.provider=cloudflare'
+      - '--certificatesresolvers.myresolver.acme.email=dev.amptechnology@gmail.com'
+      - '--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json'
+
+    ports:
+      - '80:80'
+      - '443:443'
+
+    volumes:
+      - '/var/run/docker.sock:/var/run/docker.sock:ro'
+      - './traefik/acme.json:/letsencrypt/acme.json'
+
   # ── Bun/Express App ─────────────────────────────
   app:
     build: .
@@ -9,12 +41,25 @@ services:
     env_file:
       - .env
     expose:
-      - '8000' # Internal only
+      - '8000'
+    labels:
+      - 'traefik.enable=true'
+
+      # Domain routing
+      - 'traefik.http.routers.app.rule=Host(`amdaani.pos-dev.amptechnology.in`)'
+
+      # Use HTTPS
+      - 'traefik.http.routers.app.entrypoints=websecure'
+      - 'traefik.http.routers.app.tls.certresolver=myresolver'
+
+      # Internal port
+      - 'traefik.http.services.app.loadbalancer.server.port=8000'
+
     depends_on:
       - mongodb
       - redis
 
-  # ── MongoDB Replica Set ──────────────────────────
+  # ── MongoDB ─────────────────────────────────────
   mongodb:
     image: mongo:7
     container_name: mongodb
@@ -26,8 +71,6 @@ services:
     command: ['--replSet', 'rs0']
     volumes:
       - mongodb-data:/data/db
-    expose:
-      - '27017'
 
   # ── Redis ───────────────────────────────────────
   redis:
@@ -36,43 +79,7 @@ services:
     restart: unless-stopped
     volumes:
       - redis-data:/data
-    expose:
-      - '6379'
-
-  # ── Nginx Reverse Proxy ─────────────────────────
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: nginx-proxy
-    restart: unless-stopped
-    ports:
-      - '80:80'
-      - '443:443'
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./certs:/etc/nginx/certs # SSL certificates
-      - ./certbot-webroot:/var/www/certbot
-    depends_on:
-      - app
-
-  # ── Certbot: Let's Encrypt SSL ─────────────────
-  certbot:
-    image: certbot/certbot:latest
-    container_name: certbot
-    volumes:
-      - ./certs:/etc/letsencrypt
-      - ./certbot-webroot:/var/www/certbot
-      - ./certbot/renew-hook.sh:/renew-hook.sh:ro
-    entrypoint: >
-      /bin/sh -c '
-        trap exit TERM;
-        while :; do
-          certbot renew --webroot -w /var/www/certbot --deploy-hook "/renew-hook.sh";
-          sleep 12h & wait $${!};
-        done
-      '
 
 volumes:
   mongodb-data:
   redis-data:
-  certbot-webroot:
-  certs:

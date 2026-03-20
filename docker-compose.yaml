@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   app:
     build: .
@@ -8,7 +10,10 @@ services:
     expose:
       - '8010'
     command: >
-      sh -c "until bun run src/seeders/roleSeeder.js; do echo 'Seeder failed, retrying in 5s...'; sleep 5; done && bun run src/index.js"
+      sh -c "
+      until bun run src/seeders/roleSeeder.js;
+      do echo 'Seeder failed, retrying in 5s...'; sleep 5; done &&
+      bun run src/index.js"
     depends_on:
       mongodb:
         condition: service_healthy
@@ -16,7 +21,7 @@ services:
         condition: service_started
     labels:
       - traefik.enable=true
-      - "traefik.http.routers.bun-app.rule=Host(`amdaani.v1.amptechnology.in`)"
+      - traefik.http.routers.bun-app.rule=Host(`amdaani.v1.amptechnology.in`)
       - traefik.http.routers.bun-app.entrypoints=websecure
       - traefik.http.routers.bun-app.tls=true
       - traefik.http.routers.bun-app.tls.certresolver=letsencrypt
@@ -25,24 +30,47 @@ services:
       - coolify
 
   mongodb:
-    image: 'mongo:7'
+    image: mongo:7
+    container_name: mongodb
     restart: unless-stopped
+    command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
     volumes:
-      - 'mongodb-data:/data/db'
+      - mongodb-data:/data/db
     networks:
       - coolify
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 20s
 
+  mongo-init:
+    image: mongo:7
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - coolify
+    restart: 'no'
+    entrypoint: >
+      bash -c "
+      echo 'Waiting for MongoDB...' &&
+      sleep 5 &&
+      mongosh mongodb:27017 --eval '
+        rs.initiate({
+          _id: \"rs0\",
+          members: [{ _id: 0, host: \"mongodb:27017\" }]
+        })
+      ' || true
+      "
+
   redis:
-    image: 'redis:7'
+    image: redis:7
+    container_name: redis
     restart: unless-stopped
     volumes:
-      - 'redis-data:/data'
+      - redis-data:/data
     networks:
       - coolify
 

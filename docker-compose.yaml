@@ -1,57 +1,45 @@
 services:
-traefik:
-image: traefik:v3.0
-container_name: traefik
-restart: unless-stopped
-command:
-- "--api.dashboard=true"
-- "--providers.docker=true"
-- "--providers.docker.exposedbydefault=false"
-- "--entrypoints.web.address=:80"
-- "--entrypoints.websecure.address=:443"
-- "--certificatesresolvers.myresolver.acme.httpchallenge=true"
-- "--certificatesresolvers.myresolver.acme.email=devs.amptechnology@gmail.com"
-- "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
-- "--entrypoints.web.http.redirections.entrypoint.to=websecure"
-- "--entrypoints.web.http.redirections.entrypoint.scheme=https"
-ports:
-- "80:80"
-- "443:443"
-volumes:
-- /var/run/docker.sock:/var/run/docker.sock:ro
-- letsencrypt:/letsencrypt
+  app:
+    build: .
+    container_name: bun-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    expose:
+      - '8010'
+    depends_on:
+      - mongodb
+      - redis
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.bun-app.rule=Host(`amdaani.v1.amptechnology.in`)'
+      - 'traefik.http.routers.bun-app.entrypoints=websecure'
+      - 'traefik.http.routers.bun-app.tls=true'
+      - 'traefik.http.routers.bun-app.tls.certresolver=letsencrypt'
+      - 'traefik.http.services.bun-app.loadbalancer.server.port=8010'
+    networks:
+      - coolify
 
-app:
-build: .
-container_name: bun-app
-restart: unless-stopped
-env_file:
-- .env
-expose:
-- "8010"
-depends_on:
-- mongodb
-- redis
-labels:
-- "traefik.enable=true"
-- "traefik.http.routers.app.rule=Host(`amdaani.v1.amptechnology.in`)"
-- "traefik.http.routers.app.entrypoints=websecure"
-- "traefik.http.routers.app.tls.certresolver=myresolver"
-- "traefik.http.services.app.loadbalancer.server.port=8010"
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongodb-data:/data/db
+    networks:
+      - coolify
 
-mongodb:
-image: mongo:7
-restart: unless-stopped
-volumes:
-- mongodb-data:/data/db
-
-redis:
-image: redis:7
-restart: unless-stopped
-volumes:
-- redis-data:/data
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - coolify
 
 volumes:
-mongodb-data:
-redis-data:
-letsencrypt:
+  mongodb-data:
+  redis-data:
+
+networks:
+  coolify:
+    external: true

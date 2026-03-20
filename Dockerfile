@@ -12,7 +12,7 @@ COPY . .
 ENV NODE_ENV=production
 
 # Expose app port
-EXPOSE 8000
+EXPOSE 8010
 
 # Start app
 CMD ["bun", "run", "start"]

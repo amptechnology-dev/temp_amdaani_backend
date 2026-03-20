@@ -6,7 +6,7 @@ services:
     env_file:
       - .env
     expose:
-      - '8000'
+      - '8010'
 
     depends_on:
       - mongodb

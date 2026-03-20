@@ -7,32 +7,42 @@ services:
       - .env
     expose:
       - '8010'
+    command: >
+      sh -c "until bun run src/seeders/roleSeeder.js; do echo 'Seeder failed, retrying in 5s...'; sleep 5; done && bun run src/index.js"
     depends_on:
-      - mongodb
-      - redis
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_started
     labels:
-      - 'traefik.enable=true'
-      - 'traefik.http.routers.bun-app.rule=Host(`amdaani.v1.amptechnology.in`)'
-      - 'traefik.http.routers.bun-app.entrypoints=websecure'
-      - 'traefik.http.routers.bun-app.tls=true'
-      - 'traefik.http.routers.bun-app.tls.certresolver=letsencrypt'
-      - 'traefik.http.services.bun-app.loadbalancer.server.port=8010'
+      - traefik.enable=true
+      - "traefik.http.routers.bun-app.rule=Host(`amdaani.v1.amptechnology.in`)"
+      - traefik.http.routers.bun-app.entrypoints=websecure
+      - traefik.http.routers.bun-app.tls=true
+      - traefik.http.routers.bun-app.tls.certresolver=letsencrypt
+      - traefik.http.services.bun-app.loadbalancer.server.port=8010
     networks:
       - coolify
 
   mongodb:
-    image: mongo:7
+    image: 'mongo:7'
     restart: unless-stopped
     volumes:
-      - mongodb-data:/data/db
+      - 'mongodb-data:/data/db'
     networks:
       - coolify
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   redis:
-    image: redis:7
+    image: 'redis:7'
     restart: unless-stopped
     volumes:
-      - redis-data:/data
+      - 'redis-data:/data'
     networks:
       - coolify
 

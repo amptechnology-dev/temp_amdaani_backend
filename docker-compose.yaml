@@ -36,6 +36,8 @@ services:
     command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
     volumes:
       - mongodb-data:/data/db
+    ports: 
+    - '127.0.0.1:27017:27017'
     networks:
       - coolify
     healthcheck:

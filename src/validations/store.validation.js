@@ -85,6 +85,8 @@ export const updateStore = {
       // invoiceStartNumber: yup.number().min(1).default(1),
       // taxRates: yup.array().of(taxRateSchema),
       invoiceTerms: yup.string(),
+      stockManagement: yup.boolean().default(false),
+      purchaseOrderManagement: yup.boolean().default(false),
     }),
   }),
 };

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { boolean } from 'yup';
 
 const storeSchema = new mongoose.Schema(
   {
@@ -31,6 +32,8 @@ const storeSchema = new mongoose.Schema(
       invoiceStartNumber: { type: Number, default: 1 },
       taxRates: [{ name: String, rate: Number }],
       invoiceTerms: String,
+      stockManagement: { type: Boolean, default: false },
+      purchaseOrderManagement: { type: Boolean, default: false },
     },
     currentSubscription: {
       type: mongoose.SchemaTypes.ObjectId,

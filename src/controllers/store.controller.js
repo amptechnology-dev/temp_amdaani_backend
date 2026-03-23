@@ -5,6 +5,8 @@ import { checkUserExists, createUser, getStoreUsers, deleteStoreUser } from '../
 // import pick from "../utils/pick.js";
 
 export const updateStore = expressAsyncHandler(async (req, res) => {
+  console.log('store-->', JSON.stringify(req.user.store));
+  console.log('user body --> ', JSON.stringify(req.body));
   const store = await storeService.updateStore(req.user.store, req.body, req.files);
   return new ApiResponse(200, store, 'Store updated successfully!').send(res);
 });

@@ -18,12 +18,14 @@ export const getStoreById = async (id) => {
 export const updateStore = async (storeId, data, files, session = null) => {
   let uploadedKeys = [];
   let oldLogoUrl, oldSignatureUrl;
+
   try {
+    console.log('-->', JSON.stringify(storeId));
     const store = await Store.findById(storeId, {}, { session });
     if (!store) {
       throw new ApiError(404, 'Store not found', [{ source: 'params', field: 'id', message: 'Invalid store id.' }]);
     }
-
+    console.log('==>', data);
     // file uploads
     if (files?.logo) {
       const logoKey = await compressAndUpload(files.logo[0]?.buffer, {

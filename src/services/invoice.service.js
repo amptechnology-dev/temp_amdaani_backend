@@ -6,6 +6,7 @@ import mongoose from 'mongoose';
 import { handleDuplicateKeyError } from '../utils/dbErrorHandler.js';
 import { createTransaction, getTransactionsByInvoice } from './transaction.service.js';
 import { updateStockAfterSale } from './product.service.js';
+import { Product } from '../models/product.model.js';
 
 //NOTE: Trusting frontend for valid data
 export const createInvoice = async (data) => {
@@ -17,6 +18,8 @@ export const createInvoice = async (data) => {
       message: 'Invoice must have at least one item',
     });
   }
+
+  console.log(items);
 
   const session = await mongoose.startSession();
   try {
@@ -95,7 +98,7 @@ export const updateInvoice = async (invoiceId, data) => {
     // --- Step 1: Update or re-link products ---
     const invoiceItems = [];
     for (const item of items) {
-      const productId = await findOrCreateProduct(invoice.store, item, session);
+      const productId = await Product.findById(item.items.product).session(session);
       invoiceItems.push({
         product: productId,
         ...item,

@@ -3,12 +3,11 @@ import { handleDuplicateKeyError } from '../utils/dbErrorHandler.js';
 import { Purchase } from '../models/purchase.model.js';
 
 export const createVendor = async (data, session = null) => {
-  try {
-    const vendor = new Vendor(data);
-    return await vendor.save(session ? { session } : undefined);
-  } catch (err) {
-    handleDuplicateKeyError(err, Vendor);
-  }
+  // No try/catch — let errors bubble up naturally
+  const vendor = new Vendor(data);
+  const saved = await vendor.save(session ? { session } : undefined);
+  console.log('vendor saved to DB:', saved._id);
+  return saved;
 };
 
 export const updateVendorById = async (id, data, session = null) => {
@@ -65,14 +64,65 @@ export const deleteVendorById = async (id) => {
 };
 
 export const findOrCreateVendor = async (store, data, session = null) => {
-  if (data._id) return data._id;
-  if (data.mobile === '') return null;
+  console.log('findOrCreateVendor called:', {
+    _id: data._id,
+    mobile: data.mobile,
+    name: data.name,
+  });
 
-  const existingVendor = await Vendor.exists({ store, mobile: data.mobile }).session(session);
-  if (existingVendor) return existingVendor._id;
+  // Step 1: valid ObjectId passed → use it directly
+  if (data._id && mongoose.Types.ObjectId.isValid(String(data._id))) {
+    console.log('✅ using existing _id:', data._id);
+    return data._id;
+  }
 
-  const newVendor = await createVendor({ ...data, store }, session);
-  return newVendor._id;
+  // Step 2: no mobile → cannot find or create
+  if (!data.mobile || String(data.mobile).trim() === '') {
+    console.warn('❌ no mobile provided');
+    return null;
+  }
+
+  // Step 3: no name → cannot create
+  if (!data.name || String(data.name).trim() === '') {
+    console.warn('❌ no name provided');
+    return null;
+  }
+
+  const cleanMobile = String(data.mobile).trim().replace(/\D/g, '');
+  console.log('searching vendor with cleanMobile:', cleanMobile);
+
+  // Step 4: find existing vendor by mobile
+  const existingVendor = await Vendor.findOne({
+    store,
+    mobile: { $regex: cleanMobile, $options: 'i' },
+  }).lean();
+
+  if (existingVendor) {
+    console.log('✅ found existing vendor:', existingVendor._id);
+    return existingVendor._id;
+  }
+
+  // Step 5: create new vendor
+  console.log('creating new vendor with:', { name: data.name, mobile: data.mobile });
+  const newVendor = await createVendor(
+    {
+      name: String(data.name).trim(),
+      mobile: String(data.mobile).trim(),
+      address: data.address || '',
+      city: data.city || '',
+      state: data.state || '',
+      country: data.country || 'India',
+      postalCode: data.postalCode || '',
+      gstNumber: data.gstNumber || '',
+      panNumber: data.panNumber || '',
+      store,
+      isActive: true,
+    },
+    session
+  );
+
+  console.log('✅ new vendor created:', newVendor?._id);
+  return newVendor?._id ?? null;
 };
 
 export const getVendorsWithDue = async (storeId, options = {}) => {

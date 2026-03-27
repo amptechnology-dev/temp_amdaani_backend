@@ -15,54 +15,91 @@ export const createPurchase = async (data) => {
     });
   }
 
-  const session = await mongoose.startSession();
-  try {
-    session.startTransaction();
-    // find or create supplier
-    const vendorId = await findOrCreateVendor(
-      data.store,
-      {
-        _id: data.vendor,
-        name: data.vendorName,
-        mobile: data.vendorMobile,
-        address: data.vendorAddress,
-        city: data.vendorCity,
-        state: data.vendorState,
-        country: data.vendorCountry,
-        postalCode: data.vendorPostalCode,
-        gstNumber: data.vendorGstNumber,
-        panNumber: data.vendorPanNumber,
-      },
-      session
-    );
-    data.vendor = vendorId;
+  // ✅ Resolve vendor BEFORE starting transaction (avoids write conflict)
+  const vendorId = await findOrCreateVendor(data.store, {
+    _id: data.vendor,
+    name: data.vendorName,
+    mobile: data.vendorMobile,
+    address: data.vendorAddress,
+    city: data.vendorCity,
+    state: data.vendorState,
+    country: data.vendorCountry,
+    postalCode: data.vendorPostalCode,
+    gstNumber: data.vendorGstNumber,
+    panNumber: data.vendorPanNumber,
+  }); // no session here
 
-    const purchase = new Purchase(data);
-    await purchase.save(session ? { session } : undefined);
+  console.log('=> resolved vendorId:', vendorId);
 
-    await updateStockAfterPurchase(purchase, session);
+  if (!vendorId) {
+    throw new ApiError(400, 'Could not resolve vendor', {
+      source: 'body',
+      field: 'vendor',
+      message: 'Vendor could not be found or created',
+    });
+  }
 
-    // If payment is partial, record the outgoing transaction
-    if (purchase.paymentStatus === 'partial') {
-      await createVendorPayment(
-        {
-          store: purchase.store,
-          purchase: purchase._id,
-          amount: purchase.amountPaid,
-          paymentMethod: purchase.paymentMethod,
-          note: purchase.paymentNote,
-        },
-        session
-      );
+  // ✅ Retry wrapper for TransientTransactionError
+  const MAX_RETRIES = 3;
+  let attempt = 0;
+
+  while (attempt < MAX_RETRIES) {
+    const session = await mongoose.startSession();
+    try {
+      session.startTransaction({
+        readConcern: { level: 'snapshot' },
+        writeConcern: { w: 'majority' },
+      });
+
+      const purchasePayload = {
+        ...data,
+        vendor: vendorId,
+      };
+
+      const purchase = new Purchase(purchasePayload);
+      await purchase.save({ session });
+
+      await updateStockAfterPurchase(purchase, session);
+
+      if (purchase.paymentStatus === 'partial') {
+        await createVendorPayment(
+          {
+            store: purchase.store,
+            purchase: purchase._id,
+            amount: purchase.amountPaid,
+            paymentMethod: purchase.paymentMethod,
+            note: purchase.paymentNote,
+          },
+          session
+        );
+      }
+
+      await session.commitTransaction();
+      return purchase;
+    } catch (error) {
+      await session.abortTransaction();
+
+      // ✅ Retry only on transient transaction errors
+      const isTransient = error?.errorLabels?.includes('TransientTransactionError') || error?.code === 112;
+
+      if (isTransient && attempt < MAX_RETRIES - 1) {
+        attempt++;
+        console.warn(`⚠️ TransientTransactionError, retrying... attempt ${attempt}`);
+        await session.endSession();
+        await new Promise((res) => setTimeout(res, 50 * attempt)); // backoff
+        continue;
+      }
+
+      await session.endSession();
+      console.error('❌ createPurchase error:', error.message);
+      handleDuplicateKeyError(error, Purchase);
+      throw error;
+    } finally {
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+      }
+      session.endSession().catch(() => {});
     }
-
-    await session.commitTransaction();
-    return purchase;
-  } catch (error) {
-    await session.abortTransaction();
-    handleDuplicateKeyError(error, Purchase);
-  } finally {
-    await session.endSession();
   }
 };
 

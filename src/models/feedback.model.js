@@ -27,6 +27,9 @@ const FeedbackSchema = new mongoose.Schema(
         trim: true,
       },
     ],
+    voiceUrl: {
+      type: String,
+    },
     status: {
       type: String,
       enum: ['open', 'in_review', 'resolved', 'rejected'],

@@ -23,6 +23,8 @@ import hsnCodeRoutes from './hsnCode.routes.js';
 router.use('/hsncode', hsnCodeRoutes);
 import feedbackRoutes from './feedback.routes.js';
 router.use('/feedback', feedbackRoutes);
+import faqRoutes from './faq.routes.js';
+router.use('/faq', faqRoutes);
 import expenseHeadRoutes from './expenseHead.routes.js';
 router.use('/expense-head', expenseHeadRoutes);
 import expenseRoutes from './expense.routes.js';

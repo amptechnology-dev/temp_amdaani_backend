@@ -3,8 +3,23 @@ import { ApiResponse, ApiError } from '../utils/responseHandler.js';
 import * as feedbackService from '../services/feedback.service.js';
 
 export const createFeedback = asyncHandler(async (req, res) => {
-  const feedback = await feedbackService.createFeedback({ user: req.user._id, store: req.user.store._id, ...req.body });
-  return new ApiResponse(201, feedback, 'Feedback submitted successfully!').send(res);
+  let voiceUrl = null;
+  if (req.file) {
+    const fileBuffer = req.file.buffer;
+    const fileName = `feedback-${Date.now()}-${req.file.originalname}`;
+    voiceUrl = await uploadFileToStorage(fileBuffer, fileName, "feedback");
+  }
+  const feedback = await feedbackService.createFeedback({
+    user: req.user._id,
+    store: req.user.store._id,
+    voiceUrl,
+    ...req.body
+  });
+  return new ApiResponse(
+    201,
+    feedback,
+    "Feedback submitted successfully!"
+  ).send(res);
 });
 
 export const getFeedbacks = asyncHandler(async (req, res) => {

@@ -4,11 +4,12 @@ import * as feedbackController from '../controllers/feedback.controller.js';
 // import * as adsSchema from '../validations/ads.validation.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { authorizeRoles } from '../middlewares/auth.middleware.js';
+import { uploadAudio } from "../middlewares/multer.middleware.js";
 
 const router = Router();
 
 router.use(authenticate);
-router.post('/', feedbackController.createFeedback);
+router.post('/', uploadAudio.single("voice"), feedbackController.createFeedback);
 
 router.use(authorizeRoles('super-admin'));
 router.route('/').get(feedbackController.getFeedbacks);

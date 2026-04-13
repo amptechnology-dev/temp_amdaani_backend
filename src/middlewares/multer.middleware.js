@@ -16,3 +16,25 @@ export const uploadImage = multer({
     cb(new ApiError(400, 'Only images are allowed (jpeg, jpg, png).'));
   },
 });
+
+
+export const uploadAudio = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /mp3|mp4/;
+    const extname = allowedTypes.test(
+      path.extname(file.originalname).toLowerCase()
+    );
+    const mimetype =
+      file.mimetype === "audio/mpeg" ||
+      file.mimetype === "video/mp4";
+    if (mimetype && extname) return cb(null, true);
+    cb(
+      new ApiError(
+        400,
+        "Only audio/video files are allowed (mp3, mp4)."
+      )
+    );
+  },
+});

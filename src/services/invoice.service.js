@@ -151,17 +151,32 @@ export const getInvoiceById = async (id) => {
 };
 
 export const queryInvoices = async (filter = {}, options = {}) => {
-  const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;
-  const sort = { [sortBy]: order === 'desc' ? -1 : 1 };
 
-  const aggregate = Invoice.aggregate([{ $match: filter }, { $project: { items: 0 } }]);
+  const { page = 1, limit = 20, sortBy = "createdAt", order = "desc" } = options;
+
+  const sort = {
+    [sortBy]: order === "desc" ? -1 : 1,
+  };
+
+  const aggregate = Invoice.aggregate([
+    {
+      $match: filter,
+    },
+    {
+      $project: {
+        items: 0,
+      },
+    },
+  ]);
+
   const paginationOptions = {
-    page,
-    limit,
+    page: Number(page),
+    limit: Number(limit),
     sort,
     lean: true,
     leanWithId: false,
   };
+
   return Invoice.aggregatePaginate(aggregate, paginationOptions);
 };
 
@@ -170,40 +185,59 @@ export const getLastInvoice = async (store) => {
 };
 
 export const getProductWiseInvoices = async (filters = {}) => {
+
   const { store, startDate, endDate } = filters;
 
   const matchStage = {};
-  if (store) matchStage.store = store;
+
+  if (store) {
+    matchStage.store = store;
+  }
+
   if (startDate && endDate) {
     matchStage.invoiceDate = {
-      $gte: new Date(startDate),
-      $lte: new Date(endDate),
+      $gte: startDate,
+      $lte: endDate,
     };
   }
 
   const result = await Invoice.aggregate([
     { $match: matchStage },
-    { $unwind: '$items' },
+
+    { $unwind: "$items" },
+
     {
       $project: {
-        date: '$invoiceDate',
+        date: "$invoiceDate",
         invoiceNumber: 1,
-        product: '$items.name',
-        productHsn: '$items.hsn',
-        unit: '$items.unit',
-        price: '$items.sellingPrice',
-        quantity: '$items.quantity',
-        discount: '$items.discount',
-        gstRate: '$items.gstRate',
+        product: "$items.name",
+        productHsn: "$items.hsn",
+        unit: "$items.unit",
+        price: "$items.sellingPrice",
+        quantity: "$items.quantity",
+        discount: "$items.discount",
+        gstRate: "$items.gstRate",
+
         gstAmount: {
-          $round: [{ $multiply: ['$items.total', { $divide: ['$items.gstRate', 100] }] }, 2],
+          $round: [
+            {
+              $multiply: [
+                "$items.total",
+                { $divide: ["$items.gstRate", 100] }
+              ]
+            },
+            2
+          ]
         },
-        lineTotal: '$items.total',
-        grandTotal: '$grandTotal',
+
+        lineTotal: "$items.total",
+        grandTotal: "$grandTotal",
       },
     },
+
     { $sort: { date: 1, invoiceNumber: 1 } },
   ]);
+
   return result;
 };
 

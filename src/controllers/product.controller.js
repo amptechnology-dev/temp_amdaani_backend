@@ -28,8 +28,43 @@ export const getProductById = expressAsyncHandler(async (req, res) => {
   return new ApiResponse(200, product, 'Product fetched successfully!').send(res);
 });
 export const getAllProductsWithSales = expressAsyncHandler(async (req, res) => {
-  const products = await productService.getAllProductsWithSales(req.user.store, req.query.startDate, req.query.endDate);
-  return new ApiResponse(200, products, 'Products fetched successfully!').send(res);
+
+  const { range, startDate, endDate } = req.query;
+
+  const now = new Date();
+  let start;
+  let end;
+
+  if (range === "thisMonth") {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  }
+
+  if (range === "previousMonth") {
+    start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  }
+
+  if (range === "year") {
+    start = new Date(now.getFullYear(), 0, 1);
+    end = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  }
+
+  const finalStartDate = start || startDate;
+  const finalEndDate = end || endDate;
+
+  const products = await productService.getAllProductsWithSales(
+    req.user.store,
+    finalStartDate,
+    finalEndDate
+  );
+
+  return new ApiResponse(
+    200,
+    products,
+    "Products fetched successfully!"
+  ).send(res);
+
 });
 export const adjustProductStock = expressAsyncHandler(async (req, res) => {
   const result = await productService.adjustProductStock(req.body);

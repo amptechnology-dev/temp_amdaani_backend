@@ -49,10 +49,46 @@ export const deleteExpense = expressAsyncHandler(async (req, res) => {
 });
 
 export const getExpensesGroupedByHead = expressAsyncHandler(async (req, res) => {
-  const { startDate, endDate } = req.query;
-  const expensesByHead = await expenseService.getExpensesGroupedByHead(req.user.store, {
-    startDate: startDate ? new Date(startDate).setHours(0, 0, 0, 0) : null,
-    endDate: endDate ? new Date(endDate).setHours(23, 59, 59, 999) : null
-  });
-  return new ApiResponse(200, expensesByHead, 'Expenses grouped by head fetched successfully!').send(res);
+
+  const { range, startDate, endDate } = req.query;
+
+  const now = new Date();
+  let start;
+  let end;
+
+  if (range === "thisMonth") {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  }
+
+  if (range === "previousMonth") {
+    start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  }
+
+  if (range === "year") {
+    start = new Date(now.getFullYear(), 0, 1);
+    end = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  }
+
+  const finalStartDate =
+    start || (startDate ? new Date(startDate).setHours(0, 0, 0, 0) : null);
+
+  const finalEndDate =
+    end || (endDate ? new Date(endDate).setHours(23, 59, 59, 999) : null);
+
+  const expensesByHead = await expenseService.getExpensesGroupedByHead(
+    req.user.store,
+    {
+      startDate: finalStartDate,
+      endDate: finalEndDate,
+    }
+  );
+
+  return new ApiResponse(
+    200,
+    expensesByHead,
+    "Expenses grouped by head fetched successfully!"
+  ).send(res);
+
 });

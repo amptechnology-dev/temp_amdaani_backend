@@ -27,20 +27,86 @@ export const getInvoiceById = expressAsyncHandler(async (req, res) => {
   return new ApiResponse(200, invoice, 'Invoice fetched successfully').send(res);
 });
 export const getInvoices = expressAsyncHandler(async (req, res) => {
+
   const filters = pick(req.query, ['status']);
   const options = pick(req.query, ['page', 'limit', 'sortBy', 'order']);
+  const { range } = req.query;
+
   filters.store = req.user.store;
+
+  const now = new Date();
+  let startDate;
+  let endDate;
+
+  if (range === "thisMonth") {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  }
+
+  if (range === "previousMonth") {
+    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  }
+
+  if (range === "year") {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  }
+
+  if (startDate && endDate) {
+    filters.createdAt = {
+      $gte: startDate,
+      $lte: endDate,
+    };
+  }
+
   const invoices = await invoiceService.queryInvoices(filters, options);
-  return new ApiResponse(200, invoices, 'Invoices fetched successfully').send(res);
+
+  return new ApiResponse(200, invoices, "Invoices fetched successfully").send(res);
 });
 export const getLastInvoice = expressAsyncHandler(async (req, res) => {
   const invoice = await invoiceService.getLastInvoice(req.user.store);
   return new ApiResponse(200, invoice, 'Last invoice fetched successfully').send(res);
 });
 export const getProductWiseInvoices = expressAsyncHandler(async (req, res) => {
+
   const filters = pick(req.query, ['startDate', 'endDate']);
-  const invoice = await invoiceService.getProductWiseInvoices({ ...filters, store: req.user.store });
-  return new ApiResponse(200, invoice, 'Product wise invoices fetched successfully').send(res);
+  const { range } = req.query;
+
+  const now = new Date();
+  let startDate;
+  let endDate;
+
+  if (range === "thisMonth") {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  }
+
+  if (range === "previousMonth") {
+    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  }
+
+  if (range === "year") {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  }
+
+  if (startDate && endDate) {
+    filters.startDate = startDate;
+    filters.endDate = endDate;
+  }
+
+  const invoice = await invoiceService.getProductWiseInvoices({
+    ...filters,
+    store: req.user.store
+  });
+
+  return new ApiResponse(
+    200,
+    invoice,
+    "Product wise invoices fetched successfully"
+  ).send(res);
 });
 export const addPayment = expressAsyncHandler(async (req, res) => {
   const { invoiceId } = req.params;

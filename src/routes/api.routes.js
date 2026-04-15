@@ -39,5 +39,8 @@ import purchaseRoutes from './purchase.routes.js';
 router.use('/purchase', purchaseRoutes);
 import roleRoutes from './role.routes.js';
 router.use('/role', roleRoutes);
+import helplineRoutes from './helpline.routes.js';
+router.use('/helpline', helplineRoutes);
+
 
 export default router;

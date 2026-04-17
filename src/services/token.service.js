@@ -3,6 +3,7 @@ import config from '../config/config.js';
 import { Token } from '../models/token.model.js';
 import tokenTypes from '../config/tokens.js';
 import ms from 'ms';
+import { json } from 'stream/consumers';
 
 /**
  * Generate token
@@ -78,11 +79,13 @@ export const generateAuthTokens = async (user) => {
  * @returns {Promise<string>} - The temporary token
  */
 export const generateRegistrationToken = async (phone) => {
-  const resetPasswordToken = generateToken(phone, config.jwt.registrationExpiration * 60 * 1000, tokenTypes.REGISTER);
+  const resetPasswordToken = generateToken(phone, `${config.jwt.registrationExpiration}m`, tokenTypes.REGISTER);
   return resetPasswordToken;
 };
 
 export const verifyRegistrationToken = async (token) => {
+  console.log('ok==>', JSON.stringify(config.jwt.secret));
+  console.log('--->', JSON.stringify(token));
   return jwt.verify(token, config.jwt.secret);
 };
 

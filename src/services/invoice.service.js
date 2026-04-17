@@ -211,7 +211,53 @@ export const queryInvoices = async (filter = {}, options = {}) => {
 };
 
 export const getLastInvoice = async (store) => {
-  return Invoice.findOne({ store }).sort({ createdAt: -1 });
+  const result = await Invoice.aggregate([
+    {
+      $match: {
+        store: new mongoose.Types.ObjectId(store),
+      },
+    },
+    {
+      $sort: {
+        createdAt: -1,
+      },
+    },
+    {
+      $limit: 1,
+    },
+    {
+      $lookup: {
+        from: "stores",
+        localField: "store",
+        foreignField: "_id",
+        as: "store",
+        pipeline: [
+          {
+            $project: {
+              name: 1,
+              type: 1,
+              gstNumber: 1,
+              contactNo: 1,
+              email: 1,
+              address: 1,
+              logoUrl: 1,
+              signatureUrl: 1,
+              bankDetails: 1,
+              settings: 1,
+            },
+          },
+        ],
+      },
+    },
+    {
+      $unwind: {
+        path: "$store",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+  ]);
+
+  return result[0] || null;
 };
 
 export const getProductWiseInvoices = async (filters = {}) => {
@@ -570,15 +616,15 @@ export const getItemStockReport = async (filters = {}) => {
 
     ...(itemName
       ? [
-          {
-            $match: {
-              "items.name": {
-                $regex: itemName,
-                $options: "i"
-              }
+        {
+          $match: {
+            "items.name": {
+              $regex: itemName,
+              $options: "i"
             }
           }
-        ]
+        }
+      ]
       : []),
 
     {

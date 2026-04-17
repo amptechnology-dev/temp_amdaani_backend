@@ -38,3 +38,29 @@ export const uploadAudio = multer({
     );
   },
 });
+
+export const uploadApk = multer({
+  storage,
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB
+  fileFilter: (req, file, cb) => {
+
+    const allowedTypes = /apk/;
+
+    const extname = allowedTypes.test(
+      path.extname(file.originalname).toLowerCase()
+    );
+
+    const mimetype =
+      file.mimetype === "application/vnd.android.package-archive" ||
+      file.originalname.toLowerCase().endsWith(".apk");
+
+    if (mimetype && extname) return cb(null, true);
+
+    cb(
+      new ApiError(
+        400,
+        "Only APK files are allowed."
+      )
+    );
+  },
+});

@@ -7,6 +7,7 @@ import { handleDuplicateKeyError } from '../utils/dbErrorHandler.js';
 import { createTransaction, getTransactionsByInvoice } from './transaction.service.js';
 import { updateStockAfterSale } from './product.service.js';
 import { Product } from '../models/product.model.js';
+import { Purchase } from '../models/purchase.model.js';
 
 //NOTE: Trusting frontend for valid data
 export const createInvoice = async (data) => {
@@ -151,20 +152,50 @@ export const getInvoiceById = async (id) => {
 };
 
 export const queryInvoices = async (filter = {}, options = {}) => {
-
   const { page = 1, limit = 20, sortBy = "createdAt", order = "desc" } = options;
-
-  const sort = {
-    [sortBy]: order === "desc" ? -1 : 1,
-  };
 
   const aggregate = Invoice.aggregate([
     {
       $match: filter,
     },
     {
+      $lookup: {
+        from: "stores",
+        localField: "store",
+        foreignField: "_id",
+        as: "store",
+        pipeline: [
+          {
+            $project: {
+              name: 1,
+              type: 1,
+              gstNumber: 1,
+              contactNo: 1,
+              email: 1,
+              address: 1,
+              logoUrl: 1,
+              signatureUrl: 1,
+              bankDetails: 1,
+              settings: 1,
+            },
+          },
+        ],
+      },
+    },
+    {
+      $unwind: {
+        path: "$store",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
       $project: {
         items: 0,
+      },
+    },
+    {
+      $sort: {
+        [sortBy]: order === "desc" ? -1 : 1,
       },
     },
   ]);
@@ -172,7 +203,6 @@ export const queryInvoices = async (filter = {}, options = {}) => {
   const paginationOptions = {
     page: Number(page),
     limit: Number(limit),
-    sort,
     lean: true,
     leanWithId: false,
   };
@@ -237,6 +267,367 @@ export const getProductWiseInvoices = async (filters = {}) => {
 
     { $sort: { date: 1, invoiceNumber: 1 } },
   ]);
+
+  return result;
+};
+
+export const getGstSalesReport = async (filters = {}) => {
+
+  const { store, startDate, endDate } = filters;
+
+  const matchStage = {};
+
+  if (store) {
+    matchStage.store = store;
+  }
+
+  if (startDate && endDate) {
+    matchStage.invoiceDate = {
+      $gte: startDate,
+      $lte: endDate,
+    };
+  }
+
+  const result = await Invoice.aggregate([
+    { $match: matchStage },
+
+    { $unwind: "$items" },
+
+    {
+      $project: {
+        invoiceDate: 1,
+        invoiceNumber: 1,
+
+        customerName: {
+          $ifNull: ["$customerName", "Cash Customer"]
+        },
+
+        customerGst: {
+          $ifNull: ["$customerGstNumber", "-"]
+        },
+
+        item: "$items.name",
+        hsn: "$items.hsn",
+        unit: "$items.unit",
+
+        quantity: "$items.quantity",
+
+        taxableValue: "$items.total",
+
+        cgstPercent: {
+          $divide: ["$items.gstRate", 2]
+        },
+
+        sgstPercent: {
+          $divide: ["$items.gstRate", 2]
+        },
+
+        cgstAmount: {
+          $round: [
+            {
+              $divide: [
+                {
+                  $multiply: [
+                    "$items.total",
+                    "$items.gstRate"
+                  ]
+                },
+                200
+              ]
+            },
+            2
+          ]
+        },
+
+        sgstAmount: {
+          $round: [
+            {
+              $divide: [
+                {
+                  $multiply: [
+                    "$items.total",
+                    "$items.gstRate"
+                  ]
+                },
+                200
+              ]
+            },
+            2
+          ]
+        },
+
+        invoiceAmount: "$grandTotal",
+      },
+    },
+
+    { $sort: { invoiceDate: 1, invoiceNumber: 1 } },
+  ]);
+
+  return result;
+};
+
+export const getGstPurchaseReport = async (filters = {}) => {
+
+  const { store, startDate, endDate } = filters;
+
+  const matchStage = {};
+
+  if (store) {
+    matchStage.store = store;
+  }
+
+  if (startDate && endDate) {
+    matchStage.date = {
+      $gte: startDate,
+      $lte: endDate,
+    };
+  }
+
+  const result = await Purchase.aggregate([
+    { $match: matchStage },
+
+    { $unwind: "$items" },
+
+    {
+      $project: {
+
+        purchaseDate: "$date",
+        billNumber: "$invoiceNumber",
+
+        vendorName: {
+          $ifNull: ["$vendorName", "Unknown Vendor"]
+        },
+
+        vendorGst: {
+          $ifNull: ["$vendorGstNumber", "-"]
+        },
+
+        item: "$items.name",
+        hsn: "$items.hsn",
+        unit: "$items.unit",
+
+        quantity: "$items.quantity",
+
+        taxableValue: "$items.total",
+
+        cgstPercent: {
+          $divide: ["$items.gstRate", 2]
+        },
+
+        sgstPercent: {
+          $divide: ["$items.gstRate", 2]
+        },
+
+        cgstAmount: {
+          $round: [
+            {
+              $divide: [
+                {
+                  $multiply: [
+                    "$items.total",
+                    "$items.gstRate"
+                  ]
+                },
+                200
+              ]
+            },
+            2
+          ]
+        },
+
+        sgstAmount: {
+          $round: [
+            {
+              $divide: [
+                {
+                  $multiply: [
+                    "$items.total",
+                    "$items.gstRate"
+                  ]
+                },
+                200
+              ]
+            },
+            2
+          ]
+        },
+
+        billAmount: "$grandTotal",
+
+      }
+    },
+
+    { $sort: { purchaseDate: 1, billNumber: 1 } }
+
+  ]);
+
+  return result;
+};
+
+export const getProfitLossReport = async (filters = {}) => {
+
+  const { store, startDate, endDate } = filters;
+
+  const matchStage = {
+    status: "active"
+  };
+
+  if (store) {
+    matchStage.store = store;
+  }
+
+  if (startDate && endDate) {
+    matchStage.invoiceDate = {
+      $gte: startDate,
+      $lte: endDate
+    };
+  }
+
+  const result = await Invoice.aggregate([
+
+    { $match: matchStage },
+
+    { $unwind: "$items" },
+
+    {
+      $addFields: {
+        costPrice: {
+          $multiply: [
+            "$items.quantity",
+            "$items.sellingPrice"
+          ]
+        }
+      }
+    },
+
+    {
+      $group: {
+
+        _id: "$_id",
+
+        invoiceDate: { $first: "$invoiceDate" },
+        invoiceNumber: { $first: "$invoiceNumber" },
+        customerName: { $first: "$customerName" },
+        customerMobile: { $first: "$customerMobile" },
+
+        invoiceAmount: { $first: "$grandTotal" },
+
+        totalCost: { $sum: "$costPrice" }
+
+      }
+    },
+
+    {
+      $project: {
+
+        invoiceDate: 1,
+        invoiceNumber: 1,
+
+        customerDescription: {
+          $concat: [
+            { $ifNull: ["$customerName", "Cash Customer"] },
+            " , ",
+            { $ifNull: ["$customerMobile", "-"] }
+          ]
+        },
+
+        invoiceAmount: 1,
+
+        profitLoss: {
+          $subtract: [
+            "$invoiceAmount",
+            "$totalCost"
+          ]
+        }
+
+      }
+    },
+
+    { $sort: { invoiceDate: 1 } }
+
+  ]);
+
+  return result;
+
+};
+
+export const getItemStockReport = async (filters = {}) => {
+
+  const { store, itemName, asOnDate } = filters;
+
+  const matchStage = {
+    store
+  };
+
+  if (asOnDate) {
+    matchStage.date = { $lte: asOnDate };
+  }
+
+  const pipeline = [
+    { $match: matchStage },
+
+    { $unwind: "$items" },
+
+    ...(itemName
+      ? [
+          {
+            $match: {
+              "items.name": {
+                $regex: itemName,
+                $options: "i"
+              }
+            }
+          }
+        ]
+      : []),
+
+    {
+      $group: {
+
+        _id: "$items.product",
+
+        itemDescription: { $first: "$items.name" },
+
+        quantity: {
+          $sum: "$items.quantity"
+        },
+
+        avgRate: {
+          $avg: "$items.rate"
+        }
+
+      }
+    },
+
+    {
+      $project: {
+
+        _id: 0,
+
+        itemDescription: 1,
+
+        quantity: 1,
+
+        itemValue: {
+          $round: [
+            {
+              $multiply: [
+                "$quantity",
+                "$avgRate"
+              ]
+            },
+            2
+          ]
+        }
+
+      }
+    },
+
+    { $sort: { itemDescription: 1 } }
+
+  ];
+
+  const result = await Purchase.aggregate(pipeline);
 
   return result;
 };

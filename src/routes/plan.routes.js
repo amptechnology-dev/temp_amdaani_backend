@@ -8,6 +8,7 @@ import { authorizeRoles } from '../middlewares/auth.middleware.js';
 
 const router = Router();
 
+router.get('/landing-plans', getActivePlans);
 router.use(authenticate);
 router
   .route('/')

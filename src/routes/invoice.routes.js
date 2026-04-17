@@ -15,6 +15,10 @@ router
 router.route('/id/:id').get(invoiceController.getInvoiceById).put(invoiceController.updateInvoice);
 router.route('/last').get(invoiceController.getLastInvoice);
 router.get('/product-wise', invoiceController.getProductWiseInvoices);
+router.get('/gst-sales-report', invoiceController.getGstSalesReport);
+router.get('/gst-purchase', invoiceController.getGstPurchaseReport);
+router.get('/profit-loss', invoiceController.getProfitLossReport);
+router.get('/stock-report', invoiceController.getItemStockReport);
 router.post('/add-payment/:invoiceId', validate(invoiceSchema.addPayment), invoiceController.addPayment);
 router.put('/status/:id', validate(invoiceSchema.changeInvoiceStatus), invoiceController.changeInvoiceStatus);
 router.get('/transactions', invoiceController.getTransactionsByStore);

@@ -68,6 +68,7 @@ export const getLastInvoice = expressAsyncHandler(async (req, res) => {
   const invoice = await invoiceService.getLastInvoice(req.user.store);
   return new ApiResponse(200, invoice, 'Last invoice fetched successfully').send(res);
 });
+
 export const getProductWiseInvoices = expressAsyncHandler(async (req, res) => {
 
   const filters = pick(req.query, ['startDate', 'endDate']);
@@ -108,6 +109,148 @@ export const getProductWiseInvoices = expressAsyncHandler(async (req, res) => {
     "Product wise invoices fetched successfully"
   ).send(res);
 });
+export const getGstSalesReport = expressAsyncHandler(async (req, res) => {
+
+  const filters = pick(req.query, ['startDate', 'endDate']);
+  const { range } = req.query;
+
+  const now = new Date();
+  let startDate;
+  let endDate;
+
+  if (range === "thisMonth") {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  }
+
+  if (range === "previousMonth") {
+    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  }
+
+  if (range === "year") {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  }
+
+  if (startDate && endDate) {
+    filters.startDate = startDate;
+    filters.endDate = endDate;
+  }
+
+  const report = await invoiceService.getGstSalesReport({
+    ...filters,
+    store: req.user.store
+  });
+
+  return new ApiResponse(
+    200,
+    report,
+    "GST sales report fetched successfully"
+  ).send(res);
+
+});
+export const getGstPurchaseReport = expressAsyncHandler(async (req, res) => {
+
+  const filters = pick(req.query, ['startDate', 'endDate']);
+  const { range } = req.query;
+
+  const now = new Date();
+  let startDate;
+  let endDate;
+
+  if (range === "thisMonth") {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  }
+
+  if (range === "previousMonth") {
+    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  }
+
+  if (range === "year") {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  }
+
+  if (startDate && endDate) {
+    filters.startDate = startDate;
+    filters.endDate = endDate;
+  }
+
+  const report = await purchaseService.getGstPurchaseReport({
+    ...filters,
+    store: req.user.store
+  });
+
+  return new ApiResponse(
+    200,
+    report,
+    "GST purchase report fetched successfully"
+  ).send(res);
+
+});
+export const getProfitLossReport = expressAsyncHandler(async (req, res) => {
+
+  const filters = pick(req.query, ['startDate', 'endDate']);
+  const { range } = req.query;
+
+  const now = new Date();
+  let startDate;
+  let endDate;
+
+  if (range === "thisMonth") {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  }
+
+  if (range === "previousMonth") {
+    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  }
+
+  if (range === "year") {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  }
+
+  if (startDate && endDate) {
+    filters.startDate = startDate;
+    filters.endDate = endDate;
+  }
+
+  const report = await invoiceService.getProfitLossReport({
+    ...filters,
+    store: req.user.store
+  });
+
+  return new ApiResponse(
+    200,
+    report,
+    "Profit loss report fetched successfully"
+  ).send(res);
+
+});
+
+export const getItemStockReport = expressAsyncHandler(async (req, res) => {
+
+  const { itemName, asOnDate } = req.query;
+
+  const report = await purchaseService.getItemStockReport({
+    store: req.user.store,
+    itemName,
+    asOnDate
+  });
+
+  return new ApiResponse(
+    200,
+    report,
+    "Item stock report fetched successfully"
+  ).send(res);
+
+});
+
 export const addPayment = expressAsyncHandler(async (req, res) => {
   const { invoiceId } = req.params;
   const invoice = await invoiceService.addPaymentToInvoice(invoiceId, req.body);

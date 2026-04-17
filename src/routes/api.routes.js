@@ -25,6 +25,8 @@ import feedbackRoutes from './feedback.routes.js';
 router.use('/feedback', feedbackRoutes);
 import faqRoutes from './faq.routes.js';
 router.use('/faq', faqRoutes);
+import appVersionRoutes from './appVersion.routes.js';
+router.use('/app-version', appVersionRoutes);
 import expenseHeadRoutes from './expenseHead.routes.js';
 router.use('/expense-head', expenseHeadRoutes);
 import expenseRoutes from './expense.routes.js';
@@ -37,5 +39,8 @@ import purchaseRoutes from './purchase.routes.js';
 router.use('/purchase', purchaseRoutes);
 import roleRoutes from './role.routes.js';
 router.use('/role', roleRoutes);
+import helplineRoutes from './helpline.routes.js';
+router.use('/helpline', helplineRoutes);
+
 
 export default router;

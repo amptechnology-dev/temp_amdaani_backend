@@ -41,6 +41,10 @@ import roleRoutes from './role.routes.js';
 router.use('/role', roleRoutes);
 import helplineRoutes from './helpline.routes.js';
 router.use('/helpline', helplineRoutes);
+import heroRoutes from './hero.routes.js';
+router.use('/hero', heroRoutes);
+import aboutRoutes from './about.routes.js';
+router.use('/about', aboutRoutes);
 
 
 export default router;

@@ -44,3 +44,7 @@ export const getHeroSectionById = async (id) => {
 export const getHeroSections = async (filters = {}) => {
     return HeroSection.find(filters).sort({ priority: -1, createdAt: -1 });
 };
+
+export const deleteHeroSectionById = async (id) => {
+    const hero = await HeroSection.findByIdAndDelete(id);
+};

@@ -52,3 +52,8 @@ export const getHeroSectionById = expressAsyncHandler(async (req, res) => {
 
     return new ApiResponse(200, hero, "Hero section fetched successfully!").send(res);
 });
+
+export const deleteHeroSection = expressAsyncHandler(async (req, res) => {
+    await heroService.deleteHeroSectionById(req.params.id);
+    return new ApiResponse(200, null, "Hero section deleted successfully!").send(res);
+});

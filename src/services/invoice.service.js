@@ -9,6 +9,8 @@ import { updateStockAfterSale } from './product.service.js';
 import { Product } from '../models/product.model.js';
 import { Purchase } from '../models/purchase.model.js';
 
+import { Store } from '../models/store.model.js';
+
 //NOTE: Trusting frontend for valid data
 export const createInvoice = async (data) => {
   const { items = [] } = data;
@@ -20,20 +22,27 @@ export const createInvoice = async (data) => {
     });
   }
 
-  console.log(items);
+  const store = await Store.findById(data.store);
+  if (!store) {
+    throw new ApiError(404, 'Store not found!', {
+      source: 'body',
+      field: 'store',
+      message: 'Store data not found',
+    });
+  }
 
   const session = await mongoose.startSession();
   try {
     session.startTransaction();
+
+    // Build invoice items
     const invoiceItems = [];
     for (const item of items) {
       const productId = await findOrCreateProduct(data.store, item, session);
-      invoiceItems.push({
-        product: productId,
-        ...item,
-      });
+      invoiceItems.push({ product: productId, ...item });
     }
 
+    // Handle customer
     const customerId = await findOrCreateCustomer(
       data.store,
       {
@@ -49,11 +58,54 @@ export const createInvoice = async (data) => {
       },
       session
     );
-    data.items = invoiceItems;
-    data.customer = customerId;
-    const invoice = new Invoice(data);
-    await invoice.save(session ? { session } : undefined);
-    // If payment status is partial, create a transaction
+
+    // Build full invoice doc WITH store snapshot — all in one shot
+    const invoiceDoc = {
+      ...data,
+      items: invoiceItems,
+      customer: customerId,
+
+      // Store snapshot embedded at creation time
+      name: store.name,
+      tagline: store.tagline,
+      ownershipType: store.ownershipType,
+      gstNumber: store.gstNumber,
+      panNumber: store.panNumber,
+      registrationNo: store.registrationNo,
+      contactNo: store.contactNo,
+      email: store.email,
+      address: {
+        street: store.address?.street,
+        city: store.address?.city,
+        state: store.address?.state,
+        country: store.address?.country || 'IN',
+        postalCode: store.address?.postalCode,
+      },
+      bankDetails: {
+        bankName: store.bankDetails?.bankName,
+        accountNo: store.bankDetails?.accountNo,
+        holderName: store.bankDetails?.holderName,
+        ifsc: store.bankDetails?.ifsc,
+        branch: store.bankDetails?.branch,
+        upiId: store.bankDetails?.upiId,
+      },
+      settings: {
+        invoicePrefix: store.settings?.invoicePrefix || 'INV',
+        invoiceStartNumber: store.settings?.invoiceStartNumber || 1,
+        taxRates: store.settings?.taxRates || [],
+        invoiceTerms: store.settings?.invoiceTerms,
+        stockManagement: store.settings?.stockManagement || false,
+        purchaseOrderManagement: store.settings?.purchaseOrderManagement || false,
+      },
+      logoUrl: store.logoUrl,
+      signatureUrl: store.signatureUrl,
+      isActive: store.isActive,
+    };
+
+    const invoice = new Invoice(invoiceDoc);
+    await invoice.save({ session }); // ✅ correct syntax
+
+    // Create transaction if partial payment
     if (invoice.paymentStatus === 'partial') {
       await createTransaction(
         {
@@ -66,12 +118,14 @@ export const createInvoice = async (data) => {
         session
       );
     }
+
     await updateStockAfterSale(invoice, session);
-    await session.commitTransaction();
+
+    await session.commitTransaction(); // ✅ everything commits together
     return invoice;
   } catch (error) {
     await session.abortTransaction();
-    handleDuplicateKeyError(error, Invoice);
+    throw handleDuplicateKeyError(error) || error; // ✅ always throws
   } finally {
     await session.endSession();
   }
@@ -144,15 +198,140 @@ export const updateInvoice = async (invoiceId, data) => {
 };
 
 export const getInvoiceById = async (id) => {
-  const invoice = await Invoice.findById(id).populate('customer');
-  if (!invoice) return null;
+  const result = await Invoice.aggregate([
+    {
+      $match: {
+        _id: new mongoose.Types.ObjectId(id),
+      },
+    },
+    {
+      $lookup: {
+        from: 'customers',
+        localField: 'customer',
+        foreignField: '_id',
+        as: 'customerDetails',
+        pipeline: [
+          {
+            $project: {
+              name: 1,
+              mobile: 1,
+              address: 1,
+              gstNumber: 1,
+              city: 1,
+              state: 1,
+              country: 1,
+              postalCode: 1,
+            },
+          },
+        ],
+      },
+    },
+    {
+      $unwind: {
+        path: '$customerDetails',
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $lookup: {
+        from: 'products',
+        localField: 'items.product',
+        foreignField: '_id',
+        as: 'productDetails',
+        pipeline: [
+          {
+            $project: {
+              name: 1,
+              hsn: 1,
+              unit: 1,
+              sellingPrice: 1,
+              gstRate: 1,
+            },
+          },
+        ],
+      },
+    },
+    {
+      $lookup: {
+        from: 'transactions',
+        localField: '_id',
+        foreignField: 'invoice',
+        as: 'transactions',
+        pipeline: [
+          {
+            $sort: { createdAt: -1 },
+          },
+          {
+            $project: {
+              amount: 1,
+              paymentMethod: 1,
+              note: 1,
+              type: 1,
+              createdAt: 1,
+            },
+          },
+        ],
+      },
+    },
+    {
+      $project: {
+        store: 1,
+        invoiceNumber: 1,
+        invoiceDate: 1,
+        type: 1,
+        status: 1,
+        edited: 1,
+        remarks: 1,
+        customer: 1,
+        customerName: 1,
+        customerMobile: 1,
+        customerAddress: 1,
+        customerGstNumber: 1,
+        customerCity: 1,
+        customerState: 1,
+        customerCountry: 1,
+        customerPostalCode: 1,
+        customerDetails: 1,
+        items: 1,
+        productDetails: 1,
+        subTotal: 1,
+        gstTotal: 1,
+        isIgst: 1,
+        discountTotal: 1,
+        roundOff: 1,
+        grandTotal: 1,
+        paymentStatus: 1,
+        amountPaid: 1,
+        amountDue: 1,
+        paymentMethod: 1,
+        paymentNote: 1,
+        transactions: 1,
+        name: 1,
+        tagline: 1,
+        ownershipType: 1,
+        gstNumber: 1,
+        panNumber: 1,
+        registrationNo: 1,
+        contactNo: 1,
+        email: 1,
+        address: 1,
+        bankDetails: 1,
+        settings: 1,
+        logoUrl: 1,
+        signatureUrl: 1,
+        isActive: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    },
+  ]);
 
-  const transactions = await getTransactionsByInvoice(id);
-  return { ...invoice.toObject(), transactions };
+  // ✅ aggregate returns an array — return first element or null
+  return result[0] || null;
 };
 
 export const queryInvoices = async (filter = {}, options = {}) => {
-  const { page = 1, limit = 20, sortBy = "createdAt", order = "desc" } = options;
+  const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;
 
   const aggregate = Invoice.aggregate([
     {
@@ -160,10 +339,10 @@ export const queryInvoices = async (filter = {}, options = {}) => {
     },
     {
       $lookup: {
-        from: "stores",
-        localField: "store",
-        foreignField: "_id",
-        as: "store",
+        from: 'stores',
+        localField: 'store',
+        foreignField: '_id',
+        as: 'store',
         pipeline: [
           {
             $project: {
@@ -184,7 +363,7 @@ export const queryInvoices = async (filter = {}, options = {}) => {
     },
     {
       $unwind: {
-        path: "$store",
+        path: '$store',
         preserveNullAndEmptyArrays: true,
       },
     },
@@ -195,7 +374,7 @@ export const queryInvoices = async (filter = {}, options = {}) => {
     },
     {
       $sort: {
-        [sortBy]: order === "desc" ? -1 : 1,
+        [sortBy]: order === 'desc' ? -1 : 1,
       },
     },
   ]);
@@ -218,32 +397,28 @@ export const getLastInvoice = async (store) => {
       },
     },
     {
-      $sort: {
-        createdAt: -1,
-      },
+      $sort: { createdAt: -1 },
     },
     {
       $limit: 1,
     },
     {
       $lookup: {
-        from: "stores",
-        localField: "store",
-        foreignField: "_id",
-        as: "store",
+        from: 'customers',
+        localField: 'customer',
+        foreignField: '_id',
+        as: 'customerDetails',
         pipeline: [
           {
             $project: {
               name: 1,
-              type: 1,
-              gstNumber: 1,
-              contactNo: 1,
-              email: 1,
+              mobile: 1,
               address: 1,
-              logoUrl: 1,
-              signatureUrl: 1,
-              bankDetails: 1,
-              settings: 1,
+              gstNumber: 1,
+              city: 1,
+              state: 1,
+              country: 1,
+              postalCode: 1,
             },
           },
         ],
@@ -251,8 +426,90 @@ export const getLastInvoice = async (store) => {
     },
     {
       $unwind: {
-        path: "$store",
+        path: '$customerDetails',
         preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $lookup: {
+        from: 'products',
+        localField: 'items.product',
+        foreignField: '_id',
+        as: 'productDetails',
+        pipeline: [
+          {
+            $project: {
+              name: 1,
+              hsn: 1,
+              unit: 1,
+              sellingPrice: 1,
+              gstRate: 1,
+            },
+          },
+        ],
+      },
+    },
+    {
+      $project: {
+        // ── Invoice core ──────────────────────────────────
+        store: 1,
+        invoiceNumber: 1,
+        invoiceDate: 1,
+        type: 1,
+        status: 1,
+        edited: 1,
+        remarks: 1,
+
+        // ── Customer ──────────────────────────────────────
+        customer: 1,
+        customerName: 1,
+        customerMobile: 1,
+        customerAddress: 1,
+        customerGstNumber: 1,
+        customerCity: 1,
+        customerState: 1,
+        customerCountry: 1,
+        customerPostalCode: 1,
+        customerDetails: 1,
+
+        // ── Items ─────────────────────────────────────────
+        items: 1,
+        productDetails: 1,
+
+        // ── Totals ────────────────────────────────────────
+        subTotal: 1,
+        gstTotal: 1,
+        isIgst: 1,
+        discountTotal: 1,
+        roundOff: 1,
+        grandTotal: 1,
+
+        // ── Payment ───────────────────────────────────────
+        paymentStatus: 1,
+        amountPaid: 1,
+        amountDue: 1,
+        paymentMethod: 1,
+        paymentNote: 1,
+
+        // ── Store snapshot (embedded at invoice creation) ─
+        name: 1,
+        tagline: 1,
+        ownershipType: 1,
+        gstNumber: 1,
+        panNumber: 1,
+        registrationNo: 1,
+        contactNo: 1,
+        email: 1,
+        address: 1,
+        bankDetails: 1,
+        settings: 1,
+        logoUrl: 1,
+        signatureUrl: 1,
+        isActive: 1,
+
+        // ── Timestamps ────────────────────────────────────
+        createdAt: 1,
+        updatedAt: 1,
       },
     },
   ]);
@@ -261,7 +518,6 @@ export const getLastInvoice = async (store) => {
 };
 
 export const getProductWiseInvoices = async (filters = {}) => {
-
   const { store, startDate, endDate } = filters;
 
   const matchStage = {};
@@ -280,34 +536,31 @@ export const getProductWiseInvoices = async (filters = {}) => {
   const result = await Invoice.aggregate([
     { $match: matchStage },
 
-    { $unwind: "$items" },
+    { $unwind: '$items' },
 
     {
       $project: {
-        date: "$invoiceDate",
+        date: '$invoiceDate',
         invoiceNumber: 1,
-        product: "$items.name",
-        productHsn: "$items.hsn",
-        unit: "$items.unit",
-        price: "$items.sellingPrice",
-        quantity: "$items.quantity",
-        discount: "$items.discount",
-        gstRate: "$items.gstRate",
+        product: '$items.name',
+        productHsn: '$items.hsn',
+        unit: '$items.unit',
+        price: '$items.sellingPrice',
+        quantity: '$items.quantity',
+        discount: '$items.discount',
+        gstRate: '$items.gstRate',
 
         gstAmount: {
           $round: [
             {
-              $multiply: [
-                "$items.total",
-                { $divide: ["$items.gstRate", 100] }
-              ]
+              $multiply: ['$items.total', { $divide: ['$items.gstRate', 100] }],
             },
-            2
-          ]
+            2,
+          ],
         },
 
-        lineTotal: "$items.total",
-        grandTotal: "$grandTotal",
+        lineTotal: '$items.total',
+        grandTotal: '$grandTotal',
       },
     },
 
@@ -318,7 +571,6 @@ export const getProductWiseInvoices = async (filters = {}) => {
 };
 
 export const getGstSalesReport = async (filters = {}) => {
-
   const { store, startDate, endDate } = filters;
 
   const matchStage = {};
@@ -337,7 +589,7 @@ export const getGstSalesReport = async (filters = {}) => {
   const result = await Invoice.aggregate([
     { $match: matchStage },
 
-    { $unwind: "$items" },
+    { $unwind: '$items' },
 
     {
       $project: {
@@ -345,27 +597,27 @@ export const getGstSalesReport = async (filters = {}) => {
         invoiceNumber: 1,
 
         customerName: {
-          $ifNull: ["$customerName", "Cash Customer"]
+          $ifNull: ['$customerName', 'Cash Customer'],
         },
 
         customerGst: {
-          $ifNull: ["$customerGstNumber", "-"]
+          $ifNull: ['$customerGstNumber', '-'],
         },
 
-        item: "$items.name",
-        hsn: "$items.hsn",
-        unit: "$items.unit",
+        item: '$items.name',
+        hsn: '$items.hsn',
+        unit: '$items.unit',
 
-        quantity: "$items.quantity",
+        quantity: '$items.quantity',
 
-        taxableValue: "$items.total",
+        taxableValue: '$items.total',
 
         cgstPercent: {
-          $divide: ["$items.gstRate", 2]
+          $divide: ['$items.gstRate', 2],
         },
 
         sgstPercent: {
-          $divide: ["$items.gstRate", 2]
+          $divide: ['$items.gstRate', 2],
         },
 
         cgstAmount: {
@@ -373,16 +625,13 @@ export const getGstSalesReport = async (filters = {}) => {
             {
               $divide: [
                 {
-                  $multiply: [
-                    "$items.total",
-                    "$items.gstRate"
-                  ]
+                  $multiply: ['$items.total', '$items.gstRate'],
                 },
-                200
-              ]
+                200,
+              ],
             },
-            2
-          ]
+            2,
+          ],
         },
 
         sgstAmount: {
@@ -390,19 +639,16 @@ export const getGstSalesReport = async (filters = {}) => {
             {
               $divide: [
                 {
-                  $multiply: [
-                    "$items.total",
-                    "$items.gstRate"
-                  ]
+                  $multiply: ['$items.total', '$items.gstRate'],
                 },
-                200
-              ]
+                200,
+              ],
             },
-            2
-          ]
+            2,
+          ],
         },
 
-        invoiceAmount: "$grandTotal",
+        invoiceAmount: '$grandTotal',
       },
     },
 
@@ -413,7 +659,6 @@ export const getGstSalesReport = async (filters = {}) => {
 };
 
 export const getGstPurchaseReport = async (filters = {}) => {
-
   const { store, startDate, endDate } = filters;
 
   const matchStage = {};
@@ -432,36 +677,35 @@ export const getGstPurchaseReport = async (filters = {}) => {
   const result = await Purchase.aggregate([
     { $match: matchStage },
 
-    { $unwind: "$items" },
+    { $unwind: '$items' },
 
     {
       $project: {
-
-        purchaseDate: "$date",
-        billNumber: "$invoiceNumber",
+        purchaseDate: '$date',
+        billNumber: '$invoiceNumber',
 
         vendorName: {
-          $ifNull: ["$vendorName", "Unknown Vendor"]
+          $ifNull: ['$vendorName', 'Unknown Vendor'],
         },
 
         vendorGst: {
-          $ifNull: ["$vendorGstNumber", "-"]
+          $ifNull: ['$vendorGstNumber', '-'],
         },
 
-        item: "$items.name",
-        hsn: "$items.hsn",
-        unit: "$items.unit",
+        item: '$items.name',
+        hsn: '$items.hsn',
+        unit: '$items.unit',
 
-        quantity: "$items.quantity",
+        quantity: '$items.quantity',
 
-        taxableValue: "$items.total",
+        taxableValue: '$items.total',
 
         cgstPercent: {
-          $divide: ["$items.gstRate", 2]
+          $divide: ['$items.gstRate', 2],
         },
 
         sgstPercent: {
-          $divide: ["$items.gstRate", 2]
+          $divide: ['$items.gstRate', 2],
         },
 
         cgstAmount: {
@@ -469,16 +713,13 @@ export const getGstPurchaseReport = async (filters = {}) => {
             {
               $divide: [
                 {
-                  $multiply: [
-                    "$items.total",
-                    "$items.gstRate"
-                  ]
+                  $multiply: ['$items.total', '$items.gstRate'],
                 },
-                200
-              ]
+                200,
+              ],
             },
-            2
-          ]
+            2,
+          ],
         },
 
         sgstAmount: {
@@ -486,36 +727,30 @@ export const getGstPurchaseReport = async (filters = {}) => {
             {
               $divide: [
                 {
-                  $multiply: [
-                    "$items.total",
-                    "$items.gstRate"
-                  ]
+                  $multiply: ['$items.total', '$items.gstRate'],
                 },
-                200
-              ]
+                200,
+              ],
             },
-            2
-          ]
+            2,
+          ],
         },
 
-        billAmount: "$grandTotal",
-
-      }
+        billAmount: '$grandTotal',
+      },
     },
 
-    { $sort: { purchaseDate: 1, billNumber: 1 } }
-
+    { $sort: { purchaseDate: 1, billNumber: 1 } },
   ]);
 
   return result;
 };
 
 export const getProfitLossReport = async (filters = {}) => {
-
   const { store, startDate, endDate } = filters;
 
   const matchStage = {
-    status: "active"
+    status: 'active',
   };
 
   if (store) {
@@ -525,84 +760,66 @@ export const getProfitLossReport = async (filters = {}) => {
   if (startDate && endDate) {
     matchStage.invoiceDate = {
       $gte: startDate,
-      $lte: endDate
+      $lte: endDate,
     };
   }
 
   const result = await Invoice.aggregate([
-
     { $match: matchStage },
 
-    { $unwind: "$items" },
+    { $unwind: '$items' },
 
     {
       $addFields: {
         costPrice: {
-          $multiply: [
-            "$items.quantity",
-            "$items.sellingPrice"
-          ]
-        }
-      }
+          $multiply: ['$items.quantity', '$items.sellingPrice'],
+        },
+      },
     },
 
     {
       $group: {
+        _id: '$_id',
 
-        _id: "$_id",
+        invoiceDate: { $first: '$invoiceDate' },
+        invoiceNumber: { $first: '$invoiceNumber' },
+        customerName: { $first: '$customerName' },
+        customerMobile: { $first: '$customerMobile' },
 
-        invoiceDate: { $first: "$invoiceDate" },
-        invoiceNumber: { $first: "$invoiceNumber" },
-        customerName: { $first: "$customerName" },
-        customerMobile: { $first: "$customerMobile" },
+        invoiceAmount: { $first: '$grandTotal' },
 
-        invoiceAmount: { $first: "$grandTotal" },
-
-        totalCost: { $sum: "$costPrice" }
-
-      }
+        totalCost: { $sum: '$costPrice' },
+      },
     },
 
     {
       $project: {
-
         invoiceDate: 1,
         invoiceNumber: 1,
 
         customerDescription: {
-          $concat: [
-            { $ifNull: ["$customerName", "Cash Customer"] },
-            " , ",
-            { $ifNull: ["$customerMobile", "-"] }
-          ]
+          $concat: [{ $ifNull: ['$customerName', 'Cash Customer'] }, ' , ', { $ifNull: ['$customerMobile', '-'] }],
         },
 
         invoiceAmount: 1,
 
         profitLoss: {
-          $subtract: [
-            "$invoiceAmount",
-            "$totalCost"
-          ]
-        }
-
-      }
+          $subtract: ['$invoiceAmount', '$totalCost'],
+        },
+      },
     },
 
-    { $sort: { invoiceDate: 1 } }
-
+    { $sort: { invoiceDate: 1 } },
   ]);
 
   return result;
-
 };
 
 export const getItemStockReport = async (filters = {}) => {
-
   const { store, itemName, asOnDate } = filters;
 
   const matchStage = {
-    store
+    store,
   };
 
   if (asOnDate) {
@@ -612,42 +829,39 @@ export const getItemStockReport = async (filters = {}) => {
   const pipeline = [
     { $match: matchStage },
 
-    { $unwind: "$items" },
+    { $unwind: '$items' },
 
     ...(itemName
       ? [
-        {
-          $match: {
-            "items.name": {
-              $regex: itemName,
-              $options: "i"
-            }
-          }
-        }
-      ]
+          {
+            $match: {
+              'items.name': {
+                $regex: itemName,
+                $options: 'i',
+              },
+            },
+          },
+        ]
       : []),
 
     {
       $group: {
+        _id: '$items.product',
 
-        _id: "$items.product",
-
-        itemDescription: { $first: "$items.name" },
+        itemDescription: { $first: '$items.name' },
 
         quantity: {
-          $sum: "$items.quantity"
+          $sum: '$items.quantity',
         },
 
         avgRate: {
-          $avg: "$items.rate"
-        }
-
-      }
+          $avg: '$items.rate',
+        },
+      },
     },
 
     {
       $project: {
-
         _id: 0,
 
         itemDescription: 1,
@@ -657,20 +871,15 @@ export const getItemStockReport = async (filters = {}) => {
         itemValue: {
           $round: [
             {
-              $multiply: [
-                "$quantity",
-                "$avgRate"
-              ]
+              $multiply: ['$quantity', '$avgRate'],
             },
-            2
-          ]
-        }
-
-      }
+            2,
+          ],
+        },
+      },
     },
 
-    { $sort: { itemDescription: 1 } }
-
+    { $sort: { itemDescription: 1 } },
   ];
 
   const result = await Purchase.aggregate(pipeline);

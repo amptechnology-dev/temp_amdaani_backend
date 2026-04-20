@@ -1,6 +1,7 @@
 import { Vendor } from '../models/vendor.model.js';
 import { handleDuplicateKeyError } from '../utils/dbErrorHandler.js';
 import { Purchase } from '../models/purchase.model.js';
+import mongoose from 'mongoose';
 
 export const createVendor = async (data, session = null) => {
   // No try/catch — let errors bubble up naturally

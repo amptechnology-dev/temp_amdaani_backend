@@ -5,6 +5,7 @@ const envVarsSchema = yup.object({
   NODE_ENV: yup.string().oneOf(['production', 'development', 'test']).required(),
   PORT: yup.number().default(3000),
   APP_BASE_URL: yup.string(),
+  ALLOWED_ORIGINS: yup.string().required(),
   MONGODB_URL: yup.string().required('MongoDB URL is required'),
   JWT_SECRET: yup.string().required('JWT secret key is required'),
   JWT_ACCESS_EXPIRATION: yup.string().default('30m'),
@@ -50,7 +51,7 @@ const config = {
     url: `${envVars.MONGODB_URL}${envVars.NODE_ENV === 'test' ? '-test' : ''}`,
   },
   cors: {
-    origin: envVars.ALLOWED_ORIGINS?.split(',') || '*',
+    origin: envVars.ALLOWED_ORIGINS?.split(',').map((origin) => origin.trim()),
     credentials: true,
   },
   jwt: {

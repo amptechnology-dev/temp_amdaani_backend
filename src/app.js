@@ -11,6 +11,7 @@ import config from './config/config.js';
 import { errorConverter, errorHandler } from './middlewares/error.middleware.js';
 import { ApiError } from './utils/responseHandler.js';
 
+
 const app = express();
 
 // set security HTTP headers
@@ -22,7 +23,24 @@ app.use(express.urlencoded({ extended: true }));
 // set static files
 app.use(express.static('public'));
 // sanitize request data
-app.use(expressSanitize({ skipRoutes: ['/api/auth/logout', '/api/auth/refresh-tokens', '/api/how-to-videos'] }));
+app.use((req, res, next) => {
+  const skipRoutes = [
+    "/api/auth/logout",
+    "/api/auth/refresh-tokens",
+  ];
+
+  if (
+    skipRoutes.includes(req.path) ||
+    req.path.startsWith("/api/testimonial") ||
+    req.path.startsWith("/api/how-to-videos") ||
+    req.path.startsWith("/api/helpline")
+  ) {
+    return next();
+  }
+
+  return expressSanitize()(req, res, next);
+});
+
 // gzip compression
 app.use(compression());
 // enable cors

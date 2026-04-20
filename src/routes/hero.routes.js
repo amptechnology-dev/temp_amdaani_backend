@@ -29,6 +29,10 @@ router
         uploadImage.single("phoneImage"),
         authorizeRoles("super-admin"),
         heroController.updateHeroSection
+    )
+    .delete(
+        authorizeRoles("super-admin"),
+        heroController.deleteHeroSection
     );
 
 export default router;

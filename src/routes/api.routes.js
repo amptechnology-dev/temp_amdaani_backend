@@ -45,6 +45,7 @@ import heroRoutes from './hero.routes.js';
 router.use('/hero', heroRoutes);
 import aboutRoutes from './about.routes.js';
 router.use('/about', aboutRoutes);
-
+import testimonialRoutes from './testimonial.route.js';
+router.use('/testimonial', testimonialRoutes);
 
 export default router;

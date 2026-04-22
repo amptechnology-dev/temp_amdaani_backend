@@ -33,7 +33,8 @@ app.use((req, res, next) => {
     skipRoutes.includes(req.path) ||
     req.path.startsWith("/api/testimonial") ||
     req.path.startsWith("/api/how-to-videos") ||
-    req.path.startsWith("/api/helpline")
+    req.path.startsWith("/api/helpline") ||
+    req.path.startsWith("/api/herobutton")
   ) {
     return next();
   }

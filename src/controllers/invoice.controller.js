@@ -5,13 +5,17 @@ import pick from '../utils/pick.js';
 import { updateUsage } from '../services/usage.service.js';
 import * as transactionService from '../services/transaction.service.js';
 import { deleteTransaction, cancelAllTransactionsForInvoice } from '../services/transaction.service.js';
+import ExcelJS from "exceljs";
 
 export const createInvoice = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
   const invoice = await invoiceService.createInvoice(req.body);
-  await updateUsage(req.subscription._id, { $inc: { invoicesUsed: 1 } });
-  return new ApiResponse(201, invoice, 'Invoice created successfully').send(res);
+  if (req.subscription) {
+    await updateUsage(req.subscription._id, { $inc: { invoicesUsed: 1 } });
+  }
+  return new ApiResponse(201, invoice, "Invoice created successfully").send(res);
 });
+
 export const updateInvoice = expressAsyncHandler(async (req, res) => {
   const invoice = await invoiceService.updateInvoice(req.params.id, req.body);
   if (!invoice) {
@@ -138,6 +142,56 @@ export const getGstSalesReport = expressAsyncHandler(async (req, res) => {
 
   return new ApiResponse(200, report, 'GST sales report fetched successfully').send(res);
 });
+
+export const exportGstSalesReportExcel = expressAsyncHandler(async (req, res) => {
+  const filters = {
+    store: req.user.store,
+    startDate: req.query.startDate,
+    endDate: req.query.endDate,
+  };
+
+  const report = await invoiceService.getGstSalesReport(filters);
+
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("GST Sales Report");
+
+  // Header
+  worksheet.columns = [
+    { header: "Invoice Date", key: "invoiceDate", width: 15 },
+    { header: "Invoice No", key: "invoiceNumber", width: 15 },
+    { header: "Customer Name", key: "customerName", width: 25 },
+    { header: "Customer GST", key: "customerGst", width: 20 },
+    { header: "Item", key: "item", width: 25 },
+    { header: "HSN", key: "hsn", width: 15 },
+    { header: "Unit", key: "unit", width: 10 },
+    { header: "Quantity", key: "quantity", width: 10 },
+    { header: "Taxable Value", key: "taxableValue", width: 15 },
+    { header: "CGST %", key: "cgstPercent", width: 10 },
+    { header: "CGST Amount", key: "cgstAmount", width: 15 },
+    { header: "SGST %", key: "sgstPercent", width: 10 },
+    { header: "SGST Amount", key: "sgstAmount", width: 15 },
+    { header: "Invoice Amount", key: "invoiceAmount", width: 15 },
+  ];
+
+  // Add Rows
+  report.forEach((item) => {
+    worksheet.addRow(item);
+  });
+
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+
+  res.setHeader(
+    "Content-Disposition",
+    "attachment; filename=gst-sales-report.xlsx"
+  );
+
+  await workbook.xlsx.write(res);
+  res.end();
+});
+
 export const getGstPurchaseReport = expressAsyncHandler(async (req, res) => {
   const filters = pick(req.query, ['startDate', 'endDate']);
   const { range } = req.query;
@@ -173,6 +227,83 @@ export const getGstPurchaseReport = expressAsyncHandler(async (req, res) => {
 
   return new ApiResponse(200, report, 'GST purchase report fetched successfully').send(res);
 });
+
+export const exportGstPurchaseReportExcel = expressAsyncHandler(async (req, res) => {
+  const filters = pick(req.query, ["startDate", "endDate"]);
+  const { range } = req.query;
+
+  const now = new Date();
+  let startDate;
+  let endDate;
+
+  if (range === "thisMonth") {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  }
+
+  if (range === "previousMonth") {
+    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  }
+
+  if (range === "year") {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  }
+
+  if (startDate && endDate) {
+    filters.startDate = startDate;
+    filters.endDate = endDate;
+  }
+
+  const report = await invoiceService.getGstPurchaseReport({
+    ...filters,
+    store: req.user.store,
+  });
+
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("GST Purchase Report");
+
+  // Header columns
+  worksheet.columns = [
+    { header: "Invoice Date", key: "invoiceDate", width: 15 },
+    { header: "Invoice No", key: "invoiceNumber", width: 15 },
+    { header: "Supplier Name", key: "supplierName", width: 25 },
+    { header: "Supplier GST", key: "supplierGst", width: 20 },
+    { header: "Item", key: "item", width: 25 },
+    { header: "HSN", key: "hsn", width: 15 },
+    { header: "Unit", key: "unit", width: 10 },
+    { header: "Quantity", key: "quantity", width: 10 },
+    { header: "Taxable Value", key: "taxableValue", width: 15 },
+    { header: "CGST %", key: "cgstPercent", width: 10 },
+    { header: "CGST Amount", key: "cgstAmount", width: 15 },
+    { header: "SGST %", key: "sgstPercent", width: 10 },
+    { header: "SGST Amount", key: "sgstAmount", width: 15 },
+    { header: "Invoice Amount", key: "invoiceAmount", width: 15 },
+  ];
+
+  // Style header
+  worksheet.getRow(1).font = { bold: true };
+
+  // Add rows
+  report.forEach((item) => {
+    worksheet.addRow(item);
+  });
+
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+
+  res.setHeader(
+    "Content-Disposition",
+    "attachment; filename=gst-purchase-report.xlsx"
+  );
+
+  await workbook.xlsx.write(res);
+  res.end();
+});
+
 export const getProfitLossReport = expressAsyncHandler(async (req, res) => {
   const filters = pick(req.query, ['startDate', 'endDate']);
   const { range } = req.query;

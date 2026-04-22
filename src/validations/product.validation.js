@@ -22,6 +22,7 @@ export const createProductSchema = {
     costPrice: yup.number().typeError('Cost price must be a number').min(0, 'Cost price cannot be negative'),
     sellingPrice: yup.number().typeError('Selling price must be a number').min(0, 'Selling price cannot be negative'),
     isTaxInclusive: yup.boolean().default(false),
+    isPurchaseTaxInclusive: yup.boolean(),
     discountPrice: yup
       .number()
       .typeError('Discount price must be a number')
@@ -35,6 +36,7 @@ export const createProductSchema = {
       .typeError('GST rate must be a number')
       .min(0, 'GST rate cannot be negative')
       .max(28, 'GST rate cannot be more than 100'),
+    mrp: yup.number().typeError('GST rate must be a number').min(0, 'GST rate cannot be negative'),
     purchaseGstRate: yup
       .number()
       .typeError('GST rate must be a number')
@@ -63,10 +65,20 @@ export const updateProductSchema = {
       costPrice: yup.number().typeError('Cost price must be a number').min(0, 'Cost price cannot be negative'),
       sellingPrice: yup.number().typeError('Selling price must be a number').min(0, 'Selling price cannot be negative'),
       isTaxInclusive: yup.boolean(),
+      isPurchaseTaxInclusive: yup.boolean(),
+      purchaseDiscount: yup
+        .number()
+        .typeError('Discount price must be a number')
+        .min(0, 'Discount price cannot be negative'),
       discountPrice: yup
         .number()
         .typeError('Discount price must be a number')
         .min(0, 'Discount price cannot be negative'),
+      purchaseGstRate: yup
+        .number()
+        .typeError('GST rate must be a number')
+        .min(0, 'GST rate cannot be negative')
+        .max(28, 'GST rate cannot be more than 100'),
       gstRate: yup
         .number()
         .typeError('GST rate must be a number')

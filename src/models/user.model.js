@@ -2,6 +2,11 @@ import mongoose from 'mongoose';
 
 const UserSchema = new mongoose.Schema(
   {
+    amdaaniId: {
+      type: String,
+      unique: true,
+      index: true,
+    },
     store: { type: mongoose.SchemaTypes.ObjectId, ref: 'Store' },
     phone: { type: String, required: true, unique: true, trim: true },
     name: { type: String, trim: true },

@@ -573,7 +573,9 @@ export const getProductWiseInvoices = async (filters = {}) => {
 export const getGstSalesReport = async (filters = {}) => {
   const { store, startDate, endDate } = filters;
 
-  const matchStage = {};
+  const matchStage = {
+    gstTotal: { $gt: 0 },
+  };
 
   if (store) {
     matchStage.store = store;
@@ -591,6 +593,8 @@ export const getGstSalesReport = async (filters = {}) => {
 
     { $unwind: '$items' },
 
+    { $sort: { invoiceDate: 1, invoiceNumber: 1 } },
+
     {
       $project: {
         invoiceDate: 1,
@@ -607,41 +611,55 @@ export const getGstSalesReport = async (filters = {}) => {
         item: '$items.name',
         hsn: '$items.hsn',
         unit: '$items.unit',
-
         quantity: '$items.quantity',
 
-        taxableValue: '$items.total',
-
-        cgstPercent: {
-          $divide: ['$items.gstRate', 2],
+        // Back-calculate taxable value (excluding GST) from GST-inclusive total
+        taxableValue: {
+          $round: [
+            {
+              $divide: ['$items.total', { $add: [1, { $divide: ['$items.gstRate', 100] }] }],
+            },
+            2,
+          ],
         },
 
-        sgstPercent: {
-          $divide: ['$items.gstRate', 2],
-        },
+        cgstPercent: { $divide: ['$items.gstRate', 2] },
+        sgstPercent: { $divide: ['$items.gstRate', 2] },
 
+        // CGST = gstAmount / 2, where gstAmount = total - taxableValue
         cgstAmount: {
           $round: [
             {
               $divide: [
                 {
-                  $multiply: ['$items.total', '$items.gstRate'],
+                  $subtract: [
+                    '$items.total',
+                    {
+                      $divide: ['$items.total', { $add: [1, { $divide: ['$items.gstRate', 100] }] }],
+                    },
+                  ],
                 },
-                200,
+                2,
               ],
             },
             2,
           ],
         },
 
+        // SGST = same as CGST (half of total GST)
         sgstAmount: {
           $round: [
             {
               $divide: [
                 {
-                  $multiply: ['$items.total', '$items.gstRate'],
+                  $subtract: [
+                    '$items.total',
+                    {
+                      $divide: ['$items.total', { $add: [1, { $divide: ['$items.gstRate', 100] }] }],
+                    },
+                  ],
                 },
-                200,
+                2,
               ],
             },
             2,
@@ -651,8 +669,6 @@ export const getGstSalesReport = async (filters = {}) => {
         invoiceAmount: '$grandTotal',
       },
     },
-
-    { $sort: { invoiceDate: 1, invoiceNumber: 1 } },
   ]);
 
   return result;
@@ -662,7 +678,6 @@ export const getGstPurchaseReport = async (filters = {}) => {
   const { store, startDate, endDate } = filters;
 
   const matchStage = {};
-
   if (store) {
     matchStage.store = store;
   }

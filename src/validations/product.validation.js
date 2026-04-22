@@ -26,7 +26,16 @@ export const createProductSchema = {
       .number()
       .typeError('Discount price must be a number')
       .min(0, 'Discount price cannot be negative'),
+    purchaseDiscount: yup
+      .number()
+      .typeError('Discount price must be a number')
+      .min(0, 'Discount price cannot be negative'),
     gstRate: yup
+      .number()
+      .typeError('GST rate must be a number')
+      .min(0, 'GST rate cannot be negative')
+      .max(28, 'GST rate cannot be more than 100'),
+    purchaseGstRate: yup
       .number()
       .typeError('GST rate must be a number')
       .min(0, 'GST rate cannot be negative')

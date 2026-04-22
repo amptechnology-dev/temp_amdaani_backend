@@ -47,5 +47,9 @@ import aboutRoutes from './about.routes.js';
 router.use('/about', aboutRoutes);
 import testimonialRoutes from './testimonial.route.js';
 router.use('/testimonial', testimonialRoutes);
+import herobuttonRoutes from './herobutton.routes.js';
+router.use('/herobutton', herobuttonRoutes);
+import referralSettingsRoutes from './referralSettings.routes.js';
+router.use('/referral-settings', referralSettingsRoutes);
 
 export default router;

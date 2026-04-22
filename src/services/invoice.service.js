@@ -90,13 +90,31 @@ export const createInvoice = async (data) => {
         upiId: store.bankDetails?.upiId,
       },
       settings: {
-        invoicePrefix: store.settings?.invoicePrefix || 'INV',
-        invoiceStartNumber: store.settings?.invoiceStartNumber || 1,
-        taxRates: store.settings?.taxRates || [],
-        invoiceTerms: store.settings?.invoiceTerms,
-        stockManagement: store.settings?.stockManagement || false,
-        purchaseOrderManagement: store.settings?.purchaseOrderManagement || false,
-      },
+  invoicePrefix:
+    data.settings?.invoicePrefix ||
+    store.settings?.invoicePrefix ||
+    'INV',
+
+  invoiceStartNumber:
+    data.settings?.invoiceStartNumber ||
+    store.settings?.invoiceStartNumber ||
+    1,
+
+  taxRates: data.settings?.taxRates || store.settings?.taxRates || [],
+
+  invoiceTerms:
+    data.settings?.invoiceTerms || store.settings?.invoiceTerms,
+
+  stockManagement:
+    data.settings?.stockManagement ??
+    store.settings?.stockManagement ??
+    false,
+
+  purchaseOrderManagement:
+    data.settings?.purchaseOrderManagement ??
+    store.settings?.purchaseOrderManagement ??
+    false,
+},
       logoUrl: store.logoUrl,
       signatureUrl: store.signatureUrl,
       isActive: store.isActive,

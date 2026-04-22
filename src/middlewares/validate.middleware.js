@@ -9,7 +9,7 @@ const validate = (schema) => async (req, res, next) => {
     if (validator) {
       console.log(`Before [${key}]:`, req[key]);
       try {
-        req[key] = await validator.validate(req[key], { abortEarly: false, stripUnknown: true });
+        req[key] = await validator.validate(req[key], { abortEarly: false, stripUnknown: false });
         console.log(`After [${key}]:`, req[key]);
       } catch (err) {
         if (err instanceof ValidationError) {

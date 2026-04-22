@@ -20,7 +20,7 @@ import axios from 'axios';
 import { roles } from '../config/roles.js';
 import { Role } from '../models/role.model.js';
 import { User } from '../models/user.model.js';
-
+import { generateAmdaaniId } from "../utils/generateAmdaaniId.js";
 
 export const sendOtp = async (phone) => {
   if (!phone) {
@@ -126,46 +126,71 @@ export const verifySuperAdminLogin = async (otp) => {
 };
 
 export const registerUserWithStore = async (storeData, userData, files) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  // Keep track of uploaded files so we can clean them up if DB fails
+
+  // const session = await mongoose.startSession();
+  // session.startTransaction();
+
   const uploadedKeys = [];
+
   try {
-    // 1. Upload files to R2 first
+
     if (files?.logo) {
       const logoKey = await compressAndUpload(files.logo[0]?.buffer, { isPublic: true, height: 500, width: 500 });
+
       storeData.logoUrl = `${config.r2.publicEndpoint}/${logoKey}`;
+
       uploadedKeys.push(logoKey);
     }
+
     if (files?.signature) {
       const signatureKey = await compressAndUpload(files.signature[0]?.buffer, {
         isPublic: true,
         height: 200,
         width: 600,
       });
+
       storeData.signatureUrl = `${config.r2.publicEndpoint}/${signatureKey}`;
+
       uploadedKeys.push(signatureKey);
     }
-    // 2. Check if user already exists
-    if (await checkUserExists(userData.phone, session)) {
+
+    if (await checkUserExists(userData.phone)) {
       throw new ApiError(400, 'User already exists', [
         { source: 'body', field: 'userData.phone', message: 'User already exists' },
       ]);
     }
-    const ownerRole = await Role.findOne({ name: roles.OWNER }); //NOTE: Assign owner role to the user
+
+    const ownerRole = await Role.findOne({ name: roles.OWNER });
+
     if (!ownerRole) {
       throw new ApiError(500, 'Owner role not found');
     }
-    const store = await createStore(storeData, session);
-    const user = await createUser({ ...userData, store: store._id, role: ownerRole._id }, session);
 
-    await session.commitTransaction();
-    session.endSession();
+    const store = await createStore(storeData);
+
+    // 🔥 generate amdaaniId
+    const amdaaniId = await generateAmdaaniId();
+
+    const user = await createUser(
+      {
+        ...userData,
+        amdaaniId,
+        store: store._id,
+        role: ownerRole._id,
+      },
+      // session
+    );
+
+    // await session.commitTransaction();
+    // session.endSession();
+
     return { user, store };
+
   } catch (error) {
-    await session.abortTransaction();
-    await session.endSession();
-    // 4. If DB failed after uploading files, delete them from R2
+
+    // await session.abortTransaction();
+    // await session.endSession();
+
     for (const key of uploadedKeys) {
       try {
         await deleteFileFromR2(true, key);
@@ -173,6 +198,7 @@ export const registerUserWithStore = async (storeData, userData, files) => {
         logger.error(cleanupErr, 'Error deleting file from R2.');
       }
     }
+
     throw error;
   }
 };

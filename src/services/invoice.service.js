@@ -90,31 +90,19 @@ export const createInvoice = async (data) => {
         upiId: store.bankDetails?.upiId,
       },
       settings: {
-  invoicePrefix:
-    data.settings?.invoicePrefix ||
-    store.settings?.invoicePrefix ||
-    'INV',
+        invoicePrefix: data.settings?.invoicePrefix || store.settings?.invoicePrefix || 'INV',
 
-  invoiceStartNumber:
-    data.settings?.invoiceStartNumber ||
-    store.settings?.invoiceStartNumber ||
-    1,
+        invoiceStartNumber: data.settings?.invoiceStartNumber || store.settings?.invoiceStartNumber || 1,
 
-  taxRates: data.settings?.taxRates || store.settings?.taxRates || [],
+        taxRates: data.settings?.taxRates || store.settings?.taxRates || [],
 
-  invoiceTerms:
-    data.settings?.invoiceTerms || store.settings?.invoiceTerms,
+        invoiceTerms: data.settings?.invoiceTerms || store.settings?.invoiceTerms,
 
-  stockManagement:
-    data.settings?.stockManagement ??
-    store.settings?.stockManagement ??
-    false,
+        stockManagement: data.settings?.stockManagement ?? store.settings?.stockManagement ?? false,
 
-  purchaseOrderManagement:
-    data.settings?.purchaseOrderManagement ??
-    store.settings?.purchaseOrderManagement ??
-    false,
-},
+        purchaseOrderManagement:
+          data.settings?.purchaseOrderManagement ?? store.settings?.purchaseOrderManagement ?? false,
+      },
       logoUrl: store.logoUrl,
       signatureUrl: store.signatureUrl,
       isActive: store.isActive,
@@ -607,12 +595,14 @@ export const getGstSalesReport = async (filters = {}) => {
   }
 
   const result = await Invoice.aggregate([
-    { $match: matchStage },
-
     { $unwind: '$items' },
 
     { $sort: { invoiceDate: 1, invoiceNumber: 1 } },
-
+    {
+      $match: {
+        'items.gstRate': { $gt: 0 },
+      },
+    },
     {
       $project: {
         invoiceDate: 1,

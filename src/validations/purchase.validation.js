@@ -64,6 +64,49 @@ export const createPurchase = {
   }),
 };
 
+
+export const updatePurchase = {
+  body: yup.object().shape({
+    vendor: yup
+      .string()
+      .test('is-valid-vendor-id', 'Invalid Vendor ID', (v) => (v ? isValidObjectId(v) : true))
+      .nullable(),
+    vendorName: yup.string().trim().max(255).required('Vendor name is required'),
+    vendorMobile: yup
+      .string()
+      .trim()
+      .nullable()
+      .test('is-valid-mobile', 'Vendor mobile must be a valid 10-digit number', (value) => {
+        if (!value) return true;
+        return /^[0-9]{10}$/.test(value);
+      }),
+    vendorAddress: yup.string().nullable().trim().max(255),
+    vendorState: yup.string().nullable().trim().max(100),
+    vendorCity: yup.string().nullable().trim().max(50),
+    vendorPostalCode: yup.string().nullable().trim().max(10),
+    vendorGstNumber: yup.string().nullable().trim().max(255).uppercase(),
+    vendorPanNumber: yup.string().nullable().trim().max(255).uppercase(),
+    invoiceNumber: yup.string().required('Purchase number is required'),
+    date: yup
+      .date()
+      .default(() => new Date())
+      .typeError('Purchase date must be a valid date'),
+    items: yup.array().of(purchaseItemSchema).min(1, 'At least one item is required'),
+    subTotal: yup.number().required('Sub total is required').min(0),
+    gstTotal: yup.number().min(0).default(0),
+    isIgst: yup.boolean().default(false),
+    discountTotal: yup.number().min(0).default(0),
+    roundOff: yup.number().default(0),
+    grandTotal: yup.number().required('Grand total is required').min(0),
+    paymentStatus: yup.string().oneOf(['paid', 'unpaid', 'partial']).default('unpaid'),
+    amountPaid: yup.number().min(0).default(0),
+    amountDue: yup.number().min(0).default(0),
+    paymentMethod: yup.string().default('cash'),
+    paymentNote: yup.string(),
+    status: yup.string().oneOf(['active', 'cancelled']).default('active'),
+  }),
+};
+
 export const changePurchaseStatus = {
   params: yup.object().shape({
     id: yup

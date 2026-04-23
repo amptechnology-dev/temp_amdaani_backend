@@ -12,6 +12,7 @@ router
   .route('/')
   .post(checkActiveSubscription, validate(purchaseSchema.createPurchase), purchaseController.createPurchase)
   .get(purchaseController.getPurchases);
+router.put('/id/:id', validate(purchaseSchema.updatePurchase), purchaseController.updatePurchase);
 router.route('/id/:id').get(purchaseController.getPurchaseById);
 router.post('/add-payment/:purchaseId', validate(purchaseSchema.addPayment), purchaseController.addPayment);
 router.delete('/remove-payment/:paymentId', purchaseController.removePaymentFromPurchase);

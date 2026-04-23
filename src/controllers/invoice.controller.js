@@ -5,7 +5,7 @@ import pick from '../utils/pick.js';
 import { updateUsage } from '../services/usage.service.js';
 import * as transactionService from '../services/transaction.service.js';
 import { deleteTransaction, cancelAllTransactionsForInvoice } from '../services/transaction.service.js';
-import ExcelJS from "exceljs";
+import ExcelJS from 'exceljs';
 
 export const createInvoice = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
@@ -13,7 +13,7 @@ export const createInvoice = expressAsyncHandler(async (req, res) => {
   if (req.subscription) {
     await updateUsage(req.subscription._id, { $inc: { invoicesUsed: 1 } });
   }
-  return new ApiResponse(201, invoice, "Invoice created successfully").send(res);
+  return new ApiResponse(201, invoice, 'Invoice created successfully').send(res);
 });
 
 export const updateInvoice = expressAsyncHandler(async (req, res) => {
@@ -108,8 +108,7 @@ export const getProductWiseInvoices = expressAsyncHandler(async (req, res) => {
   return new ApiResponse(200, invoice, 'Product wise invoices fetched successfully').send(res);
 });
 export const getGstSalesReport = expressAsyncHandler(async (req, res) => {
-  const filters = pick(req.query, ['startDate', 'endDate']);
-  const { range } = req.query;
+  const { range, startDate: startRaw, endDate: endRaw } = req.query;
 
   const now = new Date();
   let startDate;
@@ -118,25 +117,31 @@ export const getGstSalesReport = expressAsyncHandler(async (req, res) => {
   if (range === 'thisMonth') {
     startDate = new Date(now.getFullYear(), now.getMonth(), 1);
     endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-  }
-
-  if (range === 'previousMonth') {
+  } else if (range === 'previousMonth') {
     startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-  }
-
-  if (range === 'year') {
+  } else if (range === 'year') {
     startDate = new Date(now.getFullYear(), 0, 1);
     endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  } else if (startRaw && endRaw) {
+    // ✅ Parse "YYYY-MM-DD" string into proper Date objects
+    // Split manually to avoid UTC midnight shift (new Date("2025-04-01") = UTC = wrong in IST)
+    const [sy, sm, sd] = startRaw.split('-').map(Number);
+    const [ey, em, ed] = endRaw.split('-').map(Number);
+
+    startDate = new Date(sy, sm - 1, sd, 0, 0, 0); // local midnight start
+    endDate = new Date(ey, em - 1, ed, 23, 59, 59, 999); // local end of day
   }
 
-  if (startDate && endDate) {
-    filters.startDate = startDate;
-    filters.endDate = endDate;
+  if (!startDate || !endDate) {
+    return new ApiResponse(400, null, 'Please provide startDate & endDate or a valid range').send(res);
   }
+
+  console.log('GST Sales Report →', { startDate, endDate, range: range || 'custom' });
 
   const report = await invoiceService.getGstSalesReport({
-    ...filters,
+    startDate,
+    endDate,
     store: req.user.store,
   });
 
@@ -144,57 +149,7 @@ export const getGstSalesReport = expressAsyncHandler(async (req, res) => {
 });
 
 export const exportGstSalesReportExcel = expressAsyncHandler(async (req, res) => {
-  const filters = {
-    store: req.user.store,
-    startDate: req.query.startDate,
-    endDate: req.query.endDate,
-  };
-
-  const report = await invoiceService.getGstSalesReport(filters);
-
-  const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet("GST Sales Report");
-
-  // Header
-  worksheet.columns = [
-    { header: "Invoice Date", key: "invoiceDate", width: 15 },
-    { header: "Invoice No", key: "invoiceNumber", width: 15 },
-    { header: "Customer Name", key: "customerName", width: 25 },
-    { header: "Customer GST", key: "customerGst", width: 20 },
-    { header: "Item", key: "item", width: 25 },
-    { header: "HSN", key: "hsn", width: 15 },
-    { header: "Unit", key: "unit", width: 10 },
-    { header: "Quantity", key: "quantity", width: 10 },
-    { header: "Taxable Value", key: "taxableValue", width: 15 },
-    { header: "CGST %", key: "cgstPercent", width: 10 },
-    { header: "CGST Amount", key: "cgstAmount", width: 15 },
-    { header: "SGST %", key: "sgstPercent", width: 10 },
-    { header: "SGST Amount", key: "sgstAmount", width: 15 },
-    { header: "Invoice Amount", key: "invoiceAmount", width: 15 },
-  ];
-
-  // Add Rows
-  report.forEach((item) => {
-    worksheet.addRow(item);
-  });
-
-  res.setHeader(
-    "Content-Type",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  );
-
-  res.setHeader(
-    "Content-Disposition",
-    "attachment; filename=gst-sales-report.xlsx"
-  );
-
-  await workbook.xlsx.write(res);
-  res.end();
-});
-
-export const getGstPurchaseReport = expressAsyncHandler(async (req, res) => {
-  const filters = pick(req.query, ['startDate', 'endDate']);
-  const { range } = req.query;
+  const { range, startDate: startRaw, endDate: endRaw } = req.query;
 
   const now = new Date();
   let startDate;
@@ -203,25 +158,105 @@ export const getGstPurchaseReport = expressAsyncHandler(async (req, res) => {
   if (range === 'thisMonth') {
     startDate = new Date(now.getFullYear(), now.getMonth(), 1);
     endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-  }
-
-  if (range === 'previousMonth') {
+  } else if (range === 'previousMonth') {
     startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-  }
-
-  if (range === 'year') {
+  } else if (range === 'year') {
     startDate = new Date(now.getFullYear(), 0, 1);
     endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  } else if (startRaw && endRaw) {
+    // ✅ Parse "YYYY-MM-DD" string into proper Date objects
+    // Split manually to avoid UTC midnight shift (new Date("2025-04-01") = UTC = wrong in IST)
+    const [sy, sm, sd] = startRaw.split('-').map(Number);
+    const [ey, em, ed] = endRaw.split('-').map(Number);
+
+    startDate = new Date(sy, sm - 1, sd, 0, 0, 0); // local midnight start
+    endDate = new Date(ey, em - 1, ed, 23, 59, 59, 999); // local end of day
   }
 
-  if (startDate && endDate) {
-    filters.startDate = startDate;
-    filters.endDate = endDate;
+  if (!startDate || !endDate) {
+    return new ApiResponse(400, null, 'Please provide startDate & endDate or a valid range').send(res);
   }
+
+  console.log('GST Sales Report →', { startDate, endDate, range: range || 'custom' });
+
+  const report = await invoiceService.getGstSalesReport({
+    startDate,
+    endDate,
+  });
+
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('GST Sales Report');
+
+  // Header
+  worksheet.columns = [
+    { header: 'Invoice Date', key: 'invoiceDate', width: 15 },
+    { header: 'Invoice No', key: 'invoiceNumber', width: 15 },
+    { header: 'Customer Name', key: 'customerName', width: 25 },
+    { header: 'Customer GST', key: 'customerGst', width: 20 },
+    { header: 'Item', key: 'item', width: 25 },
+    { header: 'HSN', key: 'hsn', width: 15 },
+    { header: 'Unit', key: 'unit', width: 10 },
+    { header: 'Quantity', key: 'quantity', width: 10 },
+    { header: 'Taxable Value', key: 'taxableValue', width: 15 },
+    { header: 'CGST %', key: 'cgstPercent', width: 10 },
+    { header: 'CGST Amount', key: 'cgstAmount', width: 15 },
+    { header: 'SGST %', key: 'sgstPercent', width: 10 },
+    { header: 'SGST Amount', key: 'sgstAmount', width: 15 },
+    { header: 'Invoice Amount', key: 'invoiceAmount', width: 15 },
+  ];
+
+  // Add Rows
+  report.forEach((item) => {
+    worksheet.addRow(item);
+  });
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+  res.setHeader('Content-Disposition', 'attachment; filename=gst-sales-report.xlsx');
+
+  await workbook.xlsx.write(res);
+  res.end();
+});
+
+export const getGstPurchaseReport = expressAsyncHandler(async (req, res) => {
+  const { range, startDate: startRaw, endDate: endRaw } = req.query;
+
+  const now = new Date();
+  let startDate;
+  let endDate;
+
+  if (range === 'thisMonth') {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  } else if (range === 'previousMonth') {
+    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  } else if (range === 'year') {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  } else if (startRaw && endRaw) {
+    // ✅ Parse "YYYY-MM-DD" manually — avoids UTC midnight shift in IST (+5:30)
+    const [sy, sm, sd] = startRaw.split('-').map(Number);
+    const [ey, em, ed] = endRaw.split('-').map(Number);
+
+    startDate = new Date(sy, sm - 1, sd, 0, 0, 0, 0); // local midnight
+    endDate = new Date(ey, em - 1, ed, 23, 59, 59, 999); // local end of day
+  }
+
+  if (!startDate || !endDate) {
+    return new ApiResponse(400, null, 'Please provide startDate & endDate or a valid range').send(res);
+  }
+
+  console.log('GST Purchase Report →', {
+    startDate,
+    endDate,
+    range: range || 'custom',
+  });
 
   const report = await invoiceService.getGstPurchaseReport({
-    ...filters,
+    startDate,
+    endDate,
     store: req.user.store,
   });
 
@@ -229,57 +264,66 @@ export const getGstPurchaseReport = expressAsyncHandler(async (req, res) => {
 });
 
 export const exportGstPurchaseReportExcel = expressAsyncHandler(async (req, res) => {
-  const filters = pick(req.query, ["startDate", "endDate"]);
-  const { range } = req.query;
+  const { range, startDate: startRaw, endDate: endRaw } = req.query;
 
   const now = new Date();
   let startDate;
   let endDate;
 
-  if (range === "thisMonth") {
+  if (range === 'thisMonth') {
     startDate = new Date(now.getFullYear(), now.getMonth(), 1);
     endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-  }
-
-  if (range === "previousMonth") {
+  } else if (range === 'previousMonth') {
     startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-  }
-
-  if (range === "year") {
+  } else if (range === 'year') {
     startDate = new Date(now.getFullYear(), 0, 1);
     endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  } else if (startRaw && endRaw) {
+    // ✅ Parse "YYYY-MM-DD" string into proper Date objects
+    // Split manually to avoid UTC midnight shift (new Date("2025-04-01") = UTC = wrong in IST)
+    const [sy, sm, sd] = startRaw.split('-').map(Number);
+    const [ey, em, ed] = endRaw.split('-').map(Number);
+
+    startDate = new Date(sy, sm - 1, sd, 0, 0, 0); // local midnight start
+    endDate = new Date(ey, em - 1, ed, 23, 59, 59, 999); // local end of day
   }
 
-  if (startDate && endDate) {
-    filters.startDate = startDate;
-    filters.endDate = endDate;
+  if (!startDate || !endDate) {
+    return new ApiResponse(400, null, 'Please provide startDate & endDate or a valid range').send(res);
   }
+
+  console.log('GST Purchase Report →', {
+    startDate,
+    endDate,
+    range: range || 'custom',
+  });
 
   const report = await invoiceService.getGstPurchaseReport({
-    ...filters,
+    startDate,
+    endDate,
     store: req.user.store,
   });
 
   const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet("GST Purchase Report");
+  const worksheet = workbook.addWorksheet('GST Purchase Report');
 
   // Header columns
   worksheet.columns = [
-    { header: "Invoice Date", key: "invoiceDate", width: 15 },
-    { header: "Invoice No", key: "invoiceNumber", width: 15 },
-    { header: "Supplier Name", key: "supplierName", width: 25 },
-    { header: "Supplier GST", key: "supplierGst", width: 20 },
-    { header: "Item", key: "item", width: 25 },
-    { header: "HSN", key: "hsn", width: 15 },
-    { header: "Unit", key: "unit", width: 10 },
-    { header: "Quantity", key: "quantity", width: 10 },
-    { header: "Taxable Value", key: "taxableValue", width: 15 },
-    { header: "CGST %", key: "cgstPercent", width: 10 },
-    { header: "CGST Amount", key: "cgstAmount", width: 15 },
-    { header: "SGST %", key: "sgstPercent", width: 10 },
-    { header: "SGST Amount", key: "sgstAmount", width: 15 },
-    { header: "Invoice Amount", key: "invoiceAmount", width: 15 },
+    { header: 'Invoice Date', key: 'invoiceDate', width: 15 },
+    { header: 'Invoice No', key: 'invoiceNumber', width: 15 },
+    { header: 'Supplier Name', key: 'supplierName', width: 25 },
+    { header: 'Supplier GST', key: 'supplierGst', width: 20 },
+    { header: 'Item', key: 'item', width: 25 },
+    { header: 'HSN', key: 'hsn', width: 15 },
+    { header: 'Unit', key: 'unit', width: 10 },
+    { header: 'Quantity', key: 'quantity', width: 10 },
+    { header: 'Taxable Value', key: 'taxableValue', width: 15 },
+    { header: 'CGST %', key: 'cgstPercent', width: 10 },
+    { header: 'CGST Amount', key: 'cgstAmount', width: 15 },
+    { header: 'SGST %', key: 'sgstPercent', width: 10 },
+    { header: 'SGST Amount', key: 'sgstAmount', width: 15 },
+    { header: 'Invoice Amount', key: 'invoiceAmount', width: 15 },
   ];
 
   // Style header
@@ -290,15 +334,9 @@ export const exportGstPurchaseReportExcel = expressAsyncHandler(async (req, res)
     worksheet.addRow(item);
   });
 
-  res.setHeader(
-    "Content-Type",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  );
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 
-  res.setHeader(
-    "Content-Disposition",
-    "attachment; filename=gst-purchase-report.xlsx"
-  );
+  res.setHeader('Content-Disposition', 'attachment; filename=gst-purchase-report.xlsx');
 
   await workbook.xlsx.write(res);
   res.end();

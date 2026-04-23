@@ -9,7 +9,7 @@ import {
   verifySuperAdminLogin,
 } from '../services/auth.service.js';
 import { verifyRegistrationToken, generateAuthTokens } from '../services/token.service.js';
-import { createSuperAdmin, getUserById } from '../services/user.services.js';
+import { createSuperAdmin,createStaff,getStoreStaffs, getUserById } from '../services/user.services.js';
 import { createOrRenewFreePlan } from '../services/subscription.services.js';
 
 export const createSuperAdminUser = asyncHandler(async (req, res) => {
@@ -32,6 +32,44 @@ export const createSuperAdminUser = asyncHandler(async (req, res) => {
   } catch (error) {
     throw new ApiError(400, error.message || 'Failed to create Super Admin');
   }
+});
+
+export const registerStaff = asyncHandler(async (req, res) => {
+
+  const ownerId = req.user.id;
+
+  const { name, phone, email } = req.body;
+
+  if (!name || !phone) {
+    throw new ApiError(400, "Name and phone are required");
+  }
+
+  const staff = await createStaff(ownerId, {
+    name,
+    phone,
+    email
+  });
+
+  return new ApiResponse(
+    201,
+    staff,
+    "Staff registered successfully"
+  ).send(res);
+
+});
+
+export const getStaffList = asyncHandler(async (req, res) => {
+
+  const ownerId = req.user.id;
+
+  const staffs = await getStoreStaffs(ownerId);
+
+  return new ApiResponse(
+    200,
+    staffs,
+    "Staff list fetched successfully"
+  ).send(res);
+
 });
 
 export const sendAuthOtp = asyncHandler(async (req, res) => {

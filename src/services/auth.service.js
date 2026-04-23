@@ -203,6 +203,8 @@ export const registerUserWithStore = async (storeData, userData, files) => {
   }
 };
 
+
+
 /**
  * Logout
  * @param {string} refreshToken

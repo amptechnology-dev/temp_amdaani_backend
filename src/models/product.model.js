@@ -16,10 +16,12 @@ const productSchema = new mongoose.Schema(
     sellingPrice: Number,
 
     isTaxInclusive: { type: Boolean, default: false },
+    isPurchaseTaxInclusive: { type: Boolean, default: false },
     discountPrice: Number,
     purchaseDiscount: Number,
     gstRate: Number,
     purchaseGstRate: Number,
+    mrp: Number,
     weight: Number,
     currentStock: {
       type: Number,

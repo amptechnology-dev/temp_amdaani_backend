@@ -49,7 +49,11 @@ import testimonialRoutes from './testimonial.route.js';
 router.use('/testimonial', testimonialRoutes);
 import herobuttonRoutes from './herobutton.routes.js';
 router.use('/herobutton', herobuttonRoutes);
+import deviceRoutes from './device.routes.js';
+router.use('/device', deviceRoutes);
 import referralSettingsRoutes from './referralSettings.routes.js';
+import notificationSettingRoutes from './notificationSetting.routes.js';
+router.use('/notification-settings', notificationSettingRoutes);
 router.use('/referral-settings', referralSettingsRoutes);
 
 export default router;

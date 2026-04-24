@@ -686,6 +686,7 @@ export const getGstPurchaseReport = async (filters = {}) => {
   const { store, startDate, endDate } = filters;
 
   const matchStage = {};
+
   if (store) {
     matchStage.store = store;
   }
@@ -700,44 +701,46 @@ export const getGstPurchaseReport = async (filters = {}) => {
   const result = await Purchase.aggregate([
     { $match: matchStage },
 
-    { $unwind: '$items' },
+    { $unwind: "$items" },
 
     {
       $project: {
-        purchaseDate: '$date',
-        billNumber: '$invoiceNumber',
+        invoiceDate: "$date",
+        invoiceNumber: "$invoiceNumber",
 
-        vendorName: {
-          $ifNull: ['$vendorName', 'Unknown Vendor'],
+        supplierName: {
+          $ifNull: ["$vendorName", "Unknown Vendor"],
         },
 
-        vendorGst: {
-          $ifNull: ['$vendorGstNumber', '-'],
+        supplierGst: {
+          $ifNull: ["$vendorGstNumber", "-"],
         },
 
-        item: '$items.name',
-        hsn: '$items.hsn',
-        unit: '$items.unit',
+        item: "$items.name",
 
-        quantity: '$items.quantity',
+        hsn: {
+          $ifNull: ["$items.hsn", "-"],
+        },
 
-        taxableValue: '$items.total',
+        unit: "$items.unit",
+
+        quantity: "$items.quantity",
+
+        taxableValue: "$items.total",
 
         cgstPercent: {
-          $divide: ['$items.gstRate', 2],
+          $divide: ["$items.gstRate", 2],
         },
 
         sgstPercent: {
-          $divide: ['$items.gstRate', 2],
+          $divide: ["$items.gstRate", 2],
         },
 
         cgstAmount: {
           $round: [
             {
               $divide: [
-                {
-                  $multiply: ['$items.total', '$items.gstRate'],
-                },
+                { $multiply: ["$items.total", "$items.gstRate"] },
                 200,
               ],
             },
@@ -749,9 +752,7 @@ export const getGstPurchaseReport = async (filters = {}) => {
           $round: [
             {
               $divide: [
-                {
-                  $multiply: ['$items.total', '$items.gstRate'],
-                },
+                { $multiply: ["$items.total", "$items.gstRate"] },
                 200,
               ],
             },
@@ -759,11 +760,11 @@ export const getGstPurchaseReport = async (filters = {}) => {
           ],
         },
 
-        billAmount: '$grandTotal',
+        invoiceAmount: "$grandTotal",
       },
     },
 
-    { $sort: { purchaseDate: 1, billNumber: 1 } },
+    { $sort: { invoiceDate: 1, invoiceNumber: 1 } },
   ]);
 
   return result;

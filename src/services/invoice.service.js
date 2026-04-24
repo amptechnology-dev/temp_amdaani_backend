@@ -16,7 +16,6 @@ import { json } from 'express';
 export const createInvoice = async (data) => {
   const { items = [] } = data;
 
-  console.log('Creating invoice with items:', JSON.stringify(items));
   if (!items.length) {
     throw new ApiError(400, 'Invalid invoice items!', {
       source: 'body',
@@ -835,77 +834,72 @@ export const getProfitLossReport = async (filters = {}) => {
 };
 
 export const getItemStockReport = async (filters = {}) => {
-  const { store, itemName, asOnDate } = filters;
+  const { store, itemName, asOnDate, startDate, endDate } = filters;
 
-  const matchStage = {
+  // Build date filter: asOnDate takes priority (point-in-time snapshot),
+  // otherwise use the startDate–endDate range
+  const dateFilter = asOnDate ? { $lte: asOnDate } : { $gte: startDate, $lte: endDate };
+
+  const baseMatch = {
     store,
+    date: dateFilter,
   };
 
-  if (asOnDate) {
-    matchStage.date = { $lte: asOnDate };
-  }
+  const itemNameFilter = itemName ? [{ $match: { 'items.name': { $regex: itemName, $options: 'i' } } }] : [];
 
-  const pipeline = [
-    { $match: matchStage },
-
+  // --- Purchased quantities (stock IN) ---
+  const purchasePipeline = [
+    { $match: baseMatch },
     { $unwind: '$items' },
-
-    ...(itemName
-      ? [
-          {
-            $match: {
-              'items.name': {
-                $regex: itemName,
-                $options: 'i',
-              },
-            },
-          },
-        ]
-      : []),
-
+    ...itemNameFilter,
     {
       $group: {
         _id: '$items.product',
-
         itemDescription: { $first: '$items.name' },
-
-        quantity: {
-          $sum: '$items.quantity',
-        },
-
-        avgRate: {
-          $avg: '$items.rate',
-        },
+        totalQty: { $sum: '$items.quantity' },
+        // Weighted sum for accurate average rate
+        totalValue: { $sum: { $multiply: ['$items.quantity', '$items.rate'] } },
       },
     },
-
-    {
-      $project: {
-        _id: 0,
-
-        itemDescription: 1,
-
-        quantity: 1,
-
-        itemValue: {
-          $round: [
-            {
-              $multiply: ['$quantity', '$avgRate'],
-            },
-            2,
-          ],
-        },
-      },
-    },
-
-    { $sort: { itemDescription: 1 } },
   ];
 
-  const result = await Purchase.aggregate(pipeline);
+  // --- Sold quantities (stock OUT) ---
+  // Negate sold quantities so we can subtract from purchased
+  const salePipeline = [
+    { $match: baseMatch },
+    { $unwind: '$items' },
+    ...itemNameFilter,
+    {
+      $group: {
+        _id: '$items.product',
+        totalQty: { $sum: '$items.quantity' },
+      },
+    },
+  ];
+
+  const [purchased, sold] = await Promise.all([Purchase.aggregate(purchasePipeline), Sale.aggregate(salePipeline)]);
+
+  // Index sold quantities by product id for O(1) lookup
+  const soldMap = Object.fromEntries(sold.map((s) => [s._id.toString(), s.totalQty]));
+
+  // Merge: net stock = purchased - sold
+  const result = purchased
+    .map((p) => {
+      const soldQty = soldMap[p._id.toString()] ?? 0;
+      const netQty = p.totalQty - soldQty;
+      const avgRate = p.totalQty > 0 ? p.totalValue / p.totalQty : 0;
+
+      return {
+        itemDescription: p.itemDescription,
+        quantity: netQty,
+        itemValue: Math.round(netQty * avgRate * 100) / 100,
+      };
+    })
+    .filter((item) => item.quantity !== 0) // omit fully sold-out items if desired
+    .sort((a, b) => a.itemDescription.localeCompare(b.itemDescription));
 
   return result;
 };
-
 export const addPaymentToInvoice = async (invoiceId, paymentData) => {
   const session = await mongoose.startSession();
   try {

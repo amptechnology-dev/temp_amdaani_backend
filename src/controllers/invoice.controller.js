@@ -6,6 +6,7 @@ import { updateUsage } from '../services/usage.service.js';
 import * as transactionService from '../services/transaction.service.js';
 import { deleteTransaction, cancelAllTransactionsForInvoice } from '../services/transaction.service.js';
 import ExcelJS from 'exceljs';
+import * as purchaseService from '../services/purchase.service.js';
 
 export const createInvoice = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
@@ -383,12 +384,54 @@ export const getProfitLossReport = expressAsyncHandler(async (req, res) => {
 });
 
 export const getItemStockReport = expressAsyncHandler(async (req, res) => {
-  const { itemName, asOnDate } = req.query;
+  const { range, startDate: startRaw, endDate: endRaw, itemName, asOnDate: asOnDateRaw } = req.query;
 
-  const report = await purchaseService.getItemStockReport({
+  const now = new Date();
+  let startDate;
+  let endDate;
+
+  if (range === 'thisMonth') {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  } else if (range === 'previousMonth') {
+    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  } else if (range === 'year') {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+  } else if (startRaw && endRaw) {
+    const [sy, sm, sd] = startRaw.split('-').map(Number);
+    const [ey, em, ed] = endRaw.split('-').map(Number);
+    startDate = new Date(sy, sm - 1, sd, 0, 0, 0);
+    endDate = new Date(ey, em - 1, ed, 23, 59, 59, 999);
+  }
+
+  // Parse asOnDate if provided (used for point-in-time stock snapshot)
+  let asOnDate;
+  if (asOnDateRaw) {
+    const [y, m, d] = asOnDateRaw.split('-').map(Number);
+    asOnDate = new Date(y, m - 1, d, 23, 59, 59, 999);
+  }
+
+  // Either a date range OR asOnDate must be provided
+  if (!asOnDate && (!startDate || !endDate)) {
+    return new ApiResponse(400, null, 'Please provide startDate & endDate, a valid range, or asOnDate').send(res);
+  }
+
+  console.log('Item Stock Report →', {
+    startDate,
+    endDate,
+    asOnDate,
+    itemName,
+    range: range || 'custom',
+  });
+
+  const report = await invoiceService.getItemStockReport({
     store: req.user.store,
     itemName,
     asOnDate,
+    startDate,
+    endDate,
   });
 
   return new ApiResponse(200, report, 'Item stock report fetched successfully').send(res);

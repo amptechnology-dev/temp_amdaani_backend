@@ -106,6 +106,15 @@ export const createPurchase = async (data) => {
   }
 };
 
+
+const getItemStockReport = async () => {
+    try {
+      
+    } catch (error) {
+      
+    }
+}
+
 export const updatePurchase = async (purchaseId, data) => {
   if (data.items && !data.items.length) {
     throw new ApiError(400, 'Invalid purchase items!', {

@@ -43,48 +43,48 @@ const invoiceSchema = new mongoose.Schema(
     remarks: String,
     status: { type: String, enum: ['active', 'cancelled'], default: 'active' },
     edited: { type: Boolean, default: false },
-    name: { type: String,  trim: true },
-        type: { type: String },
-        tagline: String,
-        ownershipType: String,
-        gstNumber: { type: String, trim: true, uppercase: true },
-        panNumber: { type: String, trim: true, uppercase: true },
-        registrationNo: { type: String, trim: true },
-        contactNo: { type: String, trim: true },
-        email: { type: String, trim: true, lowercase: true },
-        address: {
-          street: String,
-          city: String,
-          state: String,
-          country: { type: String, default: 'IN' },
-          postalCode: String,
-        },
-        bankDetails: {
-          bankName: String,
-          accountNo: String,
-          holderName: String,
-          ifsc: String,
-          branch: String,
-          upiId: String,
-        },
-        settings: {
-          invoicePrefix: { type: String, default: 'INV' },
-          invoiceStartNumber: { type: Number, default: 1 },
-          taxRates: [{ name: String, rate: Number }],
-          invoiceTerms: String,
-          stockManagement: { type: Boolean, default: false },
-          purchaseOrderManagement: { type: Boolean, default: false },
-        },
-        logoUrl: String,
-        signatureUrl: String,
-        isActive: { type: Boolean, default: true },
-      
+    name: { type: String, trim: true },
+    type: { type: String },
+    tagline: String,
+    ownershipType: String,
+    gstNumber: { type: String, trim: true, uppercase: true },
+    panNumber: { type: String, trim: true, uppercase: true },
+    registrationNo: { type: String, trim: true },
+    contactNo: { type: String, trim: true },
+    email: { type: String, trim: true, lowercase: true },
+    address: {
+      street: String,
+      city: String,
+      state: String,
+      country: { type: String, default: 'IN' },
+      postalCode: String,
+    },
+    bankDetails: {
+      bankName: String,
+      accountNo: String,
+      holderName: String,
+      ifsc: String,
+      branch: String,
+      upiId: String,
+    },
+    settings: {
+      invoicePrefix: { type: String, default: 'INV' },
+      invoiceStartNumber: { type: Number, default: 1 },
+      taxRates: [{ name: String, rate: Number }],
+      invoiceTerms: String,
+      stockManagement: { type: Boolean, default: false },
+      purchaseOrderManagement: { type: Boolean, default: false },
+    },
+    logoUrl: String,
+    signatureUrl: String,
+    isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
 );
 
 invoiceSchema.index({ store: 1, invoiceNumber: 1 }, { unique: true });
 invoiceSchema.index({ store: 1, createdAt: -1 });
+invoiceSchema.index({ store: 1, invoiceDate: -1 });
 invoiceSchema.plugin(mongooseAggregatePaginate);
 
 export const Invoice = mongoose.model('Invoice', invoiceSchema);

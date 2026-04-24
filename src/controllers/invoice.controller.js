@@ -9,6 +9,7 @@ import ExcelJS from 'exceljs';
 
 export const createInvoice = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
+  console.log('Request to create invoice with data:', JSON.stringify(req.body));
   const invoice = await invoiceService.createInvoice(req.body);
   if (req.subscription) {
     await updateUsage(req.subscription._id, { $inc: { invoicesUsed: 1 } });
@@ -165,12 +166,11 @@ export const exportGstSalesReportExcel = expressAsyncHandler(async (req, res) =>
     startDate = new Date(now.getFullYear(), 0, 1);
     endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
   } else if (startRaw && endRaw) {
-    // ✅ Parse "YYYY-MM-DD" string into proper Date objects
-    // Split manually to avoid UTC midnight shift (new Date("2025-04-01") = UTC = wrong in IST)
+    // ✅ Parse "YYYY-MM-DD" manually — avoids UTC midnight shift in IST (+5:30)
     const [sy, sm, sd] = startRaw.split('-').map(Number);
     const [ey, em, ed] = endRaw.split('-').map(Number);
 
-    startDate = new Date(sy, sm - 1, sd, 0, 0, 0); // local midnight start
+    startDate = new Date(sy, sm - 1, sd, 0, 0, 0, 0); // local midnight
     endDate = new Date(ey, em - 1, ed, 23, 59, 59, 999); // local end of day
   }
 
@@ -178,7 +178,11 @@ export const exportGstSalesReportExcel = expressAsyncHandler(async (req, res) =>
     return new ApiResponse(400, null, 'Please provide startDate & endDate or a valid range').send(res);
   }
 
-  console.log('GST Sales Report →', { startDate, endDate, range: range || 'custom' });
+  console.log('GST Purchase Report →', {
+    startDate,
+    endDate,
+    range: range || 'custom',
+  });
 
   const report = await invoiceService.getGstSalesReport({
     startDate,

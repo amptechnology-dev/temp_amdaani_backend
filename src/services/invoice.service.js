@@ -10,10 +10,13 @@ import { Product } from '../models/product.model.js';
 import { Purchase } from '../models/purchase.model.js';
 
 import { Store } from '../models/store.model.js';
+import { json } from 'express';
 
 //NOTE: Trusting frontend for valid data
 export const createInvoice = async (data) => {
   const { items = [] } = data;
+
+  console.log('Creating invoice with items:', JSON.stringify(items));
   if (!items.length) {
     throw new ApiError(400, 'Invalid invoice items!', {
       source: 'body',
@@ -39,8 +42,14 @@ export const createInvoice = async (data) => {
     const invoiceItems = [];
     for (const item of items) {
       const productId = await findOrCreateProduct(data.store, item, session);
-      invoiceItems.push({ product: productId, ...item });
+      invoiceItems.push({
+        ...item,
+        // ✅ Only attach product ref if one exists — don't force it
+        ...(productId ? { product: productId } : {}),
+      });
     }
+
+    console.log('Invoice Items:', JSON.stringify(invoiceItems));
 
     // Handle customer
     const customerId = await findOrCreateCustomer(
@@ -579,12 +588,10 @@ export const getProductWiseInvoices = async (filters = {}) => {
 export const getGstSalesReport = async (filters = {}) => {
   const { store, startDate, endDate } = filters;
 
-  const matchStage = {
-    gstTotal: { $gt: 0 },
-  };
+  const matchStage = {};
 
   if (store) {
-    matchStage.store = store;
+    matchStage.store = new mongoose.Types.ObjectId(store);
   }
 
   if (startDate && endDate) {
@@ -595,33 +602,25 @@ export const getGstSalesReport = async (filters = {}) => {
   }
 
   const result = await Invoice.aggregate([
-    { $unwind: '$items' },
+    { $match: matchStage },
 
     { $sort: { invoiceDate: 1, invoiceNumber: 1 } },
-    {
-      $match: {
-        'items.gstRate': { $gt: 0 },
-      },
-    },
+
+    { $unwind: '$items' },
+
+    { $match: { 'items.gstRate': { $gt: 0 } } },
+
     {
       $project: {
         invoiceDate: 1,
         invoiceNumber: 1,
-
-        customerName: {
-          $ifNull: ['$customerName', 'Cash Customer'],
-        },
-
-        customerGst: {
-          $ifNull: ['$customerGstNumber', '-'],
-        },
-
+        customerName: { $ifNull: ['$customerName', 'Cash Customer'] },
+        customerGst: { $ifNull: ['$customerGstNumber', '-'] },
         item: '$items.name',
         hsn: '$items.hsn',
         unit: '$items.unit',
         quantity: '$items.quantity',
 
-        // Back-calculate taxable value (excluding GST) from GST-inclusive total
         taxableValue: {
           $round: [
             {
@@ -634,7 +633,6 @@ export const getGstSalesReport = async (filters = {}) => {
         cgstPercent: { $divide: ['$items.gstRate', 2] },
         sgstPercent: { $divide: ['$items.gstRate', 2] },
 
-        // CGST = gstAmount / 2, where gstAmount = total - taxableValue
         cgstAmount: {
           $round: [
             {
@@ -654,7 +652,6 @@ export const getGstSalesReport = async (filters = {}) => {
           ],
         },
 
-        // SGST = same as CGST (half of total GST)
         sgstAmount: {
           $round: [
             {
@@ -681,7 +678,6 @@ export const getGstSalesReport = async (filters = {}) => {
 
   return result;
 };
-
 export const getGstPurchaseReport = async (filters = {}) => {
   const { store, startDate, endDate } = filters;
 

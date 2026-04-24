@@ -90,13 +90,16 @@ export const deleteProductById = async (id) => {
 };
 
 export const findOrCreateProduct = async (store, data, session = null) => {
+  // ✅ If product ID already provided, just use it — never update it
   if (data._id) return data._id;
 
+  // ✅ If product exists by name, return its ID — never update it
   const existingProduct = await Product.exists({ name: data.name, store }).session(session);
   if (existingProduct) return existingProduct._id;
 
-  const newProduct = await createProduct({ ...data, store }, session);
-  return newProduct._id;
+  // ✅ No product found — return null instead of creating one
+  // The invoice item already has all the data it needs (name, price, gstRate etc.)
+  return null;
 };
 
 export const getAllProductsWithSales = async (storeId, startDate, endDate) => {
@@ -276,21 +279,26 @@ export const updateStockAfterPurchase = async (purchase, session = null) => {
 };
 
 export const updateStockAfterSale = async (sale, session = null) => {
-  const { items = [], date } = sale;
+  const { items = [], store } = sale;
   if (!items.length) return;
 
+  // ✅ Skip stock update entirely if store has stock management disabled
+  const storeSettings = sale.settings || {};
+  if (!storeSettings.stockManagement) return;
+
   for (const item of items) {
+    // ✅ Skip items with no linked product (inline-only items)
+    if (!item.product) continue;
+
     await adjustProductStock(
       {
         productId: item.product,
-        date: date || new Date(),
+        date: sale.invoiceDate || new Date(),
         transactionType: StockTransactionType.SALE,
         quantity: -item.quantity,
-        rate: item.sellingPrice,
-        batchId: item.batch,
+        // ✅ Do NOT pass rate/salePrice/sellingPrice — prevents price update on Product table
         saleId: sale._id,
-        salePrice: item.sellingPrice,
-        // remarks: `Sale deducted for ${item.quantity} units`,
+        remarks: `Sale deducted for ${item.quantity} units`,
       },
       session
     );

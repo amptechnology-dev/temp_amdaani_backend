@@ -24,6 +24,8 @@ router.post('/refresh-tokens', validate(authSchema.refreshToken), authController
 router.get('/me', authenticate, authController.getProfile);
 router.post('/register-superadmin', authController.createSuperAdminUser);
 router.post('/verify-otp-superadmin', authController.superAdminAuth);
+router.post('/register-staff', authenticate, authController.registerStaff);
+router.get('/store-staffs', authenticate, authController.getStaffList);
 // router.post('/login', validate(authSchema.login), authController.login);
 // router.post('/forgot-password', validate(authSchema.forgotPassword), authController.forgotPassword);
 // router.post('/reset-password', validate(authSchema.resetPassword), authController.resetPassword);

@@ -1,6 +1,8 @@
 import { User } from '../models/user.model.js';
 import { Role } from '../models/role.model.js';
 import { roles } from '../config/roles.js';
+import { ApiResponse, ApiError } from '../utils/responseHandler.js';
+import { generateAmdaaniId } from "../utils/generateAmdaaniId.js";
 
 export const createSuperAdmin = async (data) => {
 
@@ -31,6 +33,66 @@ export const createSuperAdmin = async (data) => {
   await user.save();
 
   return user;
+};
+
+export const createStaff = async (ownerId, staffData) => {
+
+  const owner = await User.findById(ownerId);
+
+  if (!owner) {
+    throw new ApiError(404, "Owner not found");
+  }
+
+  const storeId = owner.store;
+
+  if (!storeId) {
+    throw new ApiError(400, "Owner does not belong to any store");
+  }
+
+  const existingUser = await User.findOne({ phone: staffData.phone });
+
+  if (existingUser) {
+    throw new ApiError(400, "User already exists with this phone number");
+  }
+
+  const staffRole = await Role.findOne({ name: roles.STAFF });
+
+  if (!staffRole) {
+    throw new ApiError(500, "Staff role not found");
+  }
+
+  const amdaaniId = await generateAmdaaniId();
+
+  const staff = await User.create({
+    ...staffData,
+    amdaaniId,
+    store: storeId,
+    role: staffRole._id,
+    isVerified: true
+  });
+
+  return staff;
+};
+
+export const getStoreStaffs = async (ownerId) => {
+  const owner = await User.findById(ownerId);
+  if (!owner) {
+    throw new ApiError(404, "Owner not found");
+  }
+  const storeId = owner.store;
+  if (!storeId) {
+    throw new ApiError(400, "Owner does not belong to any store");
+  }
+  const staffRole = await Role.findOne({ name: roles.STAFF });
+  if (!staffRole) {
+    throw new ApiError(500, "Staff role not found");
+  }
+  const staffs = await User.find({
+    store: storeId,
+    role: staffRole._id,
+    isActive: true
+  }).select("name phone email amdaaniId createdAt");
+  return staffs;
 };
 
 export const createUser = async (data, session = null) => {

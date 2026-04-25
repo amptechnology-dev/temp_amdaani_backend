@@ -12,6 +12,14 @@ export const createStore = {
     registrationNo: yup.string().trim(),
     contactNo: yup.string().trim(),
     email: yup.string().trim().lowercase().email(),
+
+    // 🔥 referral code used during signup
+    usedReferralCode: yup
+      .string()
+      .trim()
+      .uppercase()
+      .optional(),
+
     address: yup
       .object()
       .shape({
@@ -22,6 +30,7 @@ export const createStore = {
         postalCode: yup.string().required(),
       })
       .required(),
+
     bankDetails: yup.object().shape({
       bankName: yup.string(),
       accountNo: yup.string(),
@@ -30,6 +39,7 @@ export const createStore = {
       branch: yup.string(),
       upiId: yup.string(),
     }),
+
     settings: yup.object().shape({
       invoicePrefix: yup.string().default('INV'),
       invoiceStartNumber: yup.number().default(1),

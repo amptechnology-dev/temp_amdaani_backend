@@ -203,3 +203,17 @@ export const getStoreUsers = async (store) => {
 export const deleteStoreUser = async (userId, storeId) => {
   return User.findOneAndDelete({ _id: userId, store: storeId });
 };
+
+export const getUserByEmail = async (email) => {
+  return User.findOne({ email }).populate('store').populate('role');
+}
+
+export const updateUserPhone = async (userId, newPhone) => {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new Error("User not found");
+  }
+  user.phone = newPhone;
+  await user.save();
+  return user;
+};

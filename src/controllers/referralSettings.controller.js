@@ -27,6 +27,19 @@ export const getReferralSettings = asyncHandler(async (req, res) => {
   ).send(res);
 });
 
+export const getReferralSettingsById = asyncHandler(async (req, res) => {
+  const settings = await referralSettingsService.getReferralSettingsById(req.params.id);
+
+  if (!settings) {
+    throw new ApiError(404, "Referral settings not found");
+  }
+
+  return new ApiResponse(
+    200,
+    settings,
+    "Referral settings fetched successfully"
+  ).send(res);
+});
 
 export const updateReferralSettings = asyncHandler(async (req, res) => {
   const settings = await referralSettingsService.updateReferralSettings(req.body);

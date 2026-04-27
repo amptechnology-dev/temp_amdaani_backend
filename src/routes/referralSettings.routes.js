@@ -9,6 +9,8 @@ router.use(authorizeRoles("super-admin"));
 
 router.get("/", referralSettingsController.getReferralSettings);
 
+router.get("/:id", referralSettingsController.getReferralSettingsById);
+
 router.post("/", referralSettingsController.createReferralSettings);
 
 router.put("/", referralSettingsController.updateReferralSettings);

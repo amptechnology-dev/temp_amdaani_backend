@@ -179,6 +179,51 @@ export const getAllProductsWithSales = async (storeId, startDate, endDate) => {
   ]);
 };
 
+const adjustProductStockForSale = async (data, session = null) => {
+  const {
+    productId,
+    date = new Date(),
+    transactionType = StockTransactionType.SALE,
+    quantity, // should be negative for OUT
+    rate,
+    saleId = null,
+    remarks = '',
+  } = data;
+
+  const product = await Product.findById(productId).session(session);
+  if (!product) return;
+
+  // ✅ Safe numeric guards
+  const safeRate = Number(rate ?? 0);
+  const safeQuantity = Number(quantity ?? 0);
+  const safeTotalAmount = Number((safeRate * Math.abs(safeQuantity)).toFixed(2));
+
+  if (isNaN(safeQuantity) || isNaN(safeRate) || isNaN(safeTotalAmount)) {
+    console.error('❌ Invalid stock values for sale item:', data);
+    throw new Error(`Invalid numeric values in stock transaction for product ${productId}`);
+  }
+
+  // ✅ Update stock level only — no price fields touched
+  product.currentStock = product.currentStock + safeQuantity;
+  await product.save({ session });
+
+  // ✅ Record stock transaction with rate + totalAmount
+  const stockTransaction = new StockTransaction({
+    product: productId,
+    store: product.store,
+    date,
+    transactionType,
+    quantity: Math.abs(safeQuantity),
+    direction: safeQuantity >= 0 ? 'IN' : 'OUT',
+    rate: safeRate,
+    totalAmount: safeTotalAmount,
+    saleId,
+    remarks,
+  });
+
+  return stockTransaction.save({ session });
+};
+
 export const adjustProductStock = async (data, session = null) => {
   const {
     productId,
@@ -278,37 +323,59 @@ export const updateStockAfterPurchase = async (purchase, session = null) => {
   }
 };
 
+// export const updateStockAfterSale = async (sale, session = null) => {
+//   const { items = [], store } = sale;
+//   if (!items.length) return;
+
+//   // ✅ Skip stock update entirely if store has stock management disabled
+//   const storeSettings = sale.settings || {};
+//   if (!storeSettings.stockManagement) return;
+
+//   for (const item of items) {
+//     // ✅ Skip items with no linked product (inline-only items)
+//     if (!item.product) continue;
+
+//     await adjustProductStock(
+//       {
+//         productId: item.product,
+//         date: sale.invoiceDate || new Date(),
+//         transactionType: StockTransactionType.SALE,
+//         quantity: -item.quantity,
+//         // ✅ Do NOT pass rate/salePrice/sellingPrice — prevents price update on Product table
+//         saleId: sale._id,
+//         remarks: `Sale deducted for ${item.quantity} units`,
+//       },
+//       session
+//     );
+//   }
+// };
+
 export const updateStockAfterSale = async (sale, session = null) => {
   const { items = [], store } = sale;
   if (!items.length) return;
 
-  // ✅ Skip stock update entirely if store has stock management disabled
   const storeSettings = sale.settings || {};
   if (!storeSettings.stockManagement) return;
 
   for (const item of items) {
-    // ✅ Skip items with no linked product (inline-only items)
     if (!item.product) continue;
 
-    await adjustProductStock(
+    const quantity = Number(item.quantity ?? item.qty ?? 0);
+    const rate = Number(item.sellingPrice ?? item.rate ?? item.price ?? 0);
+
+    if (!quantity) continue; // skip zero-qty items
+
+    await adjustProductStockForSale(
       {
         productId: item.product,
         date: sale.invoiceDate || new Date(),
         transactionType: StockTransactionType.SALE,
-        quantity: -item.quantity,
-        // ✅ Do NOT pass rate/salePrice/sellingPrice — prevents price update on Product table
+        quantity: -quantity, // ✅ negative = OUT
+        rate, // ✅ rate now passed
         saleId: sale._id,
-        remarks: `Sale deducted for ${item.quantity} units`,
+        remarks: `Sale deducted for ${quantity} units`,
       },
       session
     );
   }
-};
-
-export const reverseStockAfterSale = async (invoice, session) => {
-  const stockManagement = invoice.settings?.stockManagement;
-  if (!stockManagement) return;
-
-  // Delete all OUT transactions linked to this invoice
-  await StockTransaction.deleteMany({ saleId: invoice._id, direction: 'OUT' }, { session });
 };

@@ -95,6 +95,88 @@ export const getStoreStaffs = async (ownerId) => {
   return staffs;
 };
 
+export const getStaffById = async (ownerId, staffId) => {
+
+  const owner = await User.findById(ownerId);
+
+  if (!owner) {
+    throw new ApiError(404, "Owner not found");
+  }
+
+  const storeId = owner.store;
+
+  if (!storeId) {
+    throw new ApiError(400, "Owner does not belong to any store");
+  }
+
+  const staffRole = await Role.findOne({ name: roles.STAFF });
+
+  if (!staffRole) {
+    throw new ApiError(500, "Staff role not found");
+  }
+
+  const staff = await User.findOne({
+    _id: staffId,
+    store: storeId,
+    role: staffRole._id
+  }).select("name phone email amdaaniId isActive createdAt");
+
+  if (!staff) {
+    throw new ApiError(404, "Staff not found");
+  }
+
+  return staff;
+};
+
+
+export const updateStaff = async (ownerId, staffId, updateData) => {
+
+  const owner = await User.findById(ownerId);
+
+  if (!owner) {
+    throw new ApiError(404, "Owner not found");
+  }
+
+  const storeId = owner.store;
+
+  if (!storeId) {
+    throw new ApiError(400, "Owner does not belong to any store");
+  }
+
+  const staffRole = await Role.findOne({ name: roles.STAFF });
+
+  if (!staffRole) {
+    throw new ApiError(500, "Staff role not found");
+  }
+
+  const staff = await User.findOne({
+    _id: staffId,
+    store: storeId,
+    role: staffRole._id
+  });
+
+  if (!staff) {
+    throw new ApiError(404, "Staff not found");
+  }
+
+  if (updateData.phone && updateData.phone !== staff.phone) {
+
+    const existingUser = await User.findOne({ phone: updateData.phone });
+
+    if (existingUser) {
+      throw new ApiError(400, "Phone number already in use");
+    }
+
+  }
+
+  Object.assign(staff, updateData);
+
+  await staff.save();
+
+  return staff;
+};
+
+
 export const createUser = async (data, session = null) => {
   const user = new User(data);
   await user.save(session ? { session } : undefined);

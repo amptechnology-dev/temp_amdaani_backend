@@ -9,7 +9,7 @@ import {
   verifySuperAdminLogin,
 } from '../services/auth.service.js';
 import { verifyRegistrationToken, generateAuthTokens } from '../services/token.service.js';
-import { createSuperAdmin,createStaff,getStoreStaffs, getUserById } from '../services/user.services.js';
+import { createSuperAdmin,createStaff,getStoreStaffs, getUserById,getStaffById,updateStaff } from '../services/user.services.js';
 import { createOrRenewFreePlan } from '../services/subscription.services.js';
 
 export const createSuperAdminUser = asyncHandler(async (req, res) => {
@@ -68,6 +68,44 @@ export const getStaffList = asyncHandler(async (req, res) => {
     200,
     staffs,
     "Staff list fetched successfully"
+  ).send(res);
+
+});
+
+export const getSingleStaff = asyncHandler(async (req, res) => {
+
+  const ownerId = req.user.id;
+  const { staffId } = req.params;
+
+  const staff = await getStaffById(ownerId, staffId);
+
+  return new ApiResponse(
+    200,
+    staff,
+    "Staff details fetched successfully"
+  ).send(res);
+
+});
+
+
+export const updateStaffDetails = asyncHandler(async (req, res) => {
+
+  const ownerId = req.user.id;
+  const { staffId } = req.params;
+
+  const { name, phone, email, isActive } = req.body;
+
+  const staff = await updateStaff(ownerId, staffId, {
+    name,
+    phone,
+    email,
+    isActive
+  });
+
+  return new ApiResponse(
+    200,
+    staff,
+    "Staff updated successfully"
   ).send(res);
 
 });

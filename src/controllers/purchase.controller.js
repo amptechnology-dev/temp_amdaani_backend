@@ -4,7 +4,11 @@ import { ApiResponse, ApiError } from '../utils/responseHandler.js';
 import pick from '../utils/pick.js';
 // import { updateUsage } from '../services/usage.service.js';
 // import * as transactionService from '../services/transaction.service.js';
-import { deleteVendorPayment, getVendorPaymentsByStore } from '../services/vendorPayment.service.js';
+import {
+  deleteVendorPayment,
+  getVendorPaymentsByStore,
+  updateVendorPaymentStatus,
+} from '../services/vendorPayment.service.js';
 
 export const createPurchase = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;

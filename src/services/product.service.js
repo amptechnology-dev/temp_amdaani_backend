@@ -304,3 +304,11 @@ export const updateStockAfterSale = async (sale, session = null) => {
     );
   }
 };
+
+export const reverseStockAfterSale = async (invoice, session) => {
+  const stockManagement = invoice.settings?.stockManagement;
+  if (!stockManagement) return;
+
+  // Delete all OUT transactions linked to this invoice
+  await StockTransaction.deleteMany({ saleId: invoice._id, direction: 'OUT' }, { session });
+};

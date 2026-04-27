@@ -386,6 +386,8 @@ export const getProfitLossReport = expressAsyncHandler(async (req, res) => {
 export const getItemStockReport = expressAsyncHandler(async (req, res) => {
   const { range, startDate: startRaw, endDate: endRaw, itemName, asOnDate: asOnDateRaw } = req.query;
 
+  console.log('Received request for item stock report with query:', JSON.stringify(req.query));
+
   const now = new Date();
   let startDate;
   let endDate;
@@ -418,12 +420,14 @@ export const getItemStockReport = expressAsyncHandler(async (req, res) => {
     return new ApiResponse(400, null, 'Please provide startDate & endDate, a valid range, or asOnDate').send(res);
   }
 
-  console.log('Item Stock Report →', {
+  console.log('--->', JSON.stringify({ startDate, endDate, asOnDate }));
+
+  console.log('Generating item stock report with filters:', {
+    store: req.user.store,
+    itemName,
+    asOnDate,
     startDate,
     endDate,
-    asOnDate,
-    itemName,
-    range: range || 'custom',
   });
 
   const report = await invoiceService.getItemStockReport({

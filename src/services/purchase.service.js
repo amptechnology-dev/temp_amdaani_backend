@@ -3,7 +3,7 @@ import { Purchase } from '../models/purchase.model.js';
 import { findOrCreateVendor } from '../services/vendor.service.js';
 import { handleDuplicateKeyError } from '../utils/dbErrorHandler.js';
 import { updateStockAfterPurchase } from '../services/product.service.js';
-import { createVendorPayment, getVendorPaymentsByPurchase } from './vendorPayment.service.js';
+import { createVendorPayment, getVendorPaymentsByPurchase, updateVendorPayment } from './vendorPayment.service.js';
 import { ApiError } from '../utils/responseHandler.js';
 import { StockTransaction } from '../models/stockTransaction.model.js';
 import { adjustProductStock } from '../services/product.service.js';
@@ -106,14 +106,10 @@ export const createPurchase = async (data) => {
   }
 };
 
-
 const getItemStockReport = async () => {
-    try {
-      
-    } catch (error) {
-      
-    }
-}
+  try {
+  } catch (error) {}
+};
 
 export const updatePurchase = async (purchaseId, data) => {
   if (data.items && !data.items.length) {

@@ -38,3 +38,28 @@ export const deleteVendorPayment = async (paymentId) => {
 export const cancelAllPaymentsForPurchase = async (purchaseId) => {
   return await VendorPayment.updateMany({ purchase: purchaseId }, { $set: { status: 'cancelled' } });
 };
+
+export const updateVendorPayment = async (data, session = null) => {
+  const { store, purchase, amount, paymentMethod, note } = data;
+
+  // Cancel all existing payments for this purchase
+  await VendorPayment.updateMany(
+    { purchase, status: { $ne: 'cancelled' } },
+    { $set: { status: 'cancelled' } },
+    session ? { session } : undefined
+  );
+
+  // Only create new payment if amount > 0
+  if (amount > 0) {
+    const payment = new VendorPayment({
+      store,
+      purchase,
+      amount,
+      paymentMethod,
+      note: note || '',
+      status: 'completed',
+      paymentDate: new Date(),
+    });
+    await payment.save(session ? { session } : undefined);
+  }
+};

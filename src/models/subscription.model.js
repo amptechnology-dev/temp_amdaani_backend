@@ -71,6 +71,7 @@ const PaymentSchema = new mongoose.Schema(
     method: String,
     transactionId: String,
     status: { type: String, enum: ['success', 'pending', 'failed'], default: 'pending' },
+    walletUsed: { type: Number, default: 0 },
     paidAt: Date,
     notes: String,
   },

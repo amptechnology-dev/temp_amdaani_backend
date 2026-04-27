@@ -39,6 +39,20 @@ const storeSchema = new mongoose.Schema(
       type: mongoose.SchemaTypes.ObjectId,
       ref: 'Subscription',
     },
+    referralCode: {
+      type: String,
+      unique: true,
+      index: true,
+    },
+    usedReferralCode: {
+      type: String,
+      default: null,
+    },
+    referredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Store",
+      default: null,
+    },
     logoUrl: String,
     signatureUrl: String,
     isActive: { type: Boolean, default: true },

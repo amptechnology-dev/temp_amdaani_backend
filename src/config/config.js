@@ -75,6 +75,13 @@ const config = {
     salt: envVars.PAYU_SALT,
     testMode: envVars.PAYU_TEST_MODE === 'true',
   },
+  email:{
+    host: envVars.EMAIL_HOST,
+    port: envVars.EMAIL_PORT,
+    user: envVars.EMAIL_USER,
+    pass: envVars.EMAIL_PASS,
+    from: envVars.EMAIL_FROM
+  }
 };
 
 export default config;

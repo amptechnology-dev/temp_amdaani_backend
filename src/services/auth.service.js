@@ -21,6 +21,10 @@ import { roles } from '../config/roles.js';
 import { Role } from '../models/role.model.js';
 import { User } from '../models/user.model.js';
 import { generateAmdaaniId } from "../utils/generateAmdaaniId.js";
+import { generateReferralCode } from "../utils/generateReferralCode.js";
+import { validateReferralCode } from "./referral.service.js";
+import { Store } from "../models/store.model.js";
+import { Referral } from "../models/referral.model.js";
 
 export const sendOtp = async (phone) => {
   if (!phone) {
@@ -127,30 +131,56 @@ export const verifySuperAdminLogin = async (otp) => {
 
 export const registerUserWithStore = async (storeData, userData, files) => {
 
-  // const session = await mongoose.startSession();
-  // session.startTransaction();
-
   const uploadedKeys = [];
 
   try {
 
+    // 🔥 referral code check
+    let referredBy = null;
+    let referrerStore = null;
+
+    if (storeData.usedReferralCode) {
+
+      referrerStore = await Store.findOne({
+        referralCode: storeData.usedReferralCode
+      });
+
+      if (!referrerStore) {
+        throw new ApiError(400, "Invalid referral code", [
+          { source: "body", field: "storeData.usedReferralCode", message: "Invalid referral code" }
+        ]);
+      }
+
+      referredBy = referrerStore._id;
+    }
+
+    // 🔥 generate new referral code for this store
+    const newReferralCode = await generateReferralCode(Store);
+
+    storeData.referralCode = newReferralCode;
+    storeData.referredBy = referredBy;
+
     if (files?.logo) {
-      const logoKey = await compressAndUpload(files.logo[0]?.buffer, { isPublic: true, height: 500, width: 500 });
+      const logoKey = await compressAndUpload(
+        files.logo[0]?.buffer,
+        { isPublic: true, height: 500, width: 500 }
+      );
 
       storeData.logoUrl = `${config.r2.publicEndpoint}/${logoKey}`;
-
       uploadedKeys.push(logoKey);
     }
 
     if (files?.signature) {
-      const signatureKey = await compressAndUpload(files.signature[0]?.buffer, {
-        isPublic: true,
-        height: 200,
-        width: 600,
-      });
+      const signatureKey = await compressAndUpload(
+        files.signature[0]?.buffer,
+        {
+          isPublic: true,
+          height: 200,
+          width: 600,
+        }
+      );
 
       storeData.signatureUrl = `${config.r2.publicEndpoint}/${signatureKey}`;
-
       uploadedKeys.push(signatureKey);
     }
 
@@ -166,30 +196,29 @@ export const registerUserWithStore = async (storeData, userData, files) => {
       throw new ApiError(500, 'Owner role not found');
     }
 
+    // ✅ Create Store
     const store = await createStore(storeData);
 
-    // 🔥 generate amdaaniId
+    // ✅ Create Referral Record (IMPORTANT PART)
+    if (referrerStore) {
+      await Referral.create({
+        referrerStore: referrerStore._id,
+        referredStore: store._id,
+      });
+    }
+
     const amdaaniId = await generateAmdaaniId();
 
-    const user = await createUser(
-      {
-        ...userData,
-        amdaaniId,
-        store: store._id,
-        role: ownerRole._id,
-      },
-      // session
-    );
-
-    // await session.commitTransaction();
-    // session.endSession();
+    const user = await createUser({
+      ...userData,
+      amdaaniId,
+      store: store._id,
+      role: ownerRole._id,
+    });
 
     return { user, store };
 
   } catch (error) {
-
-    // await session.abortTransaction();
-    // await session.endSession();
 
     for (const key of uploadedKeys) {
       try {

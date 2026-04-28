@@ -323,6 +323,45 @@ export const updateStockAfterPurchase = async (purchase, session = null) => {
   }
 };
 
+export const reverseStockAfterSale = async (sale, session = null) => {
+  const saleId = sale._id;
+
+  // Find all stock transactions for this sale
+  const transactions = await StockTransaction.find({ saleId }).session(session);
+  if (!transactions.length) return;
+
+  for (const txn of transactions) {
+    const product = await Product.findById(txn.product).session(session);
+    if (!product) continue;
+
+    // Reverse the stock: if original was OUT (negative), we add back; if IN, we subtract
+    const reversalQuantity = txn.direction === 'OUT' ? txn.quantity : -txn.quantity;
+    product.currentStock = product.currentStock + reversalQuantity;
+    await product.save({ session });
+
+    // Record a reversal transaction for audit trail
+    const reversalTxn = new StockTransaction({
+      product: txn.product,
+      store: txn.store,
+      date: new Date(),
+      transactionType: StockTransactionType.ADJUSTMENT,
+      quantity: txn.quantity,
+      direction: txn.direction === 'OUT' ? 'IN' : 'OUT', // flip direction
+      rate: txn.rate,
+      totalAmount: txn.totalAmount,
+      saleId,
+      remarks: `Reversal of sale transaction for invoice edit`,
+    });
+
+    await reversalTxn.save({ session });
+
+    // Mark original transaction as reversed
+    txn.reversed = true;
+    txn.remarks = (txn.remarks || '') + ' [REVERSED]';
+    await txn.save({ session });
+  }
+};
+
 // export const updateStockAfterSale = async (sale, session = null) => {
 //   const { items = [], store } = sale;
 //   if (!items.length) return;

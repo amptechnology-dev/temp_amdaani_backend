@@ -303,6 +303,34 @@ export const updateStockAfterPurchase = async (purchase, session = null) => {
   const { items = [], date } = purchase;
   if (!items.length) return;
 
+  console.log('update stock ===> ', items);
+
+  for (const item of items) {
+    await adjustProductStock(
+      {
+        productId: item.product,
+        date: date || new Date(),
+        transactionType: StockTransactionType.PURCHASE,
+        quantity: item.quantity,
+        rate: item.rate,
+        batchId: item.batch,
+        purchaseId: purchase._id,
+        purchasePrice: item.rate,
+        remarks: `Purchase added for ${item.quantity} units`,
+        salePrice: item.sellingPrice,
+        sellingDiscount: item.sellingDiscount,
+      },
+      session
+    );
+  }
+};
+
+export const onlyupdateStockAfterPurchase = async (purchase, session = null) => {
+  const { items = [], date } = purchase;
+  if (!items.length) return;
+
+  console.log('-items-->', JSON.stringify(items));
+
   for (const item of items) {
     await adjustProductStock(
       {

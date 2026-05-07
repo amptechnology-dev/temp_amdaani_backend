@@ -11,6 +11,8 @@ const purchaseItemSchema = yup.object().shape({
   unit: yup.string().nullable(),
   batchNo: yup.string().nullable(),
   expiryDate: yup.date().nullable(),
+  previousQuantity: yup.number(),
+  //isQtyChanged: yup.boolean().default(false),
   mrp: yup.number().nullable(),
   rate: yup.number().required('Rate is required').min(0, 'Rate must be >= 0'),
   gstRate: yup.number().min(0).default(0),
@@ -63,7 +65,6 @@ export const createPurchase = {
     status: yup.string().oneOf(['active', 'cancelled']).default('active'),
   }),
 };
-
 
 export const updatePurchase = {
   body: yup.object().shape({

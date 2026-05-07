@@ -11,14 +11,10 @@ export const createStore = {
     panNumber: yup.string().trim().uppercase(),
     registrationNo: yup.string().trim(),
     contactNo: yup.string().trim(),
-    email: yup.string().trim().lowercase().email(),
+    email: yup.string().trim().lowercase().email().required(),
 
     // 🔥 referral code used during signup
-    usedReferralCode: yup
-      .string()
-      .trim()
-      .uppercase()
-      .optional(),
+    usedReferralCode: yup.string().trim().uppercase().optional(),
 
     address: yup
       .object()

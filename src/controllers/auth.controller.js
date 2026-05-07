@@ -9,13 +9,24 @@ import {
   verifySuperAdminLogin,
 } from '../services/auth.service.js';
 import { verifyRegistrationToken, generateAuthTokens } from '../services/token.service.js';
-import { createSuperAdmin, createStaff, getStoreStaffs, getUserById, getStaffById, updateStaff, getUserByEmail,updateUserPhone } from '../services/user.services.js';
+import {
+  createSuperAdmin,
+  createStaff,
+  getStoreStaffs,
+  getUserById,
+  getStaffById,
+  updateStaff,
+  getUserByEmail,
+  updateUserPhone,
+  getOnlyUserByEmail,
+} from '../services/user.services.js';
 import { createOrRenewFreePlan } from '../services/subscription.services.js';
 import jwt from 'jsonwebtoken';
 import transporter from '../config/emailtransporter.js';
 import config from '../config/config.js';
-import crypto from "crypto";
-import redis from "../config/redis.js";
+import crypto from 'crypto';
+import redis from '../config/redis.js';
+import { get } from 'https';
 
 export const createSuperAdminUser = asyncHandler(async (req, res) => {
   const { phone, name, email } = req.body;
@@ -40,61 +51,41 @@ export const createSuperAdminUser = asyncHandler(async (req, res) => {
 });
 
 export const registerStaff = asyncHandler(async (req, res) => {
-
   const ownerId = req.user.id;
 
   const { name, phone, email } = req.body;
 
   if (!name || !phone) {
-    throw new ApiError(400, "Name and phone are required");
+    throw new ApiError(400, 'Name and phone are required');
   }
 
   const staff = await createStaff(ownerId, {
     name,
     phone,
-    email
+    email,
   });
 
-  return new ApiResponse(
-    201,
-    staff,
-    "Staff registered successfully"
-  ).send(res);
-
+  return new ApiResponse(201, staff, 'Staff registered successfully').send(res);
 });
 
 export const getStaffList = asyncHandler(async (req, res) => {
-
   const ownerId = req.user.id;
 
   const staffs = await getStoreStaffs(ownerId);
 
-  return new ApiResponse(
-    200,
-    staffs,
-    "Staff list fetched successfully"
-  ).send(res);
-
+  return new ApiResponse(200, staffs, 'Staff list fetched successfully').send(res);
 });
 
 export const getSingleStaff = asyncHandler(async (req, res) => {
-
   const ownerId = req.user.id;
   const { staffId } = req.params;
 
   const staff = await getStaffById(ownerId, staffId);
 
-  return new ApiResponse(
-    200,
-    staff,
-    "Staff details fetched successfully"
-  ).send(res);
-
+  return new ApiResponse(200, staff, 'Staff details fetched successfully').send(res);
 });
 
-
 export const updateStaffDetails = asyncHandler(async (req, res) => {
-
   const ownerId = req.user.id;
   const { staffId } = req.params;
 
@@ -104,15 +95,10 @@ export const updateStaffDetails = asyncHandler(async (req, res) => {
     name,
     phone,
     email,
-    isActive
+    isActive,
   });
 
-  return new ApiResponse(
-    200,
-    staff,
-    "Staff updated successfully"
-  ).send(res);
-
+  return new ApiResponse(200, staff, 'Staff updated successfully').send(res);
 });
 
 export const sendAuthOtp = asyncHandler(async (req, res) => {
@@ -184,39 +170,84 @@ export const sendPhoneRecoveryOtp = asyncHandler(async (req, res) => {
   const { email } = req.body;
 
   if (!email) {
-    throw new ApiError(400, "Email is required");
+    throw new ApiError(400, 'Email is required');
   }
 
   const user = await getUserByEmail(email);
 
   if (!user) {
-    throw new ApiError(404, "User not found");
+    throw new ApiError(404, 'User not found');
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const hash = crypto.createHash("sha256").update(otp).digest("hex");
+  const hash = crypto.createHash('sha256').update(otp).digest('hex');
 
-  await redis.set(`emailOtp:${email}`, hash, "EX", 60 * 5);
+  await redis.set(`emailOtp:${email}`, hash, 'EX', 60 * 5);
 
   await transporter.sendMail({
     from: config.email.from,
     to: email,
-    subject: "Phone Recovery OTP",
+    subject: 'Phone Recovery OTP',
     html: `<h2>${otp}</h2><p>This OTP will expire in 5 minutes</p>`,
   });
 
   // recovery token
-  const recoveryToken = jwt.sign(
-    { userId: user._id, email },
-    config.jwt.secret,
-    { expiresIn: "10m" }
-  );
+  const recoveryToken = jwt.sign({ userId: user._id, email }, config.jwt.secret, { expiresIn: '10m' });
 
-  return new ApiResponse(
-    200,
-    { token: recoveryToken },
-    "OTP sent to email"
-  ).send(res);
+  return new ApiResponse(200, { token: recoveryToken }, 'OTP sent to email').send(res);
+});
+
+export const sendRecoveryNumber = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    throw new ApiError(400, 'Email is required');
+  }
+
+  const user = await getOnlyUserByEmail(email);
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const hash = crypto.createHash('sha256').update(otp).digest('hex');
+
+  await redis.set(`emailOtp:${email}`, hash, 'EX', 60 * 5);
+  await transporter.sendMail({
+    from: config.email.from,
+    to: email,
+    subject: 'Phone Recovery OTP',
+    html: `<h2>${otp}</h2><p>This OTP will expire in 5 minutes</p>`,
+  });
+
+  return new ApiResponse(200, 'OTP sent to email').send(res);
+});
+
+export const verifyRecoveryNumber = asyncHandler(async (req, res) => {
+  const { otp, email } = req.body;
+
+  if (!email) {
+    throw new ApiError(400, 'Email is required');
+  }
+  const user = await getOnlyUserByEmail(email);
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+  const storedHash = await redis.get(`emailOtp:${email}`);
+
+  if (!storedHash) {
+    throw new ApiError(400, 'OTP expired');
+  }
+  const incomingHash = crypto.createHash('sha256').update(otp).digest('hex');
+
+  if (incomingHash !== storedHash) {
+    throw new ApiError(400, 'Invalid OTP');
+  }
+
+  await redis.del(`emailOtp:${email}`);
+  const recoveryToken = jwt.sign({ userId: user._id, email }, config.jwt.secret, { expiresIn: '10m' });
+
+  return new ApiResponse(200, 'OTP verified', { token: recoveryToken }).send(res);
 });
 
 export const verifyPhoneRecoveryOtp = asyncHandler(async (req, res) => {
@@ -225,10 +256,10 @@ export const verifyPhoneRecoveryOtp = asyncHandler(async (req, res) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
-    throw new ApiError(401, "Token missing");
+    throw new ApiError(401, 'Token missing');
   }
 
-  const token = authHeader.split(" ")[1];
+  const token = authHeader.split(' ')[1];
 
   const decoded = jwt.verify(token, config.jwt.secret);
 
@@ -237,56 +268,43 @@ export const verifyPhoneRecoveryOtp = asyncHandler(async (req, res) => {
   const storedHash = await redis.get(`emailOtp:${email}`);
 
   if (!storedHash) {
-    throw new ApiError(400, "OTP expired");
+    throw new ApiError(400, 'OTP expired');
   }
 
-  const incomingHash = crypto
-    .createHash("sha256")
-    .update(otp)
-    .digest("hex");
+  const incomingHash = crypto.createHash('sha256').update(otp).digest('hex');
 
   if (incomingHash !== storedHash) {
-    throw new ApiError(400, "Invalid OTP");
+    throw new ApiError(400, 'Invalid OTP');
   }
 
   await redis.del(`emailOtp:${email}`);
 
   // verified token
-  const verifiedToken = jwt.sign(
-    { userId, verified: true },
-    config.jwt.secret,
-    { expiresIn: "10m" }
-  );
+  const verifiedToken = jwt.sign({ userId, verified: true }, config.jwt.secret, { expiresIn: '10m' });
 
-  return new ApiResponse(
-    200,
-    { token: verifiedToken },
-    "OTP verified"
-  ).send(res);
+  return new ApiResponse(200, { token: verifiedToken }, 'OTP verified').send(res);
 });
 
 export const updatePhoneAfterOtp = asyncHandler(async (req, res) => {
   const { newPhone } = req.body;
 
+  console.log('newPhone-->', JSON.stringify(newPhone));
+
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
-    throw new ApiError(401, "Token missing");
+    throw new ApiError(401, 'Token missing');
   }
 
-  const token = authHeader.split(" ")[1];
+  const token = authHeader.split(' ')[1];
 
   const decoded = jwt.verify(token, config.jwt.secret);
 
   if (!decoded.verified) {
-    throw new ApiError(403, "OTP verification required");
+    throw new ApiError(403, 'OTP verification required');
   }
 
   const updatedUser = await updateUserPhone(decoded.userId, newPhone);
 
-  return new ApiResponse(
-    200,
-    { phone: updatedUser.phone },
-    "Phone updated successfully"
-  ).send(res);
+  return new ApiResponse(200, { phone: updatedUser.phone }, 'Phone updated successfully').send(res);
 });

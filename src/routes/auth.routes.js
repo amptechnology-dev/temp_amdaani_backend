@@ -29,8 +29,12 @@ router.get('/store-staffs', authenticate, authController.getStaffList);
 router.get('/store-staffs/:staffId', authenticate, authController.getSingleStaff);
 router.put('/store-staffs/:staffId', authenticate, authController.updateStaffDetails);
 router.post('/phone-recovery/send-otp', authController.sendPhoneRecoveryOtp);
-router.post("/phone-recovery/verify-otp", authController.verifyPhoneRecoveryOtp);
-router.post("/phone-recovery/update-phone", authController.updatePhoneAfterOtp);
+router.post('/phone-recovery/verify-otp', authController.verifyPhoneRecoveryOtp);
+router.post('/phone-recovery/update-phone', authController.updatePhoneAfterOtp);
+
+//router.post('/send-recovery-number', authenticate, authController.sendRecoveryNumber);
+//router.post('/verify-recovery-number', authenticate, authController.verifyRecoveryNumber);
+
 // router.delete('/staff/:staffId', authenticate, authController.deleteStaff);
 // router.post('/login', validate(authSchema.login), authController.login);
 // router.post('/forgot-password', validate(authSchema.forgotPassword), authController.forgotPassword);

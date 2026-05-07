@@ -18,6 +18,8 @@ export const createPurchase = async (data) => {
     });
   }
 
+  console.log('data-->', JSON.stringify(data));
+
   // ✅ Resolve vendor BEFORE starting transaction (avoids write conflict)
   const vendorId = await findOrCreateVendor(data.store, {
     _id: data.vendor,
@@ -112,6 +114,7 @@ const getItemStockReport = async () => {
 };
 
 export const updatePurchase = async (purchaseId, data) => {
+  console.log('data-->', JSON.stringify(data));
   if (data.items && !data.items.length) {
     throw new ApiError(400, 'Invalid purchase items!', {
       source: 'body',
@@ -173,6 +176,8 @@ export const updatePurchase = async (purchaseId, data) => {
         vendor: vendorId,
       };
 
+      console.log('=> existingPurchase:', JSON.stringify(existingPurchase));
+
       // ✅ Reverse old stock before applying new stock
       await reverseStockAfterPurchase(existingPurchase, session);
 
@@ -180,7 +185,7 @@ export const updatePurchase = async (purchaseId, data) => {
       await existingPurchase.save({ session });
 
       // ✅ Apply updated stock
-      await updateStockAfterPurchase(existingPurchase, session);
+      await updateStockAfterPurchase(data, session);
 
       // ✅ Handle partial payment update
       if (existingPurchase.paymentStatus === 'partial') {
@@ -228,6 +233,8 @@ export const updatePurchase = async (purchaseId, data) => {
 export const reverseStockAfterPurchase = async (purchase, session = null) => {
   const { items = [], date, _id: purchaseId } = purchase;
   if (!items.length) return;
+
+  console.log('reves => ', items);
 
   // ✅ Delete old stock transactions tied to this purchase
   await StockTransaction.deleteMany({ purchaseId }, { session });

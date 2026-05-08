@@ -201,8 +201,8 @@ export const getUserByEmail = async (email) => {
 };
 
 export const getOnlyUserByEmail = async (email) => {
-    return User.findOne({ email })
-}
+  return User.findOne({ email });
+};
 
 export const updateUserPhone = async (userId, newPhone) => {
   const user = await User.findById(userId);
@@ -210,6 +210,15 @@ export const updateUserPhone = async (userId, newPhone) => {
     throw new Error('User not found');
   }
   user.phone = newPhone;
+  await user.save();
+  return user;
+};
+export const updateUserEmail = async (userId, email) => {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+  user.email = email;
   await user.save();
   return user;
 };

@@ -32,6 +32,14 @@ router.post('/phone-recovery/send-otp', authController.sendPhoneRecoveryOtp);
 router.post('/phone-recovery/verify-otp', authController.verifyPhoneRecoveryOtp);
 router.post('/phone-recovery/update-phone', authController.updatePhoneAfterOtp);
 
+router.post('/phone-change-phone/send-otp', authController.sendChangenumber);
+router.post('/phone-change-phone/verify-otp', authController.verifyChangeNumberOtp);
+router.post('/phone-change-phone/update-phone', authController.updateChangeNumber);
+
+router.post('/phone-change-email/send-otp', authController.sendChangeEmail);
+router.post('/phone-change-email/verify-otp', authController.verifyChangeEmailOtp);
+router.post('/phone-change-email/update-phone', authController.updateChangeEmail);
+
 //router.post('/send-recovery-number', authenticate, authController.sendRecoveryNumber);
 //router.post('/verify-recovery-number', authenticate, authController.verifyRecoveryNumber);
 

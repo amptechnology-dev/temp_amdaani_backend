@@ -16,9 +16,11 @@ import {
   getUserById,
   getStaffById,
   updateStaff,
+  getUserByPhone,
   getUserByEmail,
   updateUserPhone,
   getOnlyUserByEmail,
+  updateUserEmail,
 } from '../services/user.services.js';
 import { createOrRenewFreePlan } from '../services/subscription.services.js';
 import jwt from 'jsonwebtoken';
@@ -263,6 +265,8 @@ export const verifyPhoneRecoveryOtp = asyncHandler(async (req, res) => {
 
   const decoded = jwt.verify(token, config.jwt.secret);
 
+  console.log('decode', decoded);
+
   const { email, userId } = decoded;
 
   const storedHash = await redis.get(`emailOtp:${email}`);
@@ -307,4 +311,157 @@ export const updatePhoneAfterOtp = asyncHandler(async (req, res) => {
   const updatedUser = await updateUserPhone(decoded.userId, newPhone);
 
   return new ApiResponse(200, { phone: updatedUser.phone }, 'Phone updated successfully').send(res);
+});
+
+export const sendChangenumber = asyncHandler(async (req, res) => {
+  const { number } = req.body;
+
+  if (!number) {
+    throw new ApiError(400, 'Number is required');
+  }
+
+  const user = await getUserByPhone(number);
+
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  if (user.phone === '9999999999') return true;
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const hash = crypto.createHash('sha256').update(otp).digest('hex');
+  await redis.set(`otp:${user.phone}`, hash, 'EX', 60 * 5); // 5 min TTL
+  const message = `${otp} is your OTP to login into AMDANI. Please do not share this OTP with anyone.- AMPTECH`;
+
+  const params = {
+    username: 'MTECHTRANS',
+    apikey: '38892-B2424',
+    apirequest: 'Text',
+    sender: 'AMPTCH',
+    mobile: user.phone,
+    message,
+    route: 'TRANS',
+    TemplateID: '1407172715834228636',
+    format: 'JSON',
+  };
+
+  const smsResponse = await axios.get('http://text.mboxsolution.com/sms-panel/api/http/index.php', { params });
+
+  if (smsResponse.data.status !== 'success') {
+    console.error('Failed to send SMS:', smsResponse.data);
+    throw new ApiError(500, 'Failed to send SMS.', [{ message: 'Failed to send SMS' }]);
+  }
+
+  return new ApiResponse(200, 'OTP sent to phone').send(res);
+});
+
+export const verifyChangeNumberOtp = asyncHandler(async (req, res) => {
+  const { otp, number } = req.body;
+
+  if (!number) {
+    throw new ApiError(400, 'Email is required');
+  }
+  const user = await getUserByPhone(number);
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+  const storedHash = await redis.get(`otp:${user.phone}`);
+
+  if (!storedHash) {
+    throw new ApiError(400, 'OTP expired');
+  }
+  const incomingHash = crypto.createHash('sha256').update(otp).digest('hex');
+
+  if (incomingHash !== storedHash) {
+    throw new ApiError(400, 'Invalid OTP');
+  }
+
+  await redis.del(`otp:${user.phone}`);
+
+  return new ApiResponse(200, 'OTP verified').send(res);
+});
+
+export const updateChangeNumber = asyncHandler(async (req, res) => {
+  const { number } = req.body;
+
+  console.log('newPhone-->', JSON.stringify(newPhone));
+  if (!number) {
+    throw new ApiError(400, 'Email is required');
+  }
+  const user = await getUserByPhone(number);
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  const updatedUser = await updateUserPhone(user._id, number);
+
+  return new ApiResponse(200, { phone: updatedUser.phone }, 'Phone updated successfully').send(res);
+});
+
+export const sendChangeEmail = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    throw new ApiError(400, 'Number is required');
+  }
+
+  const user = await getOnlyUserByEmail(email);
+
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const hash = crypto.createHash('sha256').update(otp).digest('hex');
+
+  await redis.set(`emailOtp:${email}`, hash, 'EX', 60 * 5);
+  await transporter.sendMail({
+    from: config.email.from,
+    to: email,
+    subject: 'Phone Recovery OTP',
+    html: `<h2>${otp}</h2><p>This OTP will expire in 5 minutes</p>`,
+  });
+
+  return new ApiResponse(200, 'OTP sent to Email').send(res);
+});
+
+export const verifyChangeEmailOtp = asyncHandler(async (req, res) => {
+  const { otp, email } = req.body;
+
+  if (!email) {
+    throw new ApiError(400, 'Email is required');
+  }
+  const user = await getUserByPhone(email);
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+  const storedHash = await redis.get(`emailOtp:${email}`);
+
+  if (!storedHash) {
+    throw new ApiError(400, 'OTP expired');
+  }
+  const incomingHash = crypto.createHash('sha256').update(otp).digest('hex');
+
+  if (incomingHash !== storedHash) {
+    throw new ApiError(400, 'Invalid OTP');
+  }
+
+  await redis.del(`emailOtp:${email}`);
+
+  return new ApiResponse(200, 'OTP verified').send(res);
+});
+
+export const updateChangeEmail = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  console.log('newPhone-->', JSON.stringify(email));
+  if (!email) {
+    throw new ApiError(400, 'Email is required');
+  }
+  const user = await getUserByPhone(email);
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  const updatedUser = await updateUserEmail(user._id, email);
+
+  return new ApiResponse(200, { email: updatedUser.email }, 'Email updated successfully').send(res);
 });

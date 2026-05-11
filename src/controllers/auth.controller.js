@@ -404,7 +404,7 @@ export const updateChangeNumber = asyncHandler(async (req, res) => {
     throw new ApiError(403, 'OTP verification required');
   }
 
-  const updatedUser = await updateUserPhone(decoded.sub, number);
+  const updatedUser = await updateUserPhone(decoded.userId, number);
 
   //console.log('newPhone-->', JSON.stringify(newPhone));
 
@@ -501,7 +501,7 @@ export const updateChangeEmail = asyncHandler(async (req, res) => {
     throw new ApiError(403, 'OTP verification required');
   }
 
-  const updatedUser = await updateUserEmail(decoded.sub, email);
+  const updatedUser = await updateUserEmail(decoded.userId, email);
 
   return new ApiResponse(200, { email: updatedUser.email }, 'Email updated successfully').send(res);
 });

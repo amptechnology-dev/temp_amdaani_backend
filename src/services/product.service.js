@@ -102,39 +102,65 @@ export const findOrCreateProduct = async (store, data, session = null) => {
   return null;
 };
 
-export const getAllProductsWithSales = async (storeId, startDate, endDate) => {
-  const matchConditions = [{ $eq: ['$status', 'active'] }];
+export const getAllProductsWithSales = async (
+  storeId,
+  startDate,
+  endDate,
+  search = ""
+) => {
+  const invoiceMatch = {
+    status: "active",
+  };
 
-  if (startDate) {
-    matchConditions.push({
-      $gte: ['$invoiceDate', new Date(startDate)],
-    });
-  }
+  // invoice date filter
+  if (startDate || endDate) {
+    invoiceMatch.invoiceDate = {};
 
-  if (endDate) {
-    matchConditions.push({
-      $lte: ['$invoiceDate', new Date(endDate)],
-    });
+    if (startDate) {
+      invoiceMatch.invoiceDate.$gte = startDate;
+    }
+
+    if (endDate) {
+      invoiceMatch.invoiceDate.$lte = endDate;
+    }
   }
 
   return Product.aggregate([
     {
       $match: {
-        store: storeId,
+        store: new mongoose.Types.ObjectId(storeId),
+
+        // product name search
+        name: {
+          $regex: search,
+          $options: "i",
+        },
       },
     },
 
     {
       $lookup: {
-        from: 'invoices',
-        let: { productId: '$_id' },
+        from: "invoices",
+        let: {
+          productId: "$_id",
+        },
+
         pipeline: [
-          { $unwind: '$items' },
+          {
+            $match: invoiceMatch,
+          },
+
+          {
+            $unwind: "$items",
+          },
 
           {
             $match: {
               $expr: {
-                $and: [...matchConditions, { $eq: ['$items.product', '$$productId'] }],
+                $eq: [
+                  "$items.product",
+                  "$$productId",
+                ],
               },
             },
           },
@@ -142,18 +168,24 @@ export const getAllProductsWithSales = async (storeId, startDate, endDate) => {
           {
             $group: {
               _id: null,
+
               totalQuantity: {
-                $sum: '$items.quantity',
+                $sum: "$items.quantity",
               },
+
               totalRevenue: {
                 $sum: {
-                  $multiply: ['$items.quantity', '$items.sellingPrice'],
+                  $multiply: [
+                    "$items.quantity",
+                    "$items.sellingPrice",
+                  ],
                 },
               },
             },
           },
         ],
-        as: 'salesData',
+
+        as: "salesData",
       },
     },
 
@@ -166,16 +198,44 @@ export const getAllProductsWithSales = async (storeId, startDate, endDate) => {
         sellingPrice: 1,
 
         totalSold: {
-          $ifNull: [{ $arrayElemAt: ['$salesData.totalQuantity', 0] }, 0],
+          $ifNull: [
+            {
+              $arrayElemAt: [
+                "$salesData.totalQuantity",
+                0,
+              ],
+            },
+            0,
+          ],
         },
 
         totalRevenue: {
-          $ifNull: [{ $arrayElemAt: ['$salesData.totalRevenue', 0] }, 0],
+          $ifNull: [
+            {
+              $arrayElemAt: [
+                "$salesData.totalRevenue",
+                0,
+              ],
+            },
+            0,
+          ],
         },
       },
     },
 
-    { $sort: { totalRevenue: -1 } },
+    {
+      $match: {
+        totalSold: {
+          $gt: 0,
+        },
+      },
+    },
+
+    {
+      $sort: {
+        totalRevenue: -1,
+      },
+    },
   ]);
 };
 

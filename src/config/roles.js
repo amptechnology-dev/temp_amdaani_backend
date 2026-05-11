@@ -2,6 +2,8 @@ export const roles = {
   SUPERADMIN: 'super-admin',
   OWNER: 'owner',
   STAFF: 'staff',
+  MANAGER: 'manager',
+  PARTNER: 'partner',
 };
 
 export const permissions = {

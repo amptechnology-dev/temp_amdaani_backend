@@ -55,5 +55,7 @@ import referralSettingsRoutes from './referralSettings.routes.js';
 import notificationSettingRoutes from './notificationSetting.routes.js';
 router.use('/notification-settings', notificationSettingRoutes);
 router.use('/referral-settings', referralSettingsRoutes);
+import loginActivityRoutes from './loginActivity.routes.js';
+router.use('/login-activity', loginActivityRoutes);
 
 export default router;

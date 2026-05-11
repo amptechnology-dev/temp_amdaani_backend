@@ -419,7 +419,7 @@ export const sendChangeEmail = asyncHandler(async (req, res) => {
   const { email } = req.body;
 
   if (!email) {
-    throw new ApiError(400, 'Number is required');
+    throw new ApiError(400, 'Email is required');
   }
 
   const authHeader = req.headers.authorization;
@@ -499,7 +499,7 @@ export const updateChangeEmail = asyncHandler(async (req, res) => {
 
   const decoded = jwt.verify(token, config.jwt.secret);
 
-  const { sub } = decoded;
+   const { sub } = decoded;
 
   if (!decoded) {
     throw new ApiError(403, 'OTP verification required');

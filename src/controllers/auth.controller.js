@@ -382,17 +382,35 @@ export const verifyChangeNumberOtp = asyncHandler(async (req, res) => {
 
 export const updateChangeNumber = asyncHandler(async (req, res) => {
   const { number } = req.body;
-
-  console.log('newPhone-->', JSON.stringify(newPhone));
   if (!number) {
-    throw new ApiError(400, 'Email is required');
-  }
-  const user = await getUserByPhone(number);
-  if (!user) {
-    throw new ApiError(404, 'User not found');
+    throw new ApiError(400, 'Number is required');
   }
 
-  const updatedUser = await updateUserPhone(user._id, number);
+  const user = await getUserByPhone(number);
+  if (user) {
+    throw new ApiError(404, 'user already exists');
+  }
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    throw new ApiError(401, 'Token missing');
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  const decoded = jwt.verify(token, config.jwt.secret);
+
+  if (!decoded) {
+    throw new ApiError(403, 'OTP verification required');
+  }
+
+  const { sub } = decoded;
+
+  const updatedUser = await updateUserPhone(sub, number);
+
+  //console.log('newPhone-->', JSON.stringify(newPhone));
+
+  //const updatedUser = await updateUserPhone(user._id, number);
 
   return new ApiResponse(200, { phone: updatedUser.phone }, 'Phone updated successfully').send(res);
 });
@@ -401,7 +419,21 @@ export const sendChangeEmail = asyncHandler(async (req, res) => {
   const { email } = req.body;
 
   if (!email) {
-    throw new ApiError(400, 'Number is required');
+    throw new ApiError(400, 'Email is required');
+  }
+
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    throw new ApiError(401, 'Token missing');
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  const decoded = jwt.verify(token, config.jwt.secret);
+
+  if (!decoded) {
+    throw new ApiError(403, 'OTP verification required');
   }
 
   const user = await getOnlyUserByEmail(email);
@@ -452,16 +484,28 @@ export const verifyChangeEmailOtp = asyncHandler(async (req, res) => {
 export const updateChangeEmail = asyncHandler(async (req, res) => {
   const { email } = req.body;
 
-  console.log('newPhone-->', JSON.stringify(email));
+  console.log('newEmail-->', JSON.stringify(email));
   if (!email) {
     throw new ApiError(400, 'Email is required');
   }
-  const user = await getUserByPhone(email);
-  if (!user) {
-    throw new ApiError(404, 'User not found');
+
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    throw new ApiError(401, 'Token missing');
   }
 
-  const updatedUser = await updateUserEmail(user._id, email);
+  const token = authHeader.split(' ')[1];
+
+  const decoded = jwt.verify(token, config.jwt.secret);
+
+   const { sub } = decoded;
+
+  if (!decoded) {
+    throw new ApiError(403, 'OTP verification required');
+  }
+
+  const updatedUser = await updateUserEmail(sub, email);
 
   return new ApiResponse(200, { email: updatedUser.email }, 'Email updated successfully').send(res);
 });

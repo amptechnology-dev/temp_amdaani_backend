@@ -38,7 +38,7 @@ router.post('/phone-change-phone/update-phone', authController.updateChangeNumbe
 
 router.post('/phone-change-email/send-otp', authController.sendChangeEmail);
 router.post('/phone-change-email/verify-otp', authController.verifyChangeEmailOtp);
-router.post('/phone-change-email/update-phone', authController.updateChangeEmail);
+router.post('/phone-change-email/update-email', authController.updateChangeEmail);
 
 //router.post('/send-recovery-number', authenticate, authController.sendRecoveryNumber);
 //router.post('/verify-recovery-number', authenticate, authController.verifyRecoveryNumber);

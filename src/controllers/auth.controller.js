@@ -112,7 +112,7 @@ export const sendAuthOtp = asyncHandler(async (req, res) => {
 export const verifyAuthOtp = asyncHandler(async (req, res) => {
   const { phone, otp } = req.body;
   try {
-    const result = await verifyOtp(phone, otp);
+    const result = await verifyOtp(phone, otp, req);
     if (result.status === 'logged_in') {
       return new ApiResponse(200, { user: result.user, tokens: result.tokens }, 'Logged in successfully!').send(res);
     }

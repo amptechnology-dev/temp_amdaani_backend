@@ -27,45 +27,109 @@ export const getProductById = expressAsyncHandler(async (req, res) => {
   const product = await productService.getProductById(req.params.id);
   return new ApiResponse(200, product, 'Product fetched successfully!').send(res);
 });
-export const getAllProductsWithSales = expressAsyncHandler(async (req, res) => {
 
-  const { range, startDate, endDate } = req.query;
+export const getAllProductsWithSales = expressAsyncHandler(
+  async (req, res) => {
+    const {
+      range,
+      startDate,
+      endDate,
+      search = "",
+    } = req.query;
 
-  const now = new Date();
-  let start;
-  let end;
+    const now = new Date();
 
-  if (range === "thisMonth") {
-    start = new Date(now.getFullYear(), now.getMonth(), 1);
-    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    let start = null;
+    let end = null;
+
+    switch (range) {
+      case "today":
+        start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+
+        end = new Date(now);
+        end.setHours(23, 59, 59, 999);
+        break;
+
+      case "thisMonth":
+        start = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          1
+        );
+
+        end = new Date(
+          now.getFullYear(),
+          now.getMonth() + 1,
+          0,
+          23,
+          59,
+          59,
+          999
+        );
+        break;
+
+      case "previousMonth":
+        start = new Date(
+          now.getFullYear(),
+          now.getMonth() - 1,
+          1
+        );
+
+        end = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          0,
+          23,
+          59,
+          59,
+          999
+        );
+        break;
+
+      case "year":
+        start = new Date(now.getFullYear(), 0, 1);
+
+        end = new Date(
+          now.getFullYear(),
+          11,
+          31,
+          23,
+          59,
+          59,
+          999
+        );
+        break;
+
+      case "custom":
+        if (startDate) {
+          start = new Date(startDate);
+          start.setHours(0, 0, 0, 0);
+        }
+
+        if (endDate) {
+          end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+        }
+        break;
+    }
+
+    const products =
+      await productService.getAllProductsWithSales(
+        req.user.store,
+        start,
+        end,
+        search
+      );
+
+    return new ApiResponse(
+      200,
+      products,
+      "Products fetched successfully!"
+    ).send(res);
   }
+);
 
-  if (range === "previousMonth") {
-    start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-  }
-
-  if (range === "year") {
-    start = new Date(now.getFullYear(), 0, 1);
-    end = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
-  }
-
-  const finalStartDate = start || startDate;
-  const finalEndDate = end || endDate;
-
-  const products = await productService.getAllProductsWithSales(
-    req.user.store,
-    finalStartDate,
-    finalEndDate
-  );
-
-  return new ApiResponse(
-    200,
-    products,
-    "Products fetched successfully!"
-  ).send(res);
-
-});
 export const adjustProductStock = expressAsyncHandler(async (req, res) => {
   const result = await productService.adjustProductStock(req.body);
   return new ApiResponse(200, result, 'Stock adjusted successfully').send(res);

@@ -53,6 +53,8 @@ app.use(cookieParser(config.cookieSecret));
 app.use(passport.initialize());
 passport.use('jwt', jwtStrategy);
 
+app.set('trust proxy', true);
+
 // limit repeated failed requests to auth endpoints
 // app.use('/v1/auth', authLimiter);
 

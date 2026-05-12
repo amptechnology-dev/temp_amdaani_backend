@@ -25,6 +25,7 @@ import { generateReferralCode } from "../utils/generateReferralCode.js";
 import { validateReferralCode } from "./referral.service.js";
 import { Store } from "../models/store.model.js";
 import { Referral } from "../models/referral.model.js";
+import { saveLoginActivity } from './loginActivity.service.js';
 
 export const sendOtp = async (phone) => {
   if (!phone) {
@@ -72,30 +73,97 @@ export const sendOtp = async (phone) => {
 };
 
 
-export const verifyOtp = async (phone, otp) => {
-  const storedHash = await redis.get(`otp:${phone}`);
+export const verifyOtp = async (
+  phone,
+  otp,
+  req
+) => {
+
+  const storedHash =
+    await redis.get(
+      `otp:${phone}`
+    );
+
   if (!storedHash) {
-    throw new ApiError(400, 'Invalid OTP!', [
-      { source: 'body', field: 'otp', message: 'OTP not found or expired' },
-    ]);
+    throw new ApiError(
+      400,
+      'Invalid OTP!',
+      [
+        {
+          source: 'body',
+          field: 'otp',
+          message:
+            'OTP not found or expired',
+        },
+      ]
+    );
   }
-  const incomingHash = crypto
-    .createHash('sha256')
-    .update(otp)
-    .digest('hex');
-  if (incomingHash !== storedHash) {
-    throw new ApiError(400, 'Invalid OTP!', [
-      { source: 'body', field: 'otp', message: 'Incorrect OTP' },
-    ]);
+
+  const incomingHash =
+    crypto
+      .createHash(
+        'sha256'
+      )
+      .update(otp)
+      .digest('hex');
+
+  if (
+    incomingHash !==
+    storedHash
+  ) {
+    throw new ApiError(
+      400,
+      'Invalid OTP!',
+      [
+        {
+          source: 'body',
+          field: 'otp',
+          message:
+            'Incorrect OTP',
+        },
+      ]
+    );
   }
-  await redis.del(`otp:${phone}`);
-  const user = await getUserByPhone(phone);
+
+  await redis.del(
+    `otp:${phone}`
+  );
+
+  const user =
+    await getUserByPhone(
+      phone
+    );
+
   if (user) {
-    const tokens = await generateAuthTokens(user);
-    return { status: 'logged_in', user, tokens };
+
+    const tokens =
+      await generateAuthTokens(
+        user
+      );
+
+    await saveLoginActivity(
+      user._id,
+      req
+    );
+
+    return {
+      status:
+        'logged_in',
+      user,
+      tokens,
+    };
   }
-  const tempToken = await generateRegistrationToken(phone);
-  return { status: 'new_user', tempToken };
+
+  const tempToken =
+    await generateRegistrationToken(
+      phone
+    );
+
+  return {
+    status:
+      'new_user',
+    tempToken,
+  };
 };
 
 export const verifySuperAdminLogin = async (otp) => {

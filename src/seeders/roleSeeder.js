@@ -16,6 +16,14 @@ const seedRoles = async () => {
                 permissions: [permissions.ALL],
             },
             {
+                name: roles.MANAGER,
+                permissions: [permissions.ALL]
+            },
+            {
+                name: roles.PARTNER,
+                permissions: [permissions.ALL]
+            },
+            {
                 name: roles.STAFF,
                 permissions: [
                     permissions.CAN_MANAGE_STORE,

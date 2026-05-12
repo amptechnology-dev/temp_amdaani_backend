@@ -224,6 +224,36 @@ const adjustProductStockForSale = async (data, session = null) => {
   return stockTransaction.save({ session });
 };
 
+export const reverseStockAfterDelete = async (purchase, session = null) => {
+  const { items = [], date, _id: purchaseId } = purchase;
+  if (!items.length) return;
+
+  console.log('reverseStockAfterDelete =>', JSON.stringify(items));
+
+  // Delete all stock transactions tied to this purchase first
+  await StockTransaction.deleteMany({ purchaseId }, { session });
+
+  // Subtract exactly what was originally purchased from each product
+  for (const item of items) {
+    await adjustProductStock(
+      {
+        productId: item.product,
+        date: date || new Date(),
+        transactionType: StockTransactionType.PURCHASE_REVERSE,
+        quantity: -Math.abs(item.quantity), // always negative — subtract from stock
+        rate: item.rate ?? item.costPrice ?? 0,
+        batchId: item.batch ?? null,
+        purchaseId,
+        purchasePrice: item.rate ?? item.costPrice ?? null,
+        remarks: `Purchase deleted — reversed ${item.quantity} units`,
+        salePrice: item.sellingPrice ?? null,
+        sellingDiscount: item.sellingDiscount ?? null,
+      },
+      session
+    );
+  }
+};
+
 export const adjustProductStock = async (data, session = null) => {
   const {
     productId,

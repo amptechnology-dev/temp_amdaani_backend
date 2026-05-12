@@ -7,6 +7,7 @@ import * as transactionService from '../services/transaction.service.js';
 import { deleteTransaction, cancelAllTransactionsForInvoice } from '../services/transaction.service.js';
 import ExcelJS from 'exceljs';
 import * as purchaseService from '../services/purchase.service.js';
+import mongoose from 'mongoose';
 
 export const createInvoice = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
@@ -383,6 +384,125 @@ export const getProfitLossReport = expressAsyncHandler(async (req, res) => {
   return new ApiResponse(200, report, 'Profit loss report fetched successfully').send(res);
 });
 
+export async function getStockBalance(filters) {
+  const { store, itemName, asOnDate, startDate, endDate } = filters;
+
+  // Fix 1: For asOnDate, set time to end-of-day to include all transactions on that date.
+  // For date range, startDate begins at 00:00:00 and endDate ends at 23:59:59.
+  let dateFilter;
+  if (asOnDate) {
+    const endOfDay = new Date(asOnDate);
+    endOfDay.setHours(23, 59, 59, 999);
+    // No lower bound — asOnDate means "all stock up to and including this date"
+    dateFilter = { $lte: endOfDay };
+  } else {
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    dateFilter = { $gte: start, $lte: end };
+  }
+
+  const baseMatch = {
+    store: new mongoose.Types.ObjectId(store), // Fix 2: ensure ObjectId comparison
+    date: dateFilter,
+  };
+
+  const pipeline = [
+    { $match: baseMatch },
+
+    // Join product to get item name
+    {
+      $lookup: {
+        from: 'products',
+        localField: 'product',
+        foreignField: '_id',
+        as: 'productInfo',
+      },
+    },
+    { $unwind: '$productInfo' },
+
+    // Optional item name filter
+    ...(itemName ? [{ $match: { 'productInfo.name': { $regex: itemName, $options: 'i' } } }] : []),
+
+    {
+      $group: {
+        _id: '$product',
+        itemDescription: { $first: '$productInfo.name' },
+
+        // Fix 3: Use abs(quantity) to guard against any negatively-stored OUT quantities
+        totalIn: {
+          $sum: {
+            $cond: [
+              { $eq: ['$direction', 'IN'] },
+              { $abs: '$quantity' }, // always treat as positive
+              0,
+            ],
+          },
+        },
+        totalOut: {
+          $sum: {
+            $cond: [
+              { $eq: ['$direction', 'OUT'] },
+              { $abs: '$quantity' }, // always treat as positive
+              0,
+            ],
+          },
+        },
+
+        // Weighted average cost from IN transactions only
+        totalInValue: {
+          $sum: {
+            $cond: [
+              { $eq: ['$direction', 'IN'] },
+              {
+                $multiply: [{ $abs: '$quantity' }, { $ifNull: ['$rate', 0] }],
+              },
+              0,
+            ],
+          },
+        },
+      },
+    },
+
+    {
+      $project: {
+        _id: 0,
+        itemDescription: 1,
+        totalIn: 1,
+        totalOut: 1,
+        // Fix 4: closing balance = IN - OUT (both are now positive sums)
+        quantity: { $subtract: ['$totalIn', '$totalOut'] },
+        avgRate: {
+          $cond: [{ $gt: ['$totalIn', 0] }, { $divide: ['$totalInValue', '$totalIn'] }, 0],
+        },
+      },
+    },
+
+    {
+      $addFields: {
+        itemValue: {
+          $round: [{ $multiply: ['$quantity', '$avgRate'] }, 2],
+        },
+      },
+    },
+
+    // Fix 5: allow negative balance to show (for audit trail), or keep $ne: 0 if preferred
+    { $match: { quantity: { $ne: 0 } } },
+    { $sort: { itemDescription: 1 } },
+  ];
+
+  const result = await StockTransaction.aggregate(pipeline);
+
+  return result.map(({ itemDescription, quantity, itemValue, totalIn, totalOut }) => ({
+    itemDescription,
+    quantity,
+    itemValue,
+    totalIn,
+    totalOut,
+  }));
+}
+
 export const getItemStockReport = expressAsyncHandler(async (req, res) => {
   const { range, startDate: startRaw, endDate: endRaw, itemName, asOnDate: asOnDateRaw } = req.query;
 
@@ -430,7 +550,7 @@ export const getItemStockReport = expressAsyncHandler(async (req, res) => {
     endDate,
   });
 
-  const report = await invoiceService.getItemStockReport({
+  const report = await invoiceService.getStockBalance({
     store: req.user.store,
     itemName,
     asOnDate,

@@ -541,18 +541,25 @@ export const getLastInvoice = async (store) => {
 export const getProductWiseInvoices = async (filters = {}) => {
   const { store, startDate, endDate } = filters;
 
-  const matchStage = {};
+  const matchStage = {
+    status: { $ne: 'cancelled' }, // exclude cancelled invoices
+  };
 
   if (store) {
-    matchStage.store = store;
+    // Fix 1: always cast to ObjectId — safe whether store is string or ObjectId
+    matchStage.store = new mongoose.Types.ObjectId(String(store));
   }
 
   if (startDate && endDate) {
-    matchStage.invoiceDate = {
-      $gte: startDate,
-      $lte: endDate,
-    };
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    matchStage.invoiceDate = { $gte: start, $lte: end };
   }
+
+  console.log('matchStage =>', JSON.stringify(matchStage));
 
   const result = await Invoice.aggregate([
     { $match: matchStage },
@@ -561,8 +568,11 @@ export const getProductWiseInvoices = async (filters = {}) => {
 
     {
       $project: {
-        date: '$invoiceDate',
+        // Fix 2: keep invoiceDate as-is for sort; alias to `date` AFTER sort
+        invoiceDate: 1,
         invoiceNumber: 1,
+        grandTotal: 1,
+
         product: '$items.name',
         productHsn: '$items.hsn',
         unit: '$items.unit',
@@ -570,22 +580,72 @@ export const getProductWiseInvoices = async (filters = {}) => {
         quantity: '$items.quantity',
         discount: '$items.discount',
         gstRate: '$items.gstRate',
+        lineTotal: '$items.total',
+
+        // Fix 3: compute taxableValue first, then derive gstAmount from it
+        taxableValue: {
+          $cond: {
+            if: '$items.isTaxInclusive',
+            then: {
+              // inclusive: base = total / (1 + gstRate/100)
+              $cond: {
+                if: { $gt: ['$items.gstRate', 0] },
+                then: {
+                  $divide: ['$items.total', { $add: [1, { $divide: ['$items.gstRate', 100] }] }],
+                },
+                else: '$items.total',
+              },
+            },
+            // exclusive: taxable = total / (1 + gstRate/100) — same formula works
+            else: {
+              $cond: {
+                if: { $gt: ['$items.gstRate', 0] },
+                then: {
+                  $divide: ['$items.total', { $add: [1, { $divide: ['$items.gstRate', 100] }] }],
+                },
+                else: '$items.total',
+              },
+            },
+          },
+        },
 
         gstAmount: {
           $round: [
             {
-              $multiply: ['$items.total', { $divide: ['$items.gstRate', 100] }],
+              $cond: {
+                if: { $gt: ['$items.gstRate', 0] },
+                then: {
+                  // gstAmount = total - (total / (1 + rate/100))
+                  $subtract: [
+                    '$items.total',
+                    {
+                      $divide: ['$items.total', { $add: [1, { $divide: ['$items.gstRate', 100] }] }],
+                    },
+                  ],
+                },
+                else: 0,
+              },
             },
             2,
           ],
         },
-
-        lineTotal: '$items.total',
-        grandTotal: '$grandTotal',
       },
     },
 
-    { $sort: { date: 1, invoiceNumber: 1 } },
+    // Fix 2 continued: sort on invoiceDate (still exists at this stage)
+    { $sort: { invoiceDate: 1, invoiceNumber: 1 } },
+
+    // Rename invoiceDate → date only for the final output shape
+    {
+      $addFields: {
+        date: '$invoiceDate',
+      },
+    },
+    {
+      $project: {
+        invoiceDate: 0, // remove the original field from output
+      },
+    },
   ]);
 
   return result;
@@ -835,6 +895,125 @@ export const getProfitLossReport = async (filters = {}) => {
   return result;
 };
 
+// export async function getStockBalance(filters) {
+//   const { store, itemName, asOnDate, startDate, endDate } = filters;
+
+//   // Fix 1: For asOnDate, set time to end-of-day to include all transactions on that date.
+//   // For date range, startDate begins at 00:00:00 and endDate ends at 23:59:59.
+//   let dateFilter;
+//   if (asOnDate) {
+//     const endOfDay = new Date(asOnDate);
+//     endOfDay.setHours(23, 59, 59, 999);
+//     // No lower bound — asOnDate means "all stock up to and including this date"
+//     dateFilter = { $lte: endOfDay };
+//   } else {
+//     const start = new Date(startDate);
+//     start.setHours(0, 0, 0, 0);
+//     const end = new Date(endDate);
+//     end.setHours(23, 59, 59, 999);
+//     dateFilter = { $gte: start, $lte: end };
+//   }
+
+//   const baseMatch = {
+//     store: new mongoose.Types.ObjectId(store), // Fix 2: ensure ObjectId comparison
+//     date: dateFilter,
+//   };
+
+//   const pipeline = [
+//     { $match: baseMatch },
+
+//     // Join product to get item name
+//     {
+//       $lookup: {
+//         from: 'products',
+//         localField: 'product',
+//         foreignField: '_id',
+//         as: 'productInfo',
+//       },
+//     },
+//     { $unwind: '$productInfo' },
+
+//     // Optional item name filter
+//     ...(itemName ? [{ $match: { 'productInfo.name': { $regex: itemName, $options: 'i' } } }] : []),
+
+//     {
+//       $group: {
+//         _id: '$product',
+//         itemDescription: { $first: '$productInfo.name' },
+
+//         // Fix 3: Use abs(quantity) to guard against any negatively-stored OUT quantities
+//         totalIn: {
+//           $sum: {
+//             $cond: [
+//               { $eq: ['$direction', 'IN'] },
+//               { $abs: '$quantity' }, // always treat as positive
+//               0,
+//             ],
+//           },
+//         },
+//         totalOut: {
+//           $sum: {
+//             $cond: [
+//               { $eq: ['$direction', 'OUT'] },
+//               { $abs: '$quantity' }, // always treat as positive
+//               0,
+//             ],
+//           },
+//         },
+
+//         // Weighted average cost from IN transactions only
+//         totalInValue: {
+//           $sum: {
+//             $cond: [
+//               { $eq: ['$direction', 'IN'] },
+//               {
+//                 $multiply: [{ $abs: '$quantity' }, { $ifNull: ['$rate', 0] }],
+//               },
+//               0,
+//             ],
+//           },
+//         },
+//       },
+//     },
+
+//     {
+//       $project: {
+//         _id: 0,
+//         itemDescription: 1,
+//         totalIn: 1,
+//         totalOut: 1,
+//         // Fix 4: closing balance = IN - OUT (both are now positive sums)
+//         quantity: { $subtract: ['$totalIn', '$totalOut'] },
+//         avgRate: {
+//           $cond: [{ $gt: ['$totalIn', 0] }, { $divide: ['$totalInValue', '$totalIn'] }, 0],
+//         },
+//       },
+//     },
+
+//     {
+//       $addFields: {
+//         itemValue: {
+//           $round: [{ $multiply: ['$quantity', '$avgRate'] }, 2],
+//         },
+//       },
+//     },
+
+//     // Fix 5: allow negative balance to show (for audit trail), or keep $ne: 0 if preferred
+//     { $match: { quantity: { $ne: 0 } } },
+//     { $sort: { itemDescription: 1 } },
+//   ];
+
+//   const result = await StockTransaction.aggregate(pipeline);
+
+//   return result.map(({ itemDescription, quantity, itemValue, totalIn, totalOut }) => ({
+//     itemDescription,
+//     quantity,
+//     itemValue,
+//     totalIn,
+//     totalOut,
+//   }));
+// }
+
 export const getItemStockReport = async (filters = {}) => {
   const { store, itemName, asOnDate, startDate, endDate } = filters;
 
@@ -907,6 +1086,138 @@ export const getItemStockReport = async (filters = {}) => {
   ];
 
   const result = await StockTransaction.aggregate(pipeline);
+
+  return result.map(({ itemDescription, quantity, itemValue, totalIn, totalOut }) => ({
+    itemDescription,
+    quantity,
+    itemValue,
+    totalIn,
+    totalOut,
+  }));
+};
+
+export const getStockBalance = async (filters = {}) => {
+  const { store, itemName, asOnDate, startDate, endDate } = filters;
+
+  // Build base match from Product collection
+  const baseMatch = {
+    store: new mongoose.Types.ObjectId(String(store)),
+    status: { $ne: 'cancelled' },
+    currentStock: { $ne: 0 }, // omit zero-stock items
+  };
+
+  // itemName filter
+  if (itemName) {
+    baseMatch.name = { $regex: itemName, $options: 'i' };
+  }
+
+  const pipeline = [
+    { $match: baseMatch },
+
+    // Lookup stock transactions to compute totalIn / totalOut for the date range
+    {
+      $lookup: {
+        from: 'stocktransactions',
+        let: { productId: '$_id' },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$product', '$$productId'] },
+                  { $eq: ['$store', new mongoose.Types.ObjectId(String(store))] },
+                  // Date filter — asOnDate means all transactions up to that date
+                  ...(asOnDate
+                    ? [{ $lte: ['$date', new Date(new Date(asOnDate).setHours(23, 59, 59, 999))] }]
+                    : [
+                        { $gte: ['$date', new Date(new Date(startDate).setHours(0, 0, 0, 0))] },
+                        { $lte: ['$date', new Date(new Date(endDate).setHours(23, 59, 59, 999))] },
+                      ]),
+                ],
+              },
+            },
+          },
+        ],
+        as: 'transactions',
+      },
+    },
+
+    {
+      $addFields: {
+        totalIn: {
+          $sum: {
+            $map: {
+              input: '$transactions',
+              as: 'tx',
+              in: {
+                $cond: [{ $eq: ['$$tx.direction', 'IN'] }, { $abs: '$$tx.quantity' }, 0],
+              },
+            },
+          },
+        },
+        totalOut: {
+          $sum: {
+            $map: {
+              input: '$transactions',
+              as: 'tx',
+              in: {
+                $cond: [{ $eq: ['$$tx.direction', 'OUT'] }, { $abs: '$$tx.quantity' }, 0],
+              },
+            },
+          },
+        },
+        totalInValue: {
+          $sum: {
+            $map: {
+              input: '$transactions',
+              as: 'tx',
+              in: {
+                $cond: [
+                  { $eq: ['$$tx.direction', 'IN'] },
+                  { $multiply: [{ $abs: '$$tx.quantity' }, { $ifNull: ['$$tx.rate', 0] }] },
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+
+    {
+      $project: {
+        _id: 0,
+        itemDescription: '$name',
+
+        // Use currentStock directly from Product — source of truth
+        quantity: '$currentStock',
+
+        totalIn: 1,
+        totalOut: 1,
+
+        // Weighted average rate from IN transactions; fall back to lastPurchasePrice or costPrice
+        avgRate: {
+          $cond: [
+            { $gt: ['$totalIn', 0] },
+            { $divide: ['$totalInValue', '$totalIn'] },
+            { $ifNull: ['$lastPurchasePrice', { $ifNull: ['$costPrice', 0] }] },
+          ],
+        },
+      },
+    },
+
+    {
+      $addFields: {
+        itemValue: {
+          $round: [{ $multiply: ['$quantity', '$avgRate'] }, 2],
+        },
+      },
+    },
+
+    { $sort: { itemDescription: 1 } },
+  ];
+
+  const result = await Product.aggregate(pipeline);
 
   return result.map(({ itemDescription, quantity, itemValue, totalIn, totalOut }) => ({
     itemDescription,

@@ -1281,3 +1281,52 @@ export const modifyDueAmount = async (invoiceId, amountPaid, amountDue) => {
   const paymentStatus = amountPaid === 0 ? 'unpaid' : amountDue === 0 ? 'paid' : 'partial';
   return Invoice.findByIdAndUpdate(invoiceId, { amountPaid, amountDue, paymentStatus }, { new: true });
 };
+
+export const cancelAfterSaleStock = async (invoiceId) => {
+  const MAX_RETRIES = 3;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const session = await mongoose.startSession();
+    session.startTransaction({
+      readConcern: { level: 'snapshot' },
+      writeConcern: { w: 'majority' },
+    });
+
+    try {
+      const existingInvoice = await Invoice.findOne({
+        _id: invoiceId,
+      }).session(session);
+
+      if (!existingInvoice) {
+        throw new Error(`Purchase not found: ${invoiceId}`);
+      }
+
+      // Step 1: Reverse stock
+      await reverseStockAfterSale(existingInvoice, session); // ✅ fixed name
+
+      // Step 2: Reverse vendor payment ledger
+
+      await session.commitTransaction(); // ✅ was missing entirely
+      await session.endSession();
+
+      return existingInvoice;
+    } catch (error) {
+      // Only abort if transaction is still active
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+      }
+      await session.endSession(); // ✅ single, safe cleanup
+
+      const isTransient = error?.errorLabels?.includes('TransientTransactionError') || error?.code === 112;
+
+      if (isTransient && attempt < MAX_RETRIES - 1) {
+        console.warn(`⚠️ TransientTransactionError on cancel, retrying... attempt ${attempt + 1}`);
+        await new Promise((res) => setTimeout(res, 50 * (attempt + 1)));
+        continue; // ✅ retry with a fresh session
+      }
+
+      console.error('❌ cancelAfterPurchaseStock error:', error.message);
+      throw error;
+    }
+  }
+};

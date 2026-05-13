@@ -115,5 +115,9 @@ export const changePurchaseStatus = expressAsyncHandler(async (req, res) => {
   if (status === 'cancelled') {
     await cancelAllTransactionsForInvoice(invoice._id);
   }
+
+  if (status === 'cancelled') {
+    await purchaseService.cancelAfterPurchaseStock(id);
+  }
   return new ApiResponse(200, invoice, 'Invoice status changed successfully').send(res);
 });

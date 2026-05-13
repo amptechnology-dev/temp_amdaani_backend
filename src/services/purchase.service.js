@@ -257,6 +257,36 @@ export const reverseStockAfterPurchase = async (purchase, session = null) => {
   }
 };
 
+export const reverseStockAfterPurchaseDelete = async (purchase, session = null) => {
+  const { items = [], date, _id: purchaseId } = purchase;
+  if (!items.length) return;
+
+  console.log('reves => ', items);
+
+  // ✅ Delete old stock transactions tied to this purchase
+  await StockTransaction.deleteMany({ purchaseId }, { session });
+
+  // ✅ Reverse each item by applying negative quantity
+  for (const item of items) {
+    await adjustProductStock(
+      {
+        productId: item.product,
+        date: date || new Date(),
+        transactionType: StockTransactionType.PURCHASE_REVERSE,
+        quantity: -item.quantity, // 👈 negative to subtract stock
+        rate: item.rate,
+        batchId: item.batch,
+        purchaseId,
+        purchasePrice: item.rate,
+        remarks: `Purchase reversed for ${item.quantity} units`,
+        salePrice: item.sellingPrice,
+        sellingDiscount: item.sellingDiscount,
+      },
+      session
+    );
+  }
+};
+
 export const getPurchaseById = async (id) => {
   const purchase = await Purchase.findById(id);
   if (!purchase) return null;
@@ -331,75 +361,134 @@ export const modifyDueAmount = async (purchaseId, amountPaid, amountDue) => {
   return Purchase.findByIdAndUpdate(purchaseId, { amountPaid, amountDue, paymentStatus }, { new: true });
 };
 
-export const deletePurchase = async (purchaseId, storeId) => {
+// export const deletePurchase = async (purchaseId, storeId) => {
+//   const MAX_RETRIES = 3;
+//   let attempt = 0;
+
+//   while (attempt < MAX_RETRIES) {
+//     const session = await mongoose.startSession();
+//     try {
+//       session.startTransaction({
+//         readConcern: { level: 'snapshot' },
+//         writeConcern: { w: 'majority' },
+//       });
+
+//       // Fetch inside transaction for snapshot consistency
+//       const existingPurchase = await Purchase.findOne({
+//         _id: purchaseId,
+//         store: storeId,
+//       }).session(session);
+
+//       if (!existingPurchase) {
+//         throw new ApiError(404, 'Purchase not found!', [
+//           { source: 'params', field: 'id', message: 'Purchase not found' },
+//         ]);
+//       }
+
+//       // Step 1: Reverse stock for every item in this purchase
+//       await reverseStockAfterDelete(existingPurchase, session);
+
+//       // Step 2: Reverse vendor payment ledger if any amount was paid
+//       await updateVendorPayment(
+//         {
+//           store: existingPurchase.store,
+//           purchase: existingPurchase._id,
+//           amount: 0, // zero out the payment
+//           paymentMethod: existingPurchase.paymentMethod,
+//           note: 'Purchase deleted',
+//         },
+//         session
+//       );
+
+//       // Step 3: Hard delete the purchase document
+//       await Purchase.deleteOne({ _id: purchaseId }, { session });
+
+//       await session.commitTransaction();
+//       return existingPurchase;
+//     } catch (error) {
+//       await session.abortTransaction();
+
+//       const isTransient = error?.errorLabels?.includes('TransientTransactionError') || error?.code === 112;
+
+//       if (isTransient && attempt < MAX_RETRIES - 1) {
+//         attempt++;
+//         console.warn(`⚠️ TransientTransactionError on delete, retrying... attempt ${attempt}`);
+//         await session.endSession();
+//         await new Promise((res) => setTimeout(res, 50 * attempt));
+//         continue;
+//       }
+
+//       await session.endSession();
+//       console.error('❌ deletePurchase error:', error.message);
+//       throw error;
+//     } finally {
+//       if (session.inTransaction()) {
+//         await session.abortTransaction();
+//       }
+//       session.endSession().catch(() => {});
+//     }
+//   }
+// };
+
+export const changePurchaseInvoiceStatus = async (invoiceId, status) => {
+  return Purchase.findByIdAndUpdate(invoiceId, { status }, { new: true });
+};
+
+export const cancelAfterPurchaseStock = async (purchaseId) => {
   const MAX_RETRIES = 3;
-  let attempt = 0;
 
-  while (attempt < MAX_RETRIES) {
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const session = await mongoose.startSession();
-    try {
-      session.startTransaction({
-        readConcern: { level: 'snapshot' },
-        writeConcern: { w: 'majority' },
-      });
+    session.startTransaction({
+      readConcern: { level: 'snapshot' },
+      writeConcern: { w: 'majority' },
+    });
 
-      // Fetch inside transaction for snapshot consistency
+    try {
       const existingPurchase = await Purchase.findOne({
         _id: purchaseId,
-        store: storeId,
       }).session(session);
 
       if (!existingPurchase) {
-        throw new ApiError(404, 'Purchase not found!', [
-          { source: 'params', field: 'id', message: 'Purchase not found' },
-        ]);
+        throw new Error(`Purchase not found: ${purchaseId}`);
       }
 
-      // Step 1: Reverse stock for every item in this purchase
-      await reverseStockAfterDelete(existingPurchase, session);
+      // Step 1: Reverse stock
+      await reverseStockAfterPurchaseDelete(existingPurchase, session); // ✅ fixed name
 
-      // Step 2: Reverse vendor payment ledger if any amount was paid
+      // Step 2: Reverse vendor payment ledger
       await updateVendorPayment(
         {
           store: existingPurchase.store,
           purchase: existingPurchase._id,
-          amount: 0, // zero out the payment
+          amount: 0,
           paymentMethod: existingPurchase.paymentMethod,
           note: 'Purchase deleted',
         },
         session
       );
 
-      // Step 3: Hard delete the purchase document
-      await Purchase.deleteOne({ _id: purchaseId }, { session });
+      await session.commitTransaction(); // ✅ was missing entirely
+      await session.endSession();
 
-      await session.commitTransaction();
       return existingPurchase;
     } catch (error) {
-      await session.abortTransaction();
+      // Only abort if transaction is still active
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+      }
+      await session.endSession(); // ✅ single, safe cleanup
 
       const isTransient = error?.errorLabels?.includes('TransientTransactionError') || error?.code === 112;
 
       if (isTransient && attempt < MAX_RETRIES - 1) {
-        attempt++;
-        console.warn(`⚠️ TransientTransactionError on delete, retrying... attempt ${attempt}`);
-        await session.endSession();
-        await new Promise((res) => setTimeout(res, 50 * attempt));
-        continue;
+        console.warn(`⚠️ TransientTransactionError on cancel, retrying... attempt ${attempt + 1}`);
+        await new Promise((res) => setTimeout(res, 50 * (attempt + 1)));
+        continue; // ✅ retry with a fresh session
       }
 
-      await session.endSession();
-      console.error('❌ deletePurchase error:', error.message);
+      console.error('❌ cancelAfterPurchaseStock error:', error.message);
       throw error;
-    } finally {
-      if (session.inTransaction()) {
-        await session.abortTransaction();
-      }
-      session.endSession().catch(() => {});
     }
   }
-};
-
-export const changePurchaseInvoiceStatus = async (invoiceId, status) => {
-  return Purchase.findByIdAndUpdate(invoiceId, { status }, { new: true });
 };

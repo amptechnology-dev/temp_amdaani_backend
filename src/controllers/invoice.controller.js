@@ -576,6 +576,10 @@ export const changeInvoiceStatus = expressAsyncHandler(async (req, res) => {
   if (status === 'cancelled') {
     await cancelAllTransactionsForInvoice(invoice._id);
   }
+
+  if (status === 'cancelled') {
+      await invoiceService.cancelAfterSaleStock(id);
+    }
   return new ApiResponse(200, invoice, 'Invoice status changed successfully').send(res);
 });
 export const getTransactionsByStore = expressAsyncHandler(async (req, res) => {
@@ -603,3 +607,5 @@ export const removePaymentFromInvoice = expressAsyncHandler(async (req, res) => 
   const updatedInvoice = await invoiceService.modifyDueAmount(payment.invoice, amountPaid, amountDue);
   return new ApiResponse(200, updatedInvoice, 'Payment removed successfully').send(res);
 });
+
+

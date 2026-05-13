@@ -102,14 +102,9 @@ export const findOrCreateProduct = async (store, data, session = null) => {
   return null;
 };
 
-export const getAllProductsWithSales = async (
-  storeId,
-  startDate,
-  endDate,
-  search = ""
-) => {
+export const getAllProductsWithSales = async (storeId, startDate, endDate, search = '') => {
   const invoiceMatch = {
-    status: "active",
+    status: 'active',
   };
 
   // invoice date filter
@@ -133,16 +128,16 @@ export const getAllProductsWithSales = async (
         // product name search
         name: {
           $regex: search,
-          $options: "i",
+          $options: 'i',
         },
       },
     },
 
     {
       $lookup: {
-        from: "invoices",
+        from: 'invoices',
         let: {
-          productId: "$_id",
+          productId: '$_id',
         },
 
         pipeline: [
@@ -151,16 +146,13 @@ export const getAllProductsWithSales = async (
           },
 
           {
-            $unwind: "$items",
+            $unwind: '$items',
           },
 
           {
             $match: {
               $expr: {
-                $eq: [
-                  "$items.product",
-                  "$$productId",
-                ],
+                $eq: ['$items.product', '$$productId'],
               },
             },
           },
@@ -170,22 +162,19 @@ export const getAllProductsWithSales = async (
               _id: null,
 
               totalQuantity: {
-                $sum: "$items.quantity",
+                $sum: '$items.quantity',
               },
 
               totalRevenue: {
                 $sum: {
-                  $multiply: [
-                    "$items.quantity",
-                    "$items.sellingPrice",
-                  ],
+                  $multiply: ['$items.quantity', '$items.sellingPrice'],
                 },
               },
             },
           },
         ],
 
-        as: "salesData",
+        as: 'salesData',
       },
     },
 
@@ -200,10 +189,7 @@ export const getAllProductsWithSales = async (
         totalSold: {
           $ifNull: [
             {
-              $arrayElemAt: [
-                "$salesData.totalQuantity",
-                0,
-              ],
+              $arrayElemAt: ['$salesData.totalQuantity', 0],
             },
             0,
           ],
@@ -212,10 +198,7 @@ export const getAllProductsWithSales = async (
         totalRevenue: {
           $ifNull: [
             {
-              $arrayElemAt: [
-                "$salesData.totalRevenue",
-                0,
-              ],
+              $arrayElemAt: ['$salesData.totalRevenue', 0],
             },
             0,
           ],
@@ -284,30 +267,29 @@ const adjustProductStockForSale = async (data, session = null) => {
   return stockTransaction.save({ session });
 };
 
-export const reverseStockAfterDelete = async (purchase, session = null) => {
+export const reverseStockAfterPurchaseDelete = async (purchase, session = null) => {
   const { items = [], date, _id: purchaseId } = purchase;
+
   if (!items.length) return;
 
-  console.log('reverseStockAfterDelete =>', JSON.stringify(items));
-
-  // Delete all stock transactions tied to this purchase first
+  // ✅ Delete old stock transactions tied to this purchase
   await StockTransaction.deleteMany({ purchaseId }, { session });
 
-  // Subtract exactly what was originally purchased from each product
+  // ✅ Reverse each item by applying negative quantity
   for (const item of items) {
     await adjustProductStock(
       {
         productId: item.product,
         date: date || new Date(),
         transactionType: StockTransactionType.PURCHASE_REVERSE,
-        quantity: -Math.abs(item.quantity), // always negative — subtract from stock
-        rate: item.rate ?? item.costPrice ?? 0,
-        batchId: item.batch ?? null,
+        quantity: -item.quantity, // negative to subtract stock
+        rate: item.rate,
+        batchId: item.batch,
         purchaseId,
-        purchasePrice: item.rate ?? item.costPrice ?? null,
-        remarks: `Purchase deleted — reversed ${item.quantity} units`,
-        salePrice: item.sellingPrice ?? null,
-        sellingDiscount: item.sellingDiscount ?? null,
+        purchasePrice: item.rate,
+        remarks: `Purchase reversed for ${item.quantity} units`,
+        salePrice: item.sellingPrice,
+        sellingDiscount: item.sellingDiscount,
       },
       session
     );

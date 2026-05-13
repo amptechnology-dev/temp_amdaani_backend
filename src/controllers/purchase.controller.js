@@ -72,16 +72,52 @@ export const removePaymentFromPurchase = expressAsyncHandler(async (req, res) =>
 //   return new ApiResponse(200, purchase, 'Purchase deleted successfully').send(res);
 // });
 
-export const getAllVendorPaymentsByStore = expressAsyncHandler(async (req, res) => {
-  const startDate = new Date(req.query.startDate);
-  const endDate = new Date(req.query.endDate || new Date());
+export const getAllVendorPaymentsByStore =
+  expressAsyncHandler(
+    async (req, res) => {
 
-  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-    throw new ApiError(400, 'Invalid date range!');
-  }
-  const transactions = await getVendorPaymentsByStore(req.user.store, startDate, endDate);
-  return new ApiResponse(200, transactions, 'Payments fetched successfully').send(res);
-});
+      const {
+        startDate,
+        endDate,
+      } = req.query;
+
+      let parsedStartDate = null;
+      let parsedEndDate = null;
+
+      // Validate only if date exists
+      if (startDate && endDate) {
+
+        parsedStartDate =
+          new Date(startDate);
+
+        parsedEndDate =
+          new Date(endDate);
+
+        if (
+          isNaN(parsedStartDate.getTime()) ||
+          isNaN(parsedEndDate.getTime())
+        ) {
+          throw new ApiError(
+            400,
+            'Invalid date range!'
+          );
+        }
+      }
+
+      const transactions =
+        await getVendorPaymentsByStore(
+          req.user.store,
+          parsedStartDate,
+          parsedEndDate
+        );
+
+      return new ApiResponse(
+        200,
+        transactions,
+        'Payments fetched successfully'
+      ).send(res);
+    }
+  );
 
 export const getLastPurchase = expressAsyncHandler(async (req, res) => {
   const purchase = await purchaseService.getLastPurchase(req.user.store);

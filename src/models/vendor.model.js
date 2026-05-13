@@ -9,6 +9,10 @@ const vendorSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    userId: {
+      type: mongoose.SchemaTypes.ObjectId,
+      ref: 'User',
+    },
     name: {
       type: String,
       trim: true,

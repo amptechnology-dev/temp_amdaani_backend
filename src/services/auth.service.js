@@ -245,35 +245,152 @@ export const verifyOtp = async (
   };
 };
 
-export const verifySuperAdminLogin = async (otp) => {
-  const role = await Role.findOne({ name: roles.SUPERADMIN });
-  if (!role) {
-    throw new ApiError(400, 'Super Admin role not found');
-  }
-  const user = await User.findOne({ role: role._id });
-  if (!user) {
-    throw new ApiError(400, 'Super Admin user not found');
-  }
-  const phone = user.phone;
-  const storedHash = await redis.get(`otp:${phone}`);
-  if (!storedHash) {
-    throw new ApiError(400, 'Invalid OTP!', [
-      { source: 'body', field: 'otp', message: 'OTP not found or expired' },
-    ]);
-  }
-  const incomingHash = crypto
-    .createHash('sha256')
-    .update(otp)
-    .digest('hex');
+export const verifySuperAdminLogin = async (
+  otp,
+  req
+) => {
 
-  if (incomingHash !== storedHash) {
-    throw new ApiError(400, 'Invalid OTP!', [
-      { source: 'body', field: 'otp', message: 'Incorrect OTP' },
-    ]);
+  const role =
+    await Role.findOne({
+      name: roles.SUPERADMIN,
+    });
+
+  if (!role) {
+    throw new ApiError(
+      400,
+      'Super Admin role not found'
+    );
   }
-  await redis.del(`otp:${phone}`);
-  const token = await generateSuperAdminToken(user._id);
-  return { token };
+
+  const user =
+    await User.findOne({
+      role: role._id,
+    });
+
+  if (!user) {
+    throw new ApiError(
+      400,
+      'Super Admin user not found'
+    );
+  }
+
+  const phone =
+    user.phone;
+
+  // Get OTP from Redis
+  const storedHash =
+    await redis.get(
+      `otp:${phone}`
+    );
+
+  if (!storedHash) {
+    throw new ApiError(
+      400,
+      'OTP expired or not found',
+      [
+        {
+          source: 'body',
+          field: 'otp',
+          message:
+            'OTP not found or expired',
+        },
+      ]
+    );
+  }
+
+  // Hash incoming OTP
+  const incomingHash =
+    crypto
+      .createHash('sha256')
+      .update(String(otp))
+      .digest('hex');
+
+  // Compare OTP
+  if (
+    incomingHash !==
+    storedHash
+  ) {
+    throw new ApiError(
+      400,
+      'Invalid OTP!',
+      [
+        {
+          source: 'body',
+          field: 'otp',
+          message:
+            'Incorrect OTP',
+        },
+      ]
+    );
+  }
+
+  // Generate token
+  const token =
+    await generateSuperAdminToken(
+      user._id
+    );
+
+  console.log(
+    'SUPER ADMIN TOKEN:',
+    token
+  );
+
+  // Save login activity
+  const loginInfo =
+    await saveLoginActivity(
+      user._id,
+      req
+    );
+
+  // Extract token properly
+  const accessToken =
+    typeof token === 'string'
+      ? token
+      : token?.accessToken;
+
+  // Validate token
+  if (!accessToken) {
+    throw new ApiError(
+      500,
+      'Token generation failed'
+    );
+  }
+
+  // Save session
+  await createUserSession({
+    userId: user._id,
+
+    accessToken,
+
+    // super admin refresh token নাই
+    refreshToken:
+      'super-admin',
+
+    device:
+      loginInfo?.device ||
+      'Unknown',
+
+    browser:
+      loginInfo?.browser ||
+      'Unknown',
+
+    os:
+      loginInfo?.os ||
+      'Unknown',
+
+    ipAddress:
+      loginInfo?.ipAddress ||
+      'Unknown',
+  });
+
+  // Delete OTP after success
+  await redis.del(
+    `otp:${phone}`
+  );
+
+  return {
+    token,
+  };
 };
 
 export const registerUserWithStore = async (storeData, userData, files) => {

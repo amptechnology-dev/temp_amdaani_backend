@@ -4,6 +4,7 @@ import mongooseAggregatePaginate from 'mongoose-aggregate-paginate-v2';
 const productSchema = new mongoose.Schema(
   {
     store: { type: mongoose.SchemaTypes.ObjectId, ref: 'Store', required: true },
+    userId: { type: mongoose.SchemaTypes.ObjectId, ref: 'User'},
     name: { type: String, required: true, trim: true },
     slug: String,
     category: { type: mongoose.SchemaTypes.ObjectId, ref: 'Category' },

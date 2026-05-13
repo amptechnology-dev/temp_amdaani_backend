@@ -44,6 +44,7 @@ const purchaseItemSchema = new mongoose.Schema({
 const purchaseSchema = new mongoose.Schema(
   {
     store: { type: mongoose.Schema.Types.ObjectId, ref: 'Store', required: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     vendor: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor' },
     vendorName: String,
     vendorMobile: String,

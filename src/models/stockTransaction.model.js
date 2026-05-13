@@ -5,6 +5,7 @@ import { StockTransactionType } from '../config/constants.js';
 const stockTransactionSchema = new mongoose.Schema(
   {
     store: { type: mongoose.Schema.Types.ObjectId, ref: 'Store', required: true },
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
     batch: { type: mongoose.Schema.Types.ObjectId, ref: 'Batch' },
     date: { type: Date, required: true },

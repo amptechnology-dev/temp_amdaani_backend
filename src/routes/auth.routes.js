@@ -21,6 +21,7 @@ router.post(
 );
 router.post('/logout', authenticate, authController.logoutAuth);
 router.post('/logout-all-other-devices', authenticate, authController.logoutAllOtherDevices);
+router.get('/verify-session', authenticate, authController.verifySession);
 router.post('/refresh-tokens', validate(authSchema.refreshToken), authController.refreshTokens);
 router.get('/me', authenticate, authController.getProfile);
 router.post('/register-superadmin', authController.createSuperAdminUser);

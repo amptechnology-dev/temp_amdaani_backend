@@ -166,7 +166,7 @@ export const getProfile = asyncHandler(async (req, res) => {
 });
 
 export const superAdminAuth = asyncHandler(async (req, res) => {
-  const token = await verifySuperAdminLogin(req.body.otp);
+  const token = await verifySuperAdminLogin(req.body.otp, req);
   return new ApiResponse(200, token, 'Super admin logged in successfully').send(res);
 });
 
@@ -538,3 +538,11 @@ export const logoutAllOtherDevices =
       'Logged out from all other devices successfully'
     ).send(res);
   });
+
+export const verifySession = asyncHandler(async (req, res) => {
+  return new ApiResponse(
+    200,
+    req.user,
+    'Session valid'
+  ).send(res);
+});

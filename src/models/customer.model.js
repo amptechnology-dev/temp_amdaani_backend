@@ -9,6 +9,11 @@ const customerSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    userId: {
+      type: mongoose.SchemaTypes.ObjectId,
+      ref: 'User',
+      index: true,
+    },
     name: {
       type: String,
       trim: true,

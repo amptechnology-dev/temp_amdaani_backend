@@ -17,6 +17,7 @@ const invoiceItemSchema = new mongoose.Schema({
 const invoiceSchema = new mongoose.Schema(
   {
     store: { type: mongoose.Schema.Types.ObjectId, ref: 'Store', required: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
     customerName: { type: String },
     customerMobile: { type: String },

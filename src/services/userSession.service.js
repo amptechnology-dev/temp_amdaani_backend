@@ -26,11 +26,16 @@ export const createUserSession = async ({
 };
 
 export const getActiveSession = async (
-  accessToken
+  token
 ) => {
+
   return UserSession.findOne({
-    accessToken,
     isActive: true,
+
+    $or: [
+      { accessToken: token },
+      { refreshToken: token },
+    ],
   });
 };
 

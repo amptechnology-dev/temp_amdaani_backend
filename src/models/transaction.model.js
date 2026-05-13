@@ -7,6 +7,10 @@ const transactionSchema = new mongoose.Schema(
       ref: 'Store',
       required: true,
     },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
     invoice: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Invoice',

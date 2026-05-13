@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 const categorySchema = new mongoose.Schema(
   {
     store: { type: mongoose.SchemaTypes.ObjectId, ref: 'Store', required: true },
+    userId: { type: mongoose.SchemaTypes.ObjectId, ref: 'User'},
     name: { type: String, required: true, trim: true },
     slug: String,
     gstRate: Number,

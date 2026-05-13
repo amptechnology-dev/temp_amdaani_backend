@@ -8,6 +8,10 @@ const ExpenseSchema = new mongoose.Schema(
       ref: 'Store',
       required: true,
     },
+    userId:{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
     date: { type: Date, required: true },
     head: {
       type: mongoose.Schema.Types.ObjectId,

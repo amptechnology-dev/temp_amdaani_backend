@@ -7,6 +7,10 @@ const vendorPaymentSchema = new mongoose.Schema(
       ref: 'Store',
       required: true,
     },
+    userId:{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
     purchase: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Purchase',

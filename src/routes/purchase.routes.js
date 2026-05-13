@@ -17,10 +17,11 @@ router.route('/id/:id').get(purchaseController.getPurchaseById);
 router.post('/add-payment/:purchaseId', validate(purchaseSchema.addPayment), purchaseController.addPayment);
 router.delete('/remove-payment/:paymentId', purchaseController.removePaymentFromPurchase);
 router.get('/transactions', purchaseController.getAllVendorPaymentsByStore);
-/*
-router.route('/last').get(purchaseController.getLastInvoice);
-router.get('/product-wise', purchaseController.getProductWiseInvoices);
-router.put('/status/:id', validate(purchaseSchema.changePurchaseStatus), purchaseController.changePurchaseStatus);
-*/
+//router.delete("/:id",)
+//router.delete('/id/:id', purchaseController.deletePurchase);
 
+//router.route('/last').get(purchaseController.getLastInvoice);
+//router.get('/product-wise', purchaseController.getProductWiseInvoices);
+//router.put('/status/:id', validate(purchaseSchema.changePurchaseStatus), purchaseController.changePurchaseStatus);
+router.put('/status/:id', validate(purchaseSchema.changePurchaseStatus), purchaseController.changePurchaseStatus);
 export default router;

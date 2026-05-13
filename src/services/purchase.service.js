@@ -66,18 +66,16 @@ export const createPurchase = async (data) => {
 
       await updateStockAfterPurchase(purchase, session);
 
-      if (purchase.paymentStatus === 'partial') {
-        await createVendorPayment(
-          {
-            store: purchase.store,
-            purchase: purchase._id,
-            amount: purchase.amountPaid,
-            paymentMethod: purchase.paymentMethod,
-            note: purchase.paymentNote,
-          },
-          session
-        );
-      }
+      await createVendorPayment(
+        {
+          store: purchase.store,
+          purchase: purchase._id,
+          amount: purchase.amountPaid,
+          paymentMethod: purchase.paymentMethod,
+          note: purchase.paymentNote,
+        },
+        session
+      );
 
       await session.commitTransaction();
       return purchase;
@@ -179,7 +177,7 @@ export const updatePurchase = async (purchaseId, data) => {
       console.log('=> existingPurchase:', JSON.stringify(existingPurchase));
 
       // ✅ Reverse old stock before applying new stock
-      await reverseStockAfterPurchase(existingPurchase, session);
+      await reverseStockAfterPurchase(data, session);
 
       Object.assign(existingPurchase, purchasePayload);
       await existingPurchase.save({ session });
@@ -188,18 +186,17 @@ export const updatePurchase = async (purchaseId, data) => {
       await updateStockAfterPurchase(data, session);
 
       // ✅ Handle partial payment update
-      if (existingPurchase.paymentStatus === 'partial') {
-        await updateVendorPayment(
-          {
-            store: existingPurchase.store,
-            purchase: existingPurchase._id,
-            amount: existingPurchase.amountPaid,
-            paymentMethod: existingPurchase.paymentMethod,
-            note: existingPurchase.paymentNote,
-          },
-          session
-        );
-      }
+
+      await updateVendorPayment(
+        {
+          store: existingPurchase.store,
+          purchase: existingPurchase._id,
+          amount: existingPurchase.amountPaid,
+          paymentMethod: existingPurchase.paymentMethod,
+          note: existingPurchase.paymentNote,
+        },
+        session
+      );
 
       await session.commitTransaction();
       return existingPurchase;
@@ -231,6 +228,36 @@ export const updatePurchase = async (purchaseId, data) => {
 };
 
 export const reverseStockAfterPurchase = async (purchase, session = null) => {
+  const { items = [], date, _id: purchaseId } = purchase;
+  if (!items.length) return;
+
+  console.log('reves => ', items);
+
+  // ✅ Delete old stock transactions tied to this purchase
+  await StockTransaction.deleteMany({ purchaseId }, { session });
+
+  // ✅ Reverse each item by applying negative quantity
+  for (const item of items) {
+    await adjustProductStock(
+      {
+        productId: item.product,
+        date: date || new Date(),
+        transactionType: StockTransactionType.PURCHASE_REVERSE,
+        quantity: item.previousQuantity <= item.quantity ? -item.previousQuantity : -item.previousQuantity, // 👈 negative to subtract stock
+        rate: item.rate,
+        batchId: item.batch,
+        purchaseId,
+        purchasePrice: item.rate,
+        remarks: `Purchase reversed for ${item.quantity} units`,
+        salePrice: item.sellingPrice,
+        sellingDiscount: item.sellingDiscount,
+      },
+      session
+    );
+  }
+};
+
+export const reverseStockAfterPurchaseDelete = async (purchase, session = null) => {
   const { items = [], date, _id: purchaseId } = purchase;
   if (!items.length) return;
 
@@ -332,4 +359,136 @@ export const addPaymentToPurchase = async (purchaseId, paymentData) => {
 export const modifyDueAmount = async (purchaseId, amountPaid, amountDue) => {
   const paymentStatus = amountPaid === 0 ? 'unpaid' : amountDue === 0 ? 'paid' : 'partial';
   return Purchase.findByIdAndUpdate(purchaseId, { amountPaid, amountDue, paymentStatus }, { new: true });
+};
+
+// export const deletePurchase = async (purchaseId, storeId) => {
+//   const MAX_RETRIES = 3;
+//   let attempt = 0;
+
+//   while (attempt < MAX_RETRIES) {
+//     const session = await mongoose.startSession();
+//     try {
+//       session.startTransaction({
+//         readConcern: { level: 'snapshot' },
+//         writeConcern: { w: 'majority' },
+//       });
+
+//       // Fetch inside transaction for snapshot consistency
+//       const existingPurchase = await Purchase.findOne({
+//         _id: purchaseId,
+//         store: storeId,
+//       }).session(session);
+
+//       if (!existingPurchase) {
+//         throw new ApiError(404, 'Purchase not found!', [
+//           { source: 'params', field: 'id', message: 'Purchase not found' },
+//         ]);
+//       }
+
+//       // Step 1: Reverse stock for every item in this purchase
+//       await reverseStockAfterDelete(existingPurchase, session);
+
+//       // Step 2: Reverse vendor payment ledger if any amount was paid
+//       await updateVendorPayment(
+//         {
+//           store: existingPurchase.store,
+//           purchase: existingPurchase._id,
+//           amount: 0, // zero out the payment
+//           paymentMethod: existingPurchase.paymentMethod,
+//           note: 'Purchase deleted',
+//         },
+//         session
+//       );
+
+//       // Step 3: Hard delete the purchase document
+//       await Purchase.deleteOne({ _id: purchaseId }, { session });
+
+//       await session.commitTransaction();
+//       return existingPurchase;
+//     } catch (error) {
+//       await session.abortTransaction();
+
+//       const isTransient = error?.errorLabels?.includes('TransientTransactionError') || error?.code === 112;
+
+//       if (isTransient && attempt < MAX_RETRIES - 1) {
+//         attempt++;
+//         console.warn(`⚠️ TransientTransactionError on delete, retrying... attempt ${attempt}`);
+//         await session.endSession();
+//         await new Promise((res) => setTimeout(res, 50 * attempt));
+//         continue;
+//       }
+
+//       await session.endSession();
+//       console.error('❌ deletePurchase error:', error.message);
+//       throw error;
+//     } finally {
+//       if (session.inTransaction()) {
+//         await session.abortTransaction();
+//       }
+//       session.endSession().catch(() => {});
+//     }
+//   }
+// };
+
+export const changePurchaseInvoiceStatus = async (invoiceId, status) => {
+  return Purchase.findByIdAndUpdate(invoiceId, { status }, { new: true });
+};
+
+export const cancelAfterPurchaseStock = async (purchaseId) => {
+  const MAX_RETRIES = 3;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const session = await mongoose.startSession();
+    session.startTransaction({
+      readConcern: { level: 'snapshot' },
+      writeConcern: { w: 'majority' },
+    });
+
+    try {
+      const existingPurchase = await Purchase.findOne({
+        _id: purchaseId,
+      }).session(session);
+
+      if (!existingPurchase) {
+        throw new Error(`Purchase not found: ${purchaseId}`);
+      }
+
+      // Step 1: Reverse stock
+      await reverseStockAfterPurchaseDelete(existingPurchase, session); // ✅ fixed name
+
+      // Step 2: Reverse vendor payment ledger
+      await updateVendorPayment(
+        {
+          store: existingPurchase.store,
+          purchase: existingPurchase._id,
+          amount: 0,
+          paymentMethod: existingPurchase.paymentMethod,
+          note: 'Purchase deleted',
+        },
+        session
+      );
+
+      await session.commitTransaction(); // ✅ was missing entirely
+      await session.endSession();
+
+      return existingPurchase;
+    } catch (error) {
+      // Only abort if transaction is still active
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+      }
+      await session.endSession(); // ✅ single, safe cleanup
+
+      const isTransient = error?.errorLabels?.includes('TransientTransactionError') || error?.code === 112;
+
+      if (isTransient && attempt < MAX_RETRIES - 1) {
+        console.warn(`⚠️ TransientTransactionError on cancel, retrying... attempt ${attempt + 1}`);
+        await new Promise((res) => setTimeout(res, 50 * (attempt + 1)));
+        continue; // ✅ retry with a fresh session
+      }
+
+      console.error('❌ cancelAfterPurchaseStock error:', error.message);
+      throw error;
+    }
+  }
 };

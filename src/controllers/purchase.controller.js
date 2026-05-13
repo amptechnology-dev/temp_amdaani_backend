@@ -1,14 +1,17 @@
 import expressAsyncHandler from 'express-async-handler';
 import * as purchaseService from '../services/purchase.service.js';
 import { ApiResponse, ApiError } from '../utils/responseHandler.js';
+import { deleteTransaction, cancelAllTransactionsForInvoice } from '../services/transaction.service.js';
 import pick from '../utils/pick.js';
 // import { updateUsage } from '../services/usage.service.js';
 // import * as transactionService from '../services/transaction.service.js';
+import * as invoiceService from '../services/invoice.service.js';
 import {
   deleteVendorPayment,
   getVendorPaymentsByStore,
   updateVendorPaymentStatus,
 } from '../services/vendorPayment.service.js';
+import { Purchase } from '../models/purchase.model.js';
 
 export const createPurchase = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
@@ -57,6 +60,18 @@ export const removePaymentFromPurchase = expressAsyncHandler(async (req, res) =>
   const updatedPurchase = await purchaseService.modifyDueAmount(payment.purchase, amountPaid, amountDue);
   return new ApiResponse(200, updatedPurchase, 'Payment removed successfully').send(res);
 });
+
+// export const deletePurchase = expressAsyncHandler(async (req, res) => {
+//   req.body.store = req.user.store;
+//   const purchase = await purchaseService.deletePurchase(req.params.id, req.user.store);
+//   if (!purchase) {
+//     throw new ApiError(404, 'Purchase not found!', [
+//       { source: 'params', field: 'id', message: 'Purchase not found' },
+//     ]);
+//   }
+//   return new ApiResponse(200, purchase, 'Purchase deleted successfully').send(res);
+// });
+
 export const getAllVendorPaymentsByStore = expressAsyncHandler(async (req, res) => {
   const startDate = new Date(req.query.startDate);
   const endDate = new Date(req.query.endDate || new Date());
@@ -67,7 +82,7 @@ export const getAllVendorPaymentsByStore = expressAsyncHandler(async (req, res) 
   const transactions = await getVendorPaymentsByStore(req.user.store, startDate, endDate);
   return new ApiResponse(200, transactions, 'Payments fetched successfully').send(res);
 });
-/*
+
 export const getLastPurchase = expressAsyncHandler(async (req, res) => {
   const purchase = await purchaseService.getLastPurchase(req.user.store);
   return new ApiResponse(200, purchase, 'Last purchase fetched successfully').send(res);
@@ -89,4 +104,20 @@ export const changeInvoiceStatus = expressAsyncHandler(async (req, res) => {
   }
   return new ApiResponse(200, invoice, 'Invoice status changed successfully').send(res);
 });
-*/
+
+export const changePurchaseStatus = expressAsyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const status = req.body.status;
+  const invoice = await purchaseService.changePurchaseInvoiceStatus(id, status);
+  if (!invoice) {
+    throw new ApiError(404, 'Invoice not found!', [{ source: 'params', field: 'id', message: 'Invoice not found' }]);
+  }
+  if (status === 'cancelled') {
+    await cancelAllTransactionsForInvoice(invoice._id);
+  }
+
+  if (status === 'cancelled') {
+    await purchaseService.cancelAfterPurchaseStock(id);
+  }
+  return new ApiResponse(200, invoice, 'Invoice status changed successfully').send(res);
+});

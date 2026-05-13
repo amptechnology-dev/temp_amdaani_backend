@@ -17,26 +17,47 @@ export const saveLoginActivity = async (
 
         const geo = geoip.lookup(ip);
 
-        await LoginActivity.create({
-            user: userId,
+        const loginData = {
             ipAddress: ip,
 
-            browser: ua.browser.name,
+            browser:
+                ua?.browser
+                    ?.name ||
+                'Unknown',
 
-            os: ua.os.name,
+            os:
+                ua?.os
+                    ?.name ||
+                'Unknown',
 
             device:
-                ua.device.model ||
-                ua.device.type ||
+                ua?.device
+                    ?.model ||
+                ua?.device
+                    ?.type ||
                 'Desktop',
 
             location: {
-                city: geo?.city || 'Unknown',
-                country: geo?.country || 'Unknown',
-            },
+                city:
+                    geo?.city ||
+                    'Unknown',
 
-            loginAt: new Date(),
+                country:
+                    geo?.country ||
+                    'Unknown',
+            },
+        };
+
+        await LoginActivity.create({
+            user: userId,
+
+            ...loginData,
+
+            loginAt:
+                new Date(),
         });
+
+        return loginData;
     } catch (error) {
         console.log('Login activity error', error);
     }

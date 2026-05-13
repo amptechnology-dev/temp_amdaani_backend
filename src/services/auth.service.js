@@ -26,6 +26,7 @@ import { validateReferralCode } from "./referral.service.js";
 import { Store } from "../models/store.model.js";
 import { Referral } from "../models/referral.model.js";
 import { saveLoginActivity } from './loginActivity.service.js';
+import { createUserSession } from './userSession.service.js';
 
 export const sendOtp = async (phone) => {
   if (!phone) {
@@ -78,16 +79,15 @@ export const verifyOtp = async (
   otp,
   req
 ) => {
-
-  const storedHash =
-    await redis.get(
-      `otp:${phone}`
-    );
+  // Get OTP hash from Redis
+  const storedHash = await redis.get(
+    `otp:${phone}`
+  );
 
   if (!storedHash) {
     throw new ApiError(
       400,
-      'Invalid OTP!',
+      'OTP expired or not found',
       [
         {
           source: 'body',
@@ -99,18 +99,14 @@ export const verifyOtp = async (
     );
   }
 
-  const incomingHash =
-    crypto
-      .createHash(
-        'sha256'
-      )
-      .update(otp)
-      .digest('hex');
+  // Hash incoming OTP
+  const incomingHash = crypto
+    .createHash('sha256')
+    .update(String(otp))
+    .digest('hex');
 
-  if (
-    incomingHash !==
-    storedHash
-  ) {
+  // Compare OTP
+  if (incomingHash !== storedHash) {
     throw new ApiError(
       400,
       'Invalid OTP!',
@@ -125,25 +121,102 @@ export const verifyOtp = async (
     );
   }
 
-  await redis.del(
-    `otp:${phone}`
-  );
-
+  // Check user exists
   const user =
-    await getUserByPhone(
-      phone
-    );
+    await getUserByPhone(phone);
 
+  // Existing user login
   if (user) {
 
+    // Generate auth tokens
     const tokens =
       await generateAuthTokens(
         user
       );
 
-    await saveLoginActivity(
-      user._id,
-      req
+    console.log(
+      'Generated Tokens:',
+      tokens
+    );
+
+    // Save login activity
+    const loginInfo =
+      await saveLoginActivity(
+        user._id,
+        req
+      );
+
+    // Support multiple token structures
+    const accessToken =
+      tokens?.accessToken ||
+      tokens?.access?.token;
+
+    const refreshToken =
+      tokens?.refreshToken ||
+      tokens?.refresh?.token;
+
+    // Validate token existence
+    if (
+      !accessToken ||
+      !refreshToken
+    ) {
+      throw new ApiError(
+        500,
+        'Token generation failed'
+      );
+    }
+
+    // Save session
+    await createUserSession({
+      userId: user._id,
+      accessToken,
+      refreshToken,
+
+      device:
+        loginInfo?.device ||
+        'Unknown',
+
+      browser:
+        loginInfo?.browser ||
+        'Unknown',
+
+      os:
+        loginInfo?.os ||
+        'Unknown',
+
+      ipAddress:
+        loginInfo?.ipAddress ||
+        'Unknown',
+    });
+
+    // Delete OTP only after success
+    await redis.del(
+      `otp:${phone}`
+    );
+
+    console.log(
+      'Generated Tokens:',
+      JSON.stringify(tokens, null, 2)
+    );
+
+    console.log(
+      'Access Token:',
+      tokens?.accessToken
+    );
+
+    console.log(
+      'Refresh Token:',
+      tokens?.refreshToken
+    );
+
+    console.log(
+      'Access Nested:',
+      tokens?.access?.token
+    );
+
+    console.log(
+      'Refresh Nested:',
+      tokens?.refresh?.token
     );
 
     return {
@@ -154,10 +227,16 @@ export const verifyOtp = async (
     };
   }
 
+  // New user registration
   const tempToken =
     await generateRegistrationToken(
       phone
     );
+
+  // Delete OTP after success
+  await redis.del(
+    `otp:${phone}`
+  );
 
   return {
     status:

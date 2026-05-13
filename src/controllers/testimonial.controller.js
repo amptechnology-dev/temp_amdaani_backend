@@ -4,7 +4,7 @@ import { ApiResponse, ApiError } from "../utils/responseHandler.js";
 
 export const createTestimonial = expressAsyncHandler(async (req, res) => {
 
-  const testimonial = await testimonialService.createTestimonial(req.body);
+  const testimonial = await testimonialService.createTestimonial(req.body, req.file);
 
   console.log("Created Testimonial..... Payload", testimonial);
 
@@ -45,7 +45,8 @@ export const updateTestimonial = expressAsyncHandler(async (req, res) => {
 
   const testimonial = await testimonialService.updateTestimonial(
     req.params.id,
-    req.body
+    req.body,
+    req.file
   );
 
   if (!testimonial) {

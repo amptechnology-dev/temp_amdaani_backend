@@ -7,7 +7,9 @@ const testimonialSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-
+    imageUrl: {
+      type: String,
+    },
     designation: {
       type: String,
       trim: true,
@@ -20,7 +22,6 @@ const testimonialSchema = new mongoose.Schema(
 
     youtubeLink: {
       type: String,
-      required: true,
       trim: true,
     },
 

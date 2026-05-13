@@ -29,6 +29,7 @@ import config from '../config/config.js';
 import crypto from 'crypto';
 import redis from '../config/redis.js';
 import { get } from 'https';
+import { logoutOtherDevices } from '../services/userSession.service.js';
 
 export const createSuperAdminUser = asyncHandler(async (req, res) => {
   const { phone, name, email } = req.body;
@@ -118,6 +119,7 @@ export const verifyAuthOtp = asyncHandler(async (req, res) => {
     }
     return new ApiResponse(201, { tempToken: result.tempToken }, 'User not found! Registration started.').send(res);
   } catch (err) {
+    console.log('OTP verification error:', err);
     throw new ApiError(400, 'Invalid OTP', [{ source: 'body', field: 'otp', message: 'Invalid OTP' }]);
   }
 });
@@ -499,7 +501,7 @@ export const updateChangeEmail = asyncHandler(async (req, res) => {
 
   const decoded = jwt.verify(token, config.jwt.secret);
 
-   const { sub } = decoded;
+  const { sub } = decoded;
 
   if (!decoded) {
     throw new ApiError(403, 'OTP verification required');
@@ -509,3 +511,30 @@ export const updateChangeEmail = asyncHandler(async (req, res) => {
 
   return new ApiResponse(200, { email: updatedUser.email }, 'Email updated successfully').send(res);
 });
+
+export const logoutAllOtherDevices =
+  asyncHandler(async (req, res) => {
+    const authHeader =
+      req.headers.authorization;
+
+    if (!authHeader) {
+      throw new ApiError(
+        401,
+        'Token missing'
+      );
+    }
+
+    const accessToken =
+      authHeader.split(' ')[1];
+
+    await logoutOtherDevices(
+      req.user.id,
+      accessToken
+    );
+
+    return new ApiResponse(
+      200,
+      null,
+      'Logged out from all other devices successfully'
+    ).send(res);
+  });

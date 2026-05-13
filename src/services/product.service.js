@@ -310,6 +310,7 @@ export const adjustProductStock = async (data, session = null) => {
     salePrice,
     sellingDiscount,
     remarks = '',
+    purchaseDiscount,
   } = data;
 
   const product = await Product.findById(productId).session(session);
@@ -320,9 +321,12 @@ export const adjustProductStock = async (data, session = null) => {
 
   // Update product fields
   product.currentStock = newStock;
-  if (purchasePrice) product.lastPurchasePrice = purchasePrice;
+
+  if (purchasePrice) product.costPrice = purchasePrice;
   if (salePrice) product.sellingPrice = salePrice;
   if (sellingDiscount) product.discountPrice = sellingDiscount;
+  if (purchaseDiscount) product.purchaseDiscount = purchaseDiscount;
+
   await product.save({ session });
 
   // Record stock transaction
@@ -375,7 +379,7 @@ export const updateStockAfterPurchase = async (purchase, session = null) => {
   const { items = [], date } = purchase;
   if (!items.length) return;
 
-  console.log('update stock ===> ', items);
+  console.log('update stock ===> ', JSON.stringify(items));
 
   for (const item of items) {
     await adjustProductStock(
@@ -390,7 +394,8 @@ export const updateStockAfterPurchase = async (purchase, session = null) => {
         purchasePrice: item.rate,
         remarks: `Purchase added for ${item.quantity} units`,
         salePrice: item.sellingPrice,
-        sellingDiscount: item.sellingDiscount,
+        sellingDiscount: item.discount,
+        purchseDiscount: item.purchaseDiscount,
       },
       session
     );

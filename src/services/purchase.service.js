@@ -65,7 +65,7 @@ export const createPurchase = async (data) => {
       await purchase.save({ session });
 
       await updateStockAfterPurchase(purchase, session);
-
+      console.log('parches--->', JSON.stringify(purchase));
       await createVendorPayment(
         {
           store: purchase.store,
@@ -136,6 +136,8 @@ export const updatePurchase = async (purchaseId, data) => {
   }); // no session here
 
   console.log('=> resolved vendorId:', vendorId);
+
+  console.log('=> updatePurchase payload:', JSON.stringify(data));
 
   if (!vendorId) {
     throw new ApiError(400, 'Could not resolve vendor', {

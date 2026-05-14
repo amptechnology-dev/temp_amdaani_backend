@@ -17,7 +17,9 @@ const purchaseItemSchema = yup.object().shape({
   rate: yup.number().required('Rate is required').min(0, 'Rate must be >= 0'),
   gstRate: yup.number().min(0).default(0),
   isTaxInclusive: yup.boolean().default(false),
+  isPurchaseTaxInclusive: yup.boolean().default(false),
   quantity: yup.number().required('Quantity is required').min(1, 'Quantity must be at least 1'),
+
   discount: yup.number().min(0).default(0),
   total: yup.number().required('Total is required').min(0),
   sellingPrice: yup.number().min(0),

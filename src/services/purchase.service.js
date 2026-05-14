@@ -18,7 +18,7 @@ export const createPurchase = async (data) => {
     });
   }
 
-  console.log('data-->', JSON.stringify(data));
+  console.log('data--> form frontend', JSON.stringify(data));
 
   // ✅ Resolve vendor BEFORE starting transaction (avoids write conflict)
   const vendorId = await findOrCreateVendor(data.store, {

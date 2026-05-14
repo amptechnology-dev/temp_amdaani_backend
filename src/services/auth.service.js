@@ -522,16 +522,57 @@ export const logout = async (refreshToken) => {
  * @param {string} refreshToken - The refresh token
  * @returns {Promise<{ accessToken: string; refreshToken: string }>} - Object containing the new access and refresh tokens
  */
-export const refreshAuth = async (refreshToken) => {
+export const refreshAuth = async (
+  refreshToken
+) => {
   try {
-    const refreshTokenDoc = await verifyToken(refreshToken, tokenTypes.REFRESH);
-    const user = await getUserById(refreshTokenDoc.user);
+    const refreshTokenDoc =
+      await verifyToken(
+        refreshToken,
+        tokenTypes.REFRESH
+      );
+    const user =
+      await getUserById(
+        refreshTokenDoc.user
+      );
     if (!user) {
-      throw new ApiError(401, 'Invalid token');
+      throw new ApiError(
+        401,
+        'Invalid token'
+      );
     }
+    const tokens =
+      await generateAuthTokens(
+        user
+      );
+
+    await UserSession.findOneAndUpdate(
+      {
+        refreshToken,
+        isActive: true,
+      },
+      {
+        $set: {
+          accessToken:
+            tokens?.accessToken,
+
+          refreshToken:
+            tokens?.refreshToken,
+
+          lastSeenAt:
+            new Date(),
+        },
+      },
+      {
+        new: true,
+      }
+    );
     await refreshTokenDoc.deleteOne();
-    return generateAuthTokens(user);
+    return tokens;
   } catch (error) {
-    throw new ApiError(401, 'Token refresh failed! Please login again.', error);
+    throw new ApiError(
+      401,
+      'Token refresh failed! Please login again.'
+    );
   }
 };

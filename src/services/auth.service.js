@@ -20,6 +20,7 @@ import axios from 'axios';
 import { roles } from '../config/roles.js';
 import { Role } from '../models/role.model.js';
 import { User } from '../models/user.model.js';
+import { UserSession } from '../models/userSession.model.js';
 import { generateAmdaaniId } from "../utils/generateAmdaaniId.js";
 import { generateReferralCode } from "../utils/generateReferralCode.js";
 import { validateReferralCode } from "./referral.service.js";
@@ -531,6 +532,8 @@ export const refreshAuth = async (
         refreshToken,
         tokenTypes.REFRESH
       );
+    console.log('refreshTokenDoc:', refreshTokenDoc
+    );
     const user =
       await getUserById(
         refreshTokenDoc.user
@@ -570,6 +573,7 @@ export const refreshAuth = async (
     await refreshTokenDoc.deleteOne();
     return tokens;
   } catch (error) {
+    console.error('Error refreshing auth:', error);
     throw new ApiError(
       401,
       'Token refresh failed! Please login again.'

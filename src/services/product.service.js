@@ -37,7 +37,13 @@ export const queryProduct = async (filters = {}, options = {}) => {
         let: { productId: '$_id' },
         pipeline: [
           { $unwind: '$items' },
-          { $match: { $expr: { $and: [{ $eq: ['$items.product', '$$productId'] }, { $eq: ['$status', 'active'] }] } } },
+          {
+            $match: {
+              $expr: {
+                $and: [{ $eq: ['$items.product', '$$productId'] }, { $eq: ['$status', 'active'] }],
+              },
+            },
+          },
           {
             $group: {
               _id: '$$productId',
@@ -55,9 +61,11 @@ export const queryProduct = async (filters = {}, options = {}) => {
         },
       },
     },
+    // FIX: use $project with explicit 0 only for invoiceStats
+    // all other fields are preserved with $$ROOT trick
     {
       $project: {
-        invoiceStats: 0, // hide temporary lookup field
+        invoiceStats: 0,
       },
     },
   ]);
@@ -69,6 +77,7 @@ export const queryProduct = async (filters = {}, options = {}) => {
     lean: true,
     leanWithId: false,
   };
+
   return Product.aggregatePaginate(aggregate, paginationOptions);
 };
 

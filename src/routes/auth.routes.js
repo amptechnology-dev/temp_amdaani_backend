@@ -8,7 +8,7 @@ import { authOtpLimiter } from '../middlewares/rateLimiter.js';
 
 const router = Router();
 
-router.post('/get-otp', authOtpLimiter, authController.sendAuthOtp);
+router.post('/get-otp', authController.sendAuthOtp);
 router.post('/verify-otp', authController.verifyAuthOtp);
 router.post(
   '/register',

@@ -31,6 +31,18 @@ export const createProductSchema = {
       .number()
       .typeError('Discount price must be a number')
       .min(0, 'Discount price cannot be negative'),
+    discountType: yup.string().oneOf(['percentage', 'amount']),
+    discountPercentage: yup
+      .number()
+      .typeError('Discount percentage must be a number')
+      .min(0, 'Discount percentage cannot be negative')
+      .max(100, 'Discount percentage cannot be more than 100'),
+    purchaseDiscountType: yup.string().oneOf(['percentage', 'amount']),
+    purchaseDiscountPercentage: yup
+      .number()
+      .typeError('Purchase discount percentage must be a number')
+      .min(0, 'Purchase discount percentage cannot be negative')
+      .max(100, 'Purchase discount percentage cannot be more than 100'),
     gstRate: yup
       .number()
       .typeError('GST rate must be a number')
@@ -74,6 +86,18 @@ export const updateProductSchema = {
         .number()
         .typeError('Discount price must be a number')
         .min(0, 'Discount price cannot be negative'),
+      discountType: yup.string().oneOf(['percentage', 'amount']),
+      discountPercentage: yup
+        .number()
+        .typeError('Discount percentage must be a number')
+        .min(0, 'Discount percentage cannot be negative')
+        .max(100, 'Discount percentage cannot be more than 100'),
+      purchaseDiscountType: yup.string().oneOf(['percentage', 'amount']),
+      purchaseDiscountPercentage: yup
+        .number()
+        .typeError('Purchase discount percentage must be a number')
+        .min(0, 'Purchase discount percentage cannot be negative')
+        .max(100, 'Purchase discount percentage cannot be more than 100'),
       purchaseGstRate: yup
         .number()
         .typeError('GST rate must be a number')

@@ -28,6 +28,7 @@ import { Store } from "../models/store.model.js";
 import { Referral } from "../models/referral.model.js";
 import { saveLoginActivity } from './loginActivity.service.js';
 import { createUserSession } from './userSession.service.js';
+import { UserTracking } from '../models/UserTracking.model.js';
 
 export const sendOtp = async (phone) => {
   if (!phone) {
@@ -81,9 +82,10 @@ export const verifyOtp = async (
   req
 ) => {
   // Get OTP hash from Redis
-  const storedHash = await redis.get(
-    `otp:${phone}`
-  );
+  const storedHash =
+    await redis.get(
+      `otp:${phone}`
+    );
 
   if (!storedHash) {
     throw new ApiError(
@@ -101,13 +103,17 @@ export const verifyOtp = async (
   }
 
   // Hash incoming OTP
-  const incomingHash = crypto
-    .createHash('sha256')
-    .update(String(otp))
-    .digest('hex');
+  const incomingHash =
+    crypto
+      .createHash('sha256')
+      .update(String(otp))
+      .digest('hex');
 
   // Compare OTP
-  if (incomingHash !== storedHash) {
+  if (
+    incomingHash !==
+    storedHash
+  ) {
     throw new ApiError(
       400,
       'Invalid OTP!',
@@ -122,13 +128,36 @@ export const verifyOtp = async (
     );
   }
 
+  /**
+   * STEP 1:
+   * OTP VERIFIED TRACKING
+   */
+  await UserTracking.findOneAndUpdate(
+    {
+      contactNo: phone,
+    },
+    {
+      contactNo: phone,
+      otpVerified: true,
+      otpVerifiedAt:
+        new Date(),
+      currentStage:
+        'otp_verified',
+    },
+    {
+      upsert: true,
+      new: true,
+    }
+  );
+
   // Check user exists
   const user =
-    await getUserByPhone(phone);
+    await getUserByPhone(
+      phone
+    );
 
   // Existing user login
   if (user) {
-
     // Generate auth tokens
     const tokens =
       await generateAuthTokens(
@@ -150,11 +179,13 @@ export const verifyOtp = async (
     // Support multiple token structures
     const accessToken =
       tokens?.accessToken ||
-      tokens?.access?.token;
+      tokens?.access
+        ?.token;
 
     const refreshToken =
       tokens?.refreshToken ||
-      tokens?.refresh?.token;
+      tokens?.refresh
+        ?.token;
 
     // Validate token existence
     if (
@@ -168,56 +199,33 @@ export const verifyOtp = async (
     }
 
     // Save session
-    await createUserSession({
-      userId: user._id,
-      accessToken,
-      refreshToken,
+    await createUserSession(
+      {
+        userId: user._id,
+        accessToken,
+        refreshToken,
 
-      device:
-        loginInfo?.device ||
-        'Unknown',
+        device:
+          loginInfo?.device ||
+          'Unknown',
 
-      browser:
-        loginInfo?.browser ||
-        'Unknown',
+        browser:
+          loginInfo?.browser ||
+          'Unknown',
 
-      os:
-        loginInfo?.os ||
-        'Unknown',
+        os:
+          loginInfo?.os ||
+          'Unknown',
 
-      ipAddress:
-        loginInfo?.ipAddress ||
-        'Unknown',
-    });
+        ipAddress:
+          loginInfo?.ipAddress ||
+          'Unknown',
+      }
+    );
 
     // Delete OTP only after success
     await redis.del(
       `otp:${phone}`
-    );
-
-    console.log(
-      'Generated Tokens:',
-      JSON.stringify(tokens, null, 2)
-    );
-
-    console.log(
-      'Access Token:',
-      tokens?.accessToken
-    );
-
-    console.log(
-      'Refresh Token:',
-      tokens?.refreshToken
-    );
-
-    console.log(
-      'Access Nested:',
-      tokens?.access?.token
-    );
-
-    console.log(
-      'Refresh Nested:',
-      tokens?.refresh?.token
     );
 
     return {
@@ -394,102 +402,264 @@ export const verifySuperAdminLogin = async (
   };
 };
 
-export const registerUserWithStore = async (storeData, userData, files) => {
-
+export const registerUserWithStore = async (
+  storeData,
+  userData,
+  files,
+  req
+) => {
   const uploadedKeys = [];
 
   try {
-
-    // 🔥 referral code check
     let referredBy = null;
     let referrerStore = null;
 
-    if (storeData.usedReferralCode) {
-
-      referrerStore = await Store.findOne({
-        referralCode: storeData.usedReferralCode
-      });
+    if (
+      storeData.usedReferralCode
+    ) {
+      referrerStore =
+        await Store.findOne({
+          referralCode:
+            storeData.usedReferralCode,
+        });
 
       if (!referrerStore) {
-        throw new ApiError(400, "Invalid referral code", [
-          { source: "body", field: "storeData.usedReferralCode", message: "Invalid referral code" }
-        ]);
+        throw new ApiError(
+          400,
+          'Invalid referral code',
+          [
+            {
+              source: 'body',
+              field:
+                'storeData.usedReferralCode',
+              message:
+                'Invalid referral code',
+            },
+          ]
+        );
       }
 
-      referredBy = referrerStore._id;
+      referredBy =
+        referrerStore._id;
     }
 
-    // 🔥 generate new referral code for this store
-    const newReferralCode = await generateReferralCode(Store);
+    const newReferralCode =
+      await generateReferralCode(
+        Store
+      );
 
-    storeData.referralCode = newReferralCode;
-    storeData.referredBy = referredBy;
+    storeData.referralCode =
+      newReferralCode;
+
+    storeData.referredBy =
+      referredBy;
 
     if (files?.logo) {
-      const logoKey = await compressAndUpload(
-        files.logo[0]?.buffer,
-        { isPublic: true, height: 500, width: 500 }
-      );
+      const logoKey =
+        await compressAndUpload(
+          files.logo[0]
+            ?.buffer,
+          {
+            isPublic: true,
+            height: 500,
+            width: 500,
+          }
+        );
 
       storeData.logoUrl = `${config.r2.publicEndpoint}/${logoKey}`;
-      uploadedKeys.push(logoKey);
+
+      uploadedKeys.push(
+        logoKey
+      );
     }
 
-    if (files?.signature) {
-      const signatureKey = await compressAndUpload(
-        files.signature[0]?.buffer,
-        {
-          isPublic: true,
-          height: 200,
-          width: 600,
-        }
-      );
+    if (
+      files?.signature
+    ) {
+      const signatureKey =
+        await compressAndUpload(
+          files.signature[0]
+            ?.buffer,
+          {
+            isPublic: true,
+            height: 200,
+            width: 600,
+          }
+        );
 
       storeData.signatureUrl = `${config.r2.publicEndpoint}/${signatureKey}`;
-      uploadedKeys.push(signatureKey);
+
+      uploadedKeys.push(
+        signatureKey
+      );
     }
 
-    if (await checkUserExists(userData.phone)) {
-      throw new ApiError(400, 'User already exists', [
-        { source: 'body', field: 'userData.phone', message: 'User already exists' },
-      ]);
+    if (
+      await checkUserExists(
+        userData.phone
+      )
+    ) {
+      throw new ApiError(
+        400,
+        'User already exists',
+        [
+          {
+            source: 'body',
+            field:
+              'userData.phone',
+            message:
+              'User already exists',
+          },
+        ]
+      );
     }
 
-    const ownerRole = await Role.findOne({ name: roles.OWNER });
+    const ownerRole =
+      await Role.findOne({
+        name:
+          roles.OWNER,
+      });
 
     if (!ownerRole) {
-      throw new ApiError(500, 'Owner role not found');
+      throw new ApiError(
+        500,
+        'Owner role not found'
+      );
     }
 
-    // ✅ Create Store
-    const store = await createStore(storeData);
+    const store =
+      await createStore(
+        storeData
+      );
 
-    // ✅ Create Referral Record (IMPORTANT PART)
     if (referrerStore) {
-      await Referral.create({
-        referrerStore: referrerStore._id,
-        referredStore: store._id,
-      });
+      await Referral.create(
+        {
+          referrerStore:
+            referrerStore._id,
+          referredStore:
+            store._id,
+        }
+      );
     }
 
-    const amdaaniId = await generateAmdaaniId();
+    const amdaaniId =
+      await generateAmdaaniId();
 
-    const user = await createUser({
-      ...userData,
-      amdaaniId,
-      store: store._id,
-      role: ownerRole._id,
+    const user =
+      await createUser({
+        ...userData,
+        amdaaniId,
+        store: store._id,
+        role:
+          ownerRole._id,
+      });
+
+    await UserTracking.findOneAndUpdate(
+      {
+        contactNo:
+          userData.phone,
+      },
+      {
+        contactNo:
+          userData.phone,
+
+        userId:
+          user._id,
+
+        storeId:
+          store._id,
+
+        registered: true,
+
+        registeredAt:
+          new Date(),
+
+        currentStage:
+          'registered',
+      },
+      {
+        upsert: true,
+        new: true,
+      }
+    );
+
+    // Generate auth tokens
+    const tokens =
+      await generateAuthTokens(
+        user
+      );
+
+    // Save login activity
+    const loginInfo =
+      await saveLoginActivity(
+        user._id,
+        req
+      );
+
+    // Support multiple token structures
+    const accessToken =
+      tokens?.accessToken ||
+      tokens?.access?.token;
+
+    const refreshToken =
+      tokens?.refreshToken ||
+      tokens?.refresh?.token;
+
+    // Validate token existence
+    if (
+      !accessToken ||
+      !refreshToken
+    ) {
+      throw new ApiError(
+        500,
+        'Token generation failed'
+      );
+    }
+
+    // Save session
+    await createUserSession({
+      userId: user._id,
+
+      accessToken,
+      refreshToken,
+
+      device:
+        loginInfo?.device ||
+        'Unknown',
+
+      browser:
+        loginInfo?.browser ||
+        'Unknown',
+
+      os:
+        loginInfo?.os ||
+        'Unknown',
+
+      ipAddress:
+        loginInfo?.ipAddress ||
+        'Unknown',
     });
 
-    return { user, store };
-
+    return {
+      user,
+      store,
+      tokens
+    };
   } catch (error) {
-
     for (const key of uploadedKeys) {
       try {
-        await deleteFileFromR2(true, key);
-      } catch (cleanupErr) {
-        logger.error(cleanupErr, 'Error deleting file from R2.');
+        await deleteFileFromR2(
+          true,
+          key
+        );
+      } catch (
+      cleanupErr
+      ) {
+        logger.error(
+          cleanupErr,
+          'Error deleting file from R2.'
+        );
       }
     }
 

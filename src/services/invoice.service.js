@@ -654,7 +654,9 @@ export const getProductWiseInvoices = async (filters = {}) => {
 export const getGstSalesReport = async (filters = {}) => {
   const { store, startDate, endDate } = filters;
 
-  const matchStage = {};
+  const matchStage = {
+    status: { $ne: 'cancelled' }, // cancelled invoice বাদ
+  };
 
   if (store) {
     matchStage.store = new mongoose.Types.ObjectId(store);
@@ -680,8 +682,15 @@ export const getGstSalesReport = async (filters = {}) => {
       $project: {
         invoiceDate: 1,
         invoiceNumber: 1,
-        customerName: { $ifNull: ['$customerName', 'Cash Customer'] },
-        customerGst: { $ifNull: ['$customerGstNumber', '-'] },
+
+        customerName: {
+          $ifNull: ['$customerName', 'Cash Customer'],
+        },
+
+        customerGst: {
+          $ifNull: ['$customerGstNumber', '-'],
+        },
+
         item: '$items.name',
         hsn: '$items.hsn',
         unit: '$items.unit',
@@ -690,14 +699,29 @@ export const getGstSalesReport = async (filters = {}) => {
         taxableValue: {
           $round: [
             {
-              $divide: ['$items.total', { $add: [1, { $divide: ['$items.gstRate', 100] }] }],
+              $divide: [
+                '$items.total',
+                {
+                  $add: [
+                    1,
+                    {
+                      $divide: ['$items.gstRate', 100],
+                    },
+                  ],
+                },
+              ],
             },
             2,
           ],
         },
 
-        cgstPercent: { $divide: ['$items.gstRate', 2] },
-        sgstPercent: { $divide: ['$items.gstRate', 2] },
+        cgstPercent: {
+          $divide: ['$items.gstRate', 2],
+        },
+
+        sgstPercent: {
+          $divide: ['$items.gstRate', 2],
+        },
 
         cgstAmount: {
           $round: [
@@ -707,7 +731,17 @@ export const getGstSalesReport = async (filters = {}) => {
                   $subtract: [
                     '$items.total',
                     {
-                      $divide: ['$items.total', { $add: [1, { $divide: ['$items.gstRate', 100] }] }],
+                      $divide: [
+                        '$items.total',
+                        {
+                          $add: [
+                            1,
+                            {
+                              $divide: ['$items.gstRate', 100],
+                            },
+                          ],
+                        },
+                      ],
                     },
                   ],
                 },
@@ -726,7 +760,17 @@ export const getGstSalesReport = async (filters = {}) => {
                   $subtract: [
                     '$items.total',
                     {
-                      $divide: ['$items.total', { $add: [1, { $divide: ['$items.gstRate', 100] }] }],
+                      $divide: [
+                        '$items.total',
+                        {
+                          $add: [
+                            1,
+                            {
+                              $divide: ['$items.gstRate', 100],
+                            },
+                          ],
+                        },
+                      ],
                     },
                   ],
                 },
@@ -744,13 +788,16 @@ export const getGstSalesReport = async (filters = {}) => {
 
   return result;
 };
+
 export const getGstPurchaseReport = async (filters = {}) => {
   const { store, startDate, endDate } = filters;
 
-  const matchStage = {};
+  const matchStage = {
+    status: { $ne: 'cancelled' }, // cancelled purchase বাদ
+  };
 
   if (store) {
-    matchStage.store = store;
+    matchStage.store = new mongoose.Types.ObjectId(store);
   }
 
   if (startDate && endDate) {
@@ -764,6 +811,8 @@ export const getGstPurchaseReport = async (filters = {}) => {
     { $match: matchStage },
 
     { $unwind: '$items' },
+
+    { $match: { 'items.gstRate': { $gt: 0 } } },
 
     {
       $project: {
@@ -785,7 +834,6 @@ export const getGstPurchaseReport = async (filters = {}) => {
         },
 
         unit: '$items.unit',
-
         quantity: '$items.quantity',
 
         taxableValue: '$items.total',
@@ -801,7 +849,12 @@ export const getGstPurchaseReport = async (filters = {}) => {
         cgstAmount: {
           $round: [
             {
-              $divide: [{ $multiply: ['$items.total', '$items.gstRate'] }, 200],
+              $divide: [
+                {
+                  $multiply: ['$items.total', '$items.gstRate'],
+                },
+                200,
+              ],
             },
             2,
           ],
@@ -810,7 +863,12 @@ export const getGstPurchaseReport = async (filters = {}) => {
         sgstAmount: {
           $round: [
             {
-              $divide: [{ $multiply: ['$items.total', '$items.gstRate'] }, 200],
+              $divide: [
+                {
+                  $multiply: ['$items.total', '$items.gstRate'],
+                },
+                200,
+              ],
             },
             2,
           ],

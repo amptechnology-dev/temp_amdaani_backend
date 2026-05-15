@@ -138,7 +138,7 @@ export const register = asyncHandler(async (req, res) => {
   if (!phone || phone.sub !== userData?.phone) {
     throw new ApiError(400, 'Invalid token', [{ source: 'headers', field: 'authorization', message: 'Invalid token' }]);
   }
-  const { user, store } = await registerUserWithStore(storeData, userData, req.files);
+  const { user, store } = await registerUserWithStore(storeData, userData, req.files, req);
   const tokens = await generateAuthTokens(user);
   // await createOrRenewFreePlan(store._id);
   return new ApiResponse(201, { user, store, tokens }, 'Registered successfully!').send(res);

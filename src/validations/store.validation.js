@@ -15,6 +15,7 @@ export const createStore = {
 
     // 🔥 referral code used during signup
     usedReferralCode: yup.string().trim().uppercase().optional(),
+    agentCode: yup.string().trim().optional(),
 
     address: yup
       .object()
@@ -56,6 +57,7 @@ export const createStore = {
 export const updateStore = {
   body: yup.object().shape({
     tagline: yup.string(),
+    agentCode: yup.string().trim().optional(),
     ownershipType: yup.string().trim(),
     gstNumber: yup
       .string()

@@ -53,6 +53,9 @@ const storeSchema = new mongoose.Schema(
       ref: "Store",
       default: null,
     },
+    agentCode:{
+      type: String,
+    },
     logoUrl: String,
     signatureUrl: String,
     isActive: { type: Boolean, default: true },

@@ -90,18 +90,46 @@ export const updateStore = async (storeId, data, files, session = null) => {
 };
 
 export const getAllStoresWithSubscription = async () => {
-  const stores = await Store.find().sort({ name: 1 });
+  const stores = await Store.aggregate([
+    {
+      $lookup: {
+        from: "staffs", // MongoDB collection name
+        localField: "agentCode",
+        foreignField: "agentCode",
+        as: "staffInfo",
+      },
+    },
+    {
+      $unwind: {
+        path: "$staffInfo",
+        preserveNullAndEmptyArrays: true, // jader agentCode nai tarao ashbe
+      },
+    },
+    {
+      $sort: {
+        name: 1,
+      },
+    },
+  ]);
 
   const result = await Promise.all(
     stores.map(async (store) => {
-      const subscription = await getCurrentSubscription(store._id);
+      const subscription =
+        await getCurrentSubscription(store._id);
+
       let usage = null;
+
       if (subscription) {
-        usage = await getUsage(subscription._id);
+        usage = await getUsage(
+          subscription._id
+        );
       }
+
       return {
-        ...store.toObject(),
-        subscription: subscription || null,
+        ...store,
+        staff: store.staffInfo || null,
+        subscription:
+          subscription || null,
         usage,
       };
     })

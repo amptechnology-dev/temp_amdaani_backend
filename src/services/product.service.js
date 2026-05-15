@@ -311,6 +311,10 @@ export const adjustProductStock = async (data, session = null) => {
     sellingDiscount,
     remarks = '',
     purchaseDiscount,
+    hsn,
+    isTaxInclusive = false,
+    isPurchaseTaxInclusive = false,
+    gstRate,
   } = data;
 
   const product = await Product.findById(productId).session(session);
@@ -326,7 +330,11 @@ export const adjustProductStock = async (data, session = null) => {
   if (salePrice) product.sellingPrice = salePrice;
   if (sellingDiscount) product.discountPrice = sellingDiscount;
   if (purchaseDiscount) product.purchaseDiscount = purchaseDiscount;
-
+  if (data.hsn) product.hsn = data.hsn;
+  if (data.isTaxInclusive !== undefined) product.isTaxInclusive = isTaxInclusive;
+  if (data.isPurchaseTaxInclusive !== undefined) product.isPurchaseTaxInclusive = isPurchaseTaxInclusive;
+  if (gstRate) product.gstRate = gstRate;
+  if (gstRate) product.purchaseGstRate = gstRate;
   await product.save({ session });
 
   // Record stock transaction
@@ -394,8 +402,12 @@ export const updateStockAfterPurchase = async (purchase, session = null) => {
         purchasePrice: item.rate,
         remarks: `Purchase added for ${item.quantity} units`,
         salePrice: item.sellingPrice,
-        sellingDiscount: item.discount,
+        sellingDiscount: item.sellingDiscount,
         purchseDiscount: item.purchaseDiscount,
+        isTaxInclusive: item.isTaxInclusive,
+        isPurchaseTaxInclusive: item.isPurchaseTaxInclusive,
+        hsn: item.hsn,
+        gstRate: item.gstRate,
       },
       session
     );

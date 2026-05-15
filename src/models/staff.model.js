@@ -17,13 +17,10 @@ const staffSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    referralCodeId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "ReferralCode",
-    },
-    referralCount: {
-      type: Number,
-      default: 0,
+    agentCode:{
+      type: String,
+      required: true,
+      trim: true,
     },
     isActive: {
       type: Boolean,

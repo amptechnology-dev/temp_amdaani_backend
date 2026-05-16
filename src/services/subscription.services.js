@@ -10,6 +10,7 @@ import { resetUsage } from '../services/usage.service.js';
 import { Referral } from "../models/referral.model.js";
 import { ReferralSettings } from "../models/referralSettings.model.js";
 import { WalletTransaction } from "../models/wallettransaction.js";
+import { UserTracking } from '../models/userTracking.model.js';
 
 export const getActivePlans = async () => {
   return Plan.find({ isActive: true });
@@ -448,6 +449,28 @@ export const verifyAndCreateSubscription = async (paymentResponse) => {
         { message: "Payment not found with transaction ID." },
       ]);
     }
+
+    await UserTracking.findOneAndUpdate(
+      {
+        storeId:
+          subscription.store,
+      },
+      {
+        $set: {
+          planPurchased:
+            true,
+
+          planPurchasedAt:
+            new Date(),
+
+          currentStage:
+            'plan_purchased',
+        },
+      },
+      {
+        new: true,
+      }
+    );
 
     return subscription;
 

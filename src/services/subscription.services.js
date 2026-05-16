@@ -11,6 +11,7 @@ import { Referral } from "../models/referral.model.js";
 import { ReferralSettings } from "../models/referralSettings.model.js";
 import { WalletTransaction } from "../models/wallettransaction.js";
 import { UserTracking } from '../models/userTracking.model.js';
+import { User } from '../models/user.model.js';
 
 export const getActivePlans = async () => {
   return Plan.find({ isActive: true });
@@ -570,3 +571,213 @@ export const getUpcomingSubscriptions = async (storeId) => {
   }).populate('plan');
   return subscription;
 };
+
+export const getSubscriptionHistory = async (storeId) => {
+
+  const subscriptions =
+    await Subscription.find({
+      store: storeId,
+    })
+      .populate(
+        'plan',
+        'name price durationDays usageLimits'
+      )
+      .sort({
+        createdAt: -1,
+      });
+
+  const payments =
+    await Payment.find({
+      store: storeId,
+      status: 'success',
+    })
+      .sort({
+        createdAt: -1,
+      });
+
+  // current active plan
+  const currentPlan =
+    subscriptions.find(
+      (sub) =>
+        sub.status ===
+          'active' &&
+        new Date(sub.endDate) >=
+          new Date()
+    ) || null;
+
+  // expired/cancelled plans
+  const previousPlans =
+    subscriptions.filter(
+      (sub) =>
+        sub.status ===
+          'expired' ||
+        sub.status ===
+          'canceled'
+    );
+
+  // upcoming plans
+  const upcomingPlans =
+    subscriptions.filter(
+      (sub) =>
+        sub.status ===
+        'upcoming'
+    );
+
+  return {
+    currentPlan,
+
+    previousPlans,
+
+    upcomingPlans,
+
+    allPlans:
+      subscriptions,
+
+    payments,
+  };
+};
+
+export const getUserSubscriptionDetails =
+  async (userId) => {
+
+    const user =
+      await User.findById(
+        userId
+      )
+        .populate(
+          'store'
+        )
+        .populate(
+          'role'
+        );
+
+    if (!user) {
+      throw new ApiError(
+        404,
+        'User not found'
+      );
+    }
+
+    const storeId =
+      user.store?._id;
+
+    if (!storeId) {
+      throw new ApiError(
+        404,
+        'Store not found for this user'
+      );
+    }
+
+    // -------------------------
+    // Current Subscription
+    // -------------------------
+    const currentPlan =
+      await Subscription.findOne({
+        store:
+          storeId,
+        status:
+          'active',
+      })
+        .populate(
+          'plan'
+        )
+        .sort({
+          createdAt: -1,
+        });
+
+    // -------------------------
+    // Previous Subscription
+    // -------------------------
+    const previousPlan =
+      await Subscription.findOne({
+        store:
+          storeId,
+        status: {
+          $in: [
+            'expired',
+            'canceled',
+          ],
+        },
+      })
+        .populate(
+          'plan'
+        )
+        .sort({
+          endDate:
+            -1,
+        });
+
+    // -------------------------
+    // Upcoming Subscription
+    // -------------------------
+    const upcomingPlans =
+      await Subscription.find({
+        store:
+          storeId,
+        status:
+          'upcoming',
+      })
+        .populate(
+          'plan'
+        )
+        .sort({
+          startDate:
+            1,
+        });
+
+    // -------------------------
+    // All Payments
+    // -------------------------
+    const payments =
+      await Payment.find({
+        store:
+          storeId,
+      })
+        .populate({
+          path:
+            'subscription',
+          populate:
+          {
+            path:
+              'plan',
+          },
+        })
+        .sort({
+          createdAt:
+            -1,
+        });
+
+    // -------------------------
+    // Full Subscription History
+    // -------------------------
+    const allSubscriptions =
+      await Subscription.find({
+        store:
+          storeId,
+      })
+        .populate(
+          'plan'
+        )
+        .sort({
+          createdAt:
+            -1,
+        });
+
+    return {
+      user,
+      store:
+        user.store,
+
+      currentPlan,
+
+      previousPlan,
+
+      upcomingPlans,
+
+      subscriptions:
+        allSubscriptions,
+
+      payments,
+    };
+  };
+

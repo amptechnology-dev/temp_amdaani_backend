@@ -14,6 +14,8 @@ router.route('/get-active-subscriptions').get(subscriptionController.getActiveSu
 router.route('/get-last-subscription').get(subscriptionController.getLastSubscription);
 router.route('/get-payments').get(subscriptionController.getPayments);
 router.route('/get-upcoming-subscriptions').get(subscriptionController.getUpcomingSubscriptions);
+router.route('/subscription-history').get(subscriptionController.getSubscriptionHistory);
+router.route('/user-subscription/:userId').get(subscriptionController.getUserSubscriptionDetails);
 
 // router
 //   .route('/id/:id')

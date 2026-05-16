@@ -54,3 +54,47 @@ export const getUpcomingSubscriptions = expressAsyncHandler(async (req, res) => 
   const subscriptions = await subscriptionService.getUpcomingSubscriptions(req.user.store);
   return new ApiResponse(200, subscriptions, 'Subscriptions fetched successfully!').send(res);
 });
+export const getSubscriptionHistory =
+  expressAsyncHandler(
+    async (
+      req,
+      res
+    ) => {
+
+      const data =
+        await subscriptionService.getSubscriptionHistory(
+          req.user.store
+        );
+
+      return new ApiResponse(
+        200,
+        data,
+        'Subscription history fetched successfully!'
+      ).send(res);
+    }
+  );
+
+export const getUserSubscriptionDetails =
+  expressAsyncHandler(
+    async (
+      req,
+      res
+    ) => {
+
+      const {
+        userId,
+      } =
+        req.params;
+
+      const data =
+        await subscriptionService.getUserSubscriptionDetails(
+          userId
+        );
+
+      return new ApiResponse(
+        200,
+        data,
+        'User subscription details fetched successfully!'
+      ).send(res);
+    }
+  );

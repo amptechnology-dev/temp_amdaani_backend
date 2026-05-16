@@ -15,11 +15,13 @@ import { Purchase } from '../models/purchase.model.js';
 
 export const createPurchase = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
+  req.body.userId = req.user.id;
   const purchase = await purchaseService.createPurchase(req.body);
   return new ApiResponse(201, purchase, 'Purchase created successfully').send(res);
 });
 export const updatePurchase = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
+  req.body.userId = req.user.id;
   const purchase = await purchaseService.updatePurchase(req.params.id, req.body);
   if (!purchase) {
     throw new ApiError(404, 'Purchase not found!', [{ source: 'params', field: 'id', message: 'Purchase not found' }]);

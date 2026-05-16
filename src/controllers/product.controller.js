@@ -5,7 +5,7 @@ import pick from '../utils/pick.js';
 
 export const createProduct = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
-
+  req.body.userId = req.user.id;
   const product = await productService.createProduct(req.body);
   return new ApiResponse(200, product, 'Product created successfully!').send(res);
 });

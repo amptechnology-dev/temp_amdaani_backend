@@ -5,6 +5,7 @@ import pick from '../utils/pick.js';
 
 export const createVendor = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
+  req.body.userId = req.user.id;
   const vendor = await vendorService.createVendor(req.body);
   return new ApiResponse(201, vendor, 'Vendor created successfully!').send(res);
 });

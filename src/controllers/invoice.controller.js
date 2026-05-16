@@ -11,6 +11,7 @@ import mongoose from 'mongoose';
 
 export const createInvoice = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
+  req.body.userId = req.user.id;
   console.log('Request to create invoice with data:', JSON.stringify(req.body));
   const invoice = await invoiceService.createInvoice(req.body);
   if (req.subscription) {

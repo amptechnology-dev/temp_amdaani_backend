@@ -516,16 +516,6 @@ export const logoutAllOtherDevices = asyncHandler(async (req, res) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
-<<<<<<< HEAD
-    throw new ApiError(401, 'Token missing');
-  }
-
-  const accessToken = authHeader.split(' ')[1];
-
-  await logoutOtherDevices(req.user.id, accessToken);
-
-  return new ApiResponse(200, null, 'Logged out from all other devices successfully').send(res);
-=======
     throw new ApiError(401, "Token missing");
   }
 
@@ -544,7 +534,6 @@ export const logoutAllOtherDevices = asyncHandler(async (req, res) => {
     },
     "Logged out from all other devices successfully"
   ).send(res);
->>>>>>> c9ed9e339908a09d1c10b2d303ca25aaca4b4bc0
 });
 
 export const verifySession = asyncHandler(async (req, res) => {

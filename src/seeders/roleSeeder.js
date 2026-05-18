@@ -26,16 +26,17 @@ const seedRoles = async () => {
             {
                 name: roles.STAFF,
                 permissions: [
-                    permissions.CAN_MANAGE_STORE,
                     permissions.CAN_MANAGE_PRODUCTS,
                     permissions.CAN_MANAGE_CATEGORIES,
-                    permissions.CAN_MANAGE_SETTINGS,
                     permissions.CAN_MANAGE_STOCKS,
-                    permissions.CAN_MANAGE_SUBSCRIPTIONS,
+                    permissions.CAN_CANCEL_INVOICES,
+                    permissions.CAN_VIEW_PURCHASES,
+                    permissions.CAN_CREATE_INVOICES,
+                    permissions.CAN_EDIT_INVOICES,
+                    permissions.CAN_VIEW_INVOICES,
                 ],
             },
         ];
-
         for (const role of roleData) {
             await Role.updateOne(
                 { name: role.name },

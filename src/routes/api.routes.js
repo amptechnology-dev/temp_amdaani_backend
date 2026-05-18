@@ -59,5 +59,7 @@ import loginActivityRoutes from './loginActivity.routes.js';
 router.use('/login-activity', loginActivityRoutes);
 import staffRoutes from './staff.routes.js';
 router.use('/staff', staffRoutes);
+import dashboardRoutes from './dashboard.routes.js';
+router.use('/dashboard', dashboardRoutes);
 
 export default router;

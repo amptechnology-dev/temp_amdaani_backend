@@ -5,6 +5,7 @@ import pick from '../utils/pick.js';
 
 export const createCategory = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
+  req.body.userId = req.user.id;
   const category = await categoryService.createCategory(req.body);
   return new ApiResponse(200, category, 'Category created successfully!').send(res);
 });

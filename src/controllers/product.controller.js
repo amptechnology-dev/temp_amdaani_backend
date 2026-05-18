@@ -5,7 +5,7 @@ import pick from '../utils/pick.js';
 
 export const createProduct = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
-
+  req.body.userId = req.user.id;
   const product = await productService.createProduct(req.body);
   return new ApiResponse(200, product, 'Product created successfully!').send(res);
 });
@@ -30,103 +30,51 @@ export const getProductById = expressAsyncHandler(async (req, res) => {
 
 export const getAllProductsWithSales = expressAsyncHandler(
   async (req, res) => {
-    const {
-      range,
-      startDate,
-      endDate,
-      search = "",
-    } = req.query;
+    const { range, startDate, endDate, search = "" } = req.query;
 
     const now = new Date();
-
     let start = null;
     let end = null;
 
-    switch (range) {
-      case "today":
-        start = new Date(now);
-        start.setHours(0, 0, 0, 0);
-
-        end = new Date(now);
-        end.setHours(23, 59, 59, 999);
-        break;
-
-      case "thisMonth":
-        start = new Date(
-          now.getFullYear(),
-          now.getMonth(),
-          1
-        );
-
-        end = new Date(
-          now.getFullYear(),
-          now.getMonth() + 1,
-          0,
-          23,
-          59,
-          59,
-          999
-        );
-        break;
-
-      case "previousMonth":
-        start = new Date(
-          now.getFullYear(),
-          now.getMonth() - 1,
-          1
-        );
-
-        end = new Date(
-          now.getFullYear(),
-          now.getMonth(),
-          0,
-          23,
-          59,
-          59,
-          999
-        );
-        break;
-
-      case "year":
-        start = new Date(now.getFullYear(), 0, 1);
-
-        end = new Date(
-          now.getFullYear(),
-          11,
-          31,
-          23,
-          59,
-          59,
-          999
-        );
-        break;
-
-      case "custom":
-        if (startDate) {
-          start = new Date(startDate);
-          start.setHours(0, 0, 0, 0);
-        }
-
-        if (endDate) {
-          end = new Date(endDate);
-          end.setHours(23, 59, 59, 999);
-        }
-        break;
+    if (range) {
+      switch (range) {
+        case "today":
+          start = new Date(now.setHours(0, 0, 0, 0));
+          end = new Date(now.setHours(23, 59, 59, 999));
+          break;
+        case "thisMonth":
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+          end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+          break;
+        case "previousMonth":
+          start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+          break;
+        case "year":
+          start = new Date(now.getFullYear(), 0, 1);
+          end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+          break;
+        case "custom":
+          start = startDate ? new Date(startDate) : null;
+          end = endDate ? new Date(endDate) : null;
+          break;
+      }
+    } else {
+      start = startDate ? new Date(startDate) : null;
+      end = endDate ? new Date(endDate) : null;
     }
 
-    const products =
-      await productService.getAllProductsWithSales(
-        req.user.store,
-        start,
-        end,
-        search
-      );
+    if (start && isNaN(start.getTime())) start = null;
+    if (end && isNaN(end.getTime())) end = null;
 
-    return new ApiResponse(
-      200,
-      products,
-      "Products fetched successfully!"
-    ).send(res);
+    const products = await productService.getAllProductsWithSales(
+      req.user.store,
+      start,
+      end,
+      search
+    );
+
+    return new ApiResponse(200, products, "Products fetched successfully!").send(res);
   }
 );
 

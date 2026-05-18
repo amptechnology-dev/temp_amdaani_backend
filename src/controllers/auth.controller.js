@@ -138,7 +138,7 @@ export const register = asyncHandler(async (req, res) => {
   if (!phone || phone.sub !== userData?.phone) {
     throw new ApiError(400, 'Invalid token', [{ source: 'headers', field: 'authorization', message: 'Invalid token' }]);
   }
-  const { user, store } = await registerUserWithStore(storeData, userData, req.files);
+  const { user, store } = await registerUserWithStore(storeData, userData, req.files, req);
   const tokens = await generateAuthTokens(user);
   // await createOrRenewFreePlan(store._id);
   return new ApiResponse(201, { user, store, tokens }, 'Registered successfully!').send(res);
@@ -516,6 +516,7 @@ export const logoutAllOtherDevices = asyncHandler(async (req, res) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
+<<<<<<< HEAD
     throw new ApiError(401, 'Token missing');
   }
 
@@ -524,6 +525,26 @@ export const logoutAllOtherDevices = asyncHandler(async (req, res) => {
   await logoutOtherDevices(req.user.id, accessToken);
 
   return new ApiResponse(200, null, 'Logged out from all other devices successfully').send(res);
+=======
+    throw new ApiError(401, "Token missing");
+  }
+
+  const accessToken = authHeader.split(" ")[1];
+
+  const result = await logoutOtherDevices(
+    req.user.id,
+    accessToken
+  );
+
+  return new ApiResponse(
+    200,
+    {
+      deactivatedSessions: result.sessionResult?.modifiedCount,
+      deletedLoginActivities: result.loginActivityResult?.deletedCount,
+    },
+    "Logged out from all other devices successfully"
+  ).send(res);
+>>>>>>> c9ed9e339908a09d1c10b2d303ca25aaca4b4bc0
 });
 
 export const verifySession = asyncHandler(async (req, res) => {

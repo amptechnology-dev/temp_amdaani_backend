@@ -170,7 +170,8 @@ export const updateStaff = async (ownerId, staffId, updateData) => {
 };
 
 export const createUser = async (data, session = null) => {
-  const user = new User(data);
+  const amdaaniId = await generateAmdaaniId();
+  const user = new User({ ...data, amdaaniId });
   await user.save(session ? { session } : undefined);
   await user.populate('store');
   return user;

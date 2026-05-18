@@ -512,37 +512,20 @@ export const updateChangeEmail = asyncHandler(async (req, res) => {
   return new ApiResponse(200, { email: updatedUser.email }, 'Email updated successfully').send(res);
 });
 
-export const logoutAllOtherDevices =
-  asyncHandler(async (req, res) => {
-    const authHeader =
-      req.headers.authorization;
+export const logoutAllOtherDevices = asyncHandler(async (req, res) => {
+  const authHeader = req.headers.authorization;
 
-    if (!authHeader) {
-      throw new ApiError(
-        401,
-        'Token missing'
-      );
-    }
+  if (!authHeader) {
+    throw new ApiError(401, 'Token missing');
+  }
 
-    const accessToken =
-      authHeader.split(' ')[1];
+  const accessToken = authHeader.split(' ')[1];
 
-    await logoutOtherDevices(
-      req.user.id,
-      accessToken
-    );
+  await logoutOtherDevices(req.user.id, accessToken);
 
-    return new ApiResponse(
-      200,
-      null,
-      'Logged out from all other devices successfully'
-    ).send(res);
-  });
+  return new ApiResponse(200, null, 'Logged out from all other devices successfully').send(res);
+});
 
 export const verifySession = asyncHandler(async (req, res) => {
-  return new ApiResponse(
-    200,
-    req.user,
-    'Session valid'
-  ).send(res);
+  return new ApiResponse(200, req.user, 'Session valid').send(res);
 });

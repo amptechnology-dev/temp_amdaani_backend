@@ -121,18 +121,17 @@ export const createInvoice = async (data) => {
     await invoice.save({ session }); // ✅ correct syntax
 
     // Create transaction if partial payment
-    if (invoice.paymentStatus === 'partial') {
-      await createTransaction(
-        {
-          store: invoice.store,
-          invoice: invoice._id,
-          amount: invoice.amountPaid,
-          paymentMethod: invoice.paymentMethod,
-          note: invoice.paymentNote,
-        },
-        session
-      );
-    }
+
+    await createTransaction(
+      {
+        store: invoice.store,
+        invoice: invoice._id,
+        amount: invoice.amountPaid,
+        paymentMethod: invoice.paymentMethod,
+        note: invoice.paymentNote,
+      },
+      session
+    );
 
     await updateStockAfterSale(invoice, session);
 
@@ -1096,326 +1095,242 @@ export const getItemStockReport = async (filters = {}) => {
   }));
 };
 
-export const getStockBalance =
-  async (filters = {}) => {
+export const getStockBalance = async (filters = {}) => {
+  const { store, itemName, asOnDate, startDate, endDate } = filters;
 
-    const {
-      store,
-      itemName,
-      asOnDate,
-      startDate,
-      endDate,
-    } = filters;
+  const baseMatch = {
+    store: new mongoose.Types.ObjectId(String(store)),
 
-    const baseMatch = {
-      store:
-        new mongoose.Types.ObjectId(
-          String(store)
-        ),
+    status: {
+      $ne: 'cancelled',
+    },
+  };
 
-      status: {
-        $ne: 'cancelled',
-      },
+  // Item name search
+  if (itemName) {
+    baseMatch.name = {
+      $regex: itemName,
+      $options: 'i',
     };
+  }
 
-    // Item name search
-    if (itemName) {
-      baseMatch.name = {
-        $regex: itemName,
-        $options: 'i',
-      };
-    }
+  // Date filter for transactions
+  let dateCondition = [];
 
-    // Date filter for transactions
-    let dateCondition = [];
-
-    if (asOnDate) {
-      dateCondition = [
-        {
-          $lte: [
-            '$date',
-            new Date(asOnDate),
-          ],
-        },
-      ];
-    } else if (
-      startDate &&
-      endDate
-    ) {
-      dateCondition = [
-        {
-          $gte: [
-            '$date',
-            new Date(startDate),
-          ],
-        },
-        {
-          $lte: [
-            '$date',
-            new Date(endDate),
-          ],
-        },
-      ];
-    }
-
-    const pipeline = [
+  if (asOnDate) {
+    dateCondition = [
       {
-        $match:
-          baseMatch,
+        $lte: ['$date', new Date(asOnDate)],
       },
-
+    ];
+  } else if (startDate && endDate) {
+    dateCondition = [
       {
-        $lookup: {
-          from:
-            'stocktransactions',
-
-          let: {
-            productId:
-              '$_id',
-          },
-
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    {
-                      $eq: [
-                        '$product',
-                        '$$productId',
-                      ],
-                    },
-
-                    {
-                      $eq: [
-                        '$store',
-                        new mongoose.Types.ObjectId(
-                          String(store)
-                        ),
-                      ],
-                    },
-
-                    ...dateCondition,
-                  ],
-                },
-              },
-            },
-          ],
-
-          as:
-            'transactions',
-        },
+        $gte: ['$date', new Date(startDate)],
       },
-
-      // Calculate stock movement
       {
-        $addFields: {
-          totalIn: {
-            $sum: {
-              $map: {
-                input:
-                  '$transactions',
+        $lte: ['$date', new Date(endDate)],
+      },
+    ];
+  }
 
-                as:
-                  'tx',
+  const pipeline = [
+    {
+      $match: baseMatch,
+    },
 
-                in: {
-                  $cond: [
-                    {
-                      $eq: [
-                        '$$tx.direction',
-                        'IN',
-                      ],
-                    },
+    {
+      $lookup: {
+        from: 'stocktransactions',
 
-                    {
-                      $abs:
-                        '$$tx.quantity',
-                    },
+        let: {
+          productId: '$_id',
+        },
 
-                    0,
-                  ],
-                },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  {
+                    $eq: ['$product', '$$productId'],
+                  },
+
+                  {
+                    $eq: ['$store', new mongoose.Types.ObjectId(String(store))],
+                  },
+
+                  ...dateCondition,
+                ],
               },
             },
           },
+        ],
 
-          totalOut: {
-            $sum: {
-              $map: {
-                input:
-                  '$transactions',
-
-                as:
-                  'tx',
-
-                in: {
-                  $cond: [
-                    {
-                      $eq: [
-                        '$$tx.direction',
-                        'OUT',
-                      ],
-                    },
-
-                    {
-                      $abs:
-                        '$$tx.quantity',
-                    },
-
-                    0,
-                  ],
-                },
-              },
-            },
-          },
-
-          totalInValue: {
-            $sum: {
-              $map: {
-                input:
-                  '$transactions',
-
-                as:
-                  'tx',
-
-                in: {
-                  $cond: [
-                    {
-                      $eq: [
-                        '$$tx.direction',
-                        'IN',
-                      ],
-                    },
-
-                    {
-                      $multiply: [
-                        {
-                          $abs:
-                            '$$tx.quantity',
-                        },
-
-                        {
-                          $ifNull: [
-                            '$$tx.rate',
-                            0,
-                          ],
-                        },
-                      ],
-                    },
-
-                    0,
-                  ],
-                },
-              },
-            },
-          },
-        },
+        as: 'transactions',
       },
+    },
 
-      // Historical stock calculation
-      {
-        $addFields: {
-          quantity: {
-            $subtract: [
-              '$totalIn',
-              '$totalOut',
-            ],
-          },
-        },
-      },
+    // Calculate stock movement
+    {
+      $addFields: {
+        totalIn: {
+          $sum: {
+            $map: {
+              input: '$transactions',
 
-      {
-        $project: {
-          _id: 0,
+              as: 'tx',
 
-          itemDescription:
-            '$name',
+              in: {
+                $cond: [
+                  {
+                    $eq: ['$$tx.direction', 'IN'],
+                  },
 
-          quantity: 1,
+                  {
+                    $abs: '$$tx.quantity',
+                  },
 
-          totalIn: 1,
-          totalOut: 1,
-
-          avgRate: {
-            $cond: [
-              {
-                $gt: [
-                  '$totalIn',
                   0,
                 ],
               },
+            },
+          },
+        },
 
-              {
-                $divide: [
-                  '$totalInValue',
-                  '$totalIn',
-                ],
-              },
+        totalOut: {
+          $sum: {
+            $map: {
+              input: '$transactions',
 
-              {
-                $ifNull: [
-                  '$lastPurchasePrice',
+              as: 'tx',
+
+              in: {
+                $cond: [
+                  {
+                    $eq: ['$$tx.direction', 'OUT'],
+                  },
 
                   {
-                    $ifNull: [
-                      '$costPrice',
-                      0,
+                    $abs: '$$tx.quantity',
+                  },
+
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
+        totalInValue: {
+          $sum: {
+            $map: {
+              input: '$transactions',
+
+              as: 'tx',
+
+              in: {
+                $cond: [
+                  {
+                    $eq: ['$$tx.direction', 'IN'],
+                  },
+
+                  {
+                    $multiply: [
+                      {
+                        $abs: '$$tx.quantity',
+                      },
+
+                      {
+                        $ifNull: ['$$tx.rate', 0],
+                      },
                     ],
                   },
+
+                  0,
                 ],
               },
-            ],
+            },
           },
         },
       },
+    },
 
-      {
-        $addFields: {
-          itemValue: {
-            $round: [
-              {
-                $multiply: [
-                  '$quantity',
-                  '$avgRate',
-                ],
-              },
-
-              2,
-            ],
-          },
+    // Historical stock calculation
+    {
+      $addFields: {
+        quantity: {
+          $subtract: ['$totalIn', '$totalOut'],
         },
       },
+    },
 
-      {
-        $sort: {
-          itemDescription:
-            1,
+    {
+      $project: {
+        _id: 0,
+
+        itemDescription: '$name',
+
+        quantity: 1,
+
+        totalIn: 1,
+        totalOut: 1,
+
+        avgRate: {
+          $cond: [
+            {
+              $gt: ['$totalIn', 0],
+            },
+
+            {
+              $divide: ['$totalInValue', '$totalIn'],
+            },
+
+            {
+              $ifNull: [
+                '$lastPurchasePrice',
+
+                {
+                  $ifNull: ['$costPrice', 0],
+                },
+              ],
+            },
+          ],
         },
       },
-    ];
+    },
 
-    const result =
-      await Product.aggregate(
-        pipeline
-      );
+    {
+      $addFields: {
+        itemValue: {
+          $round: [
+            {
+              $multiply: ['$quantity', '$avgRate'],
+            },
 
-    return result.map(
-      ({
-        itemDescription,
-        quantity,
-        itemValue,
-        totalIn,
-        totalOut,
-      }) => ({
-        itemDescription,
-        quantity,
-        itemValue,
-        totalIn,
-        totalOut,
-      })
-    );
-  };
+            2,
+          ],
+        },
+      },
+    },
+
+    {
+      $sort: {
+        itemDescription: 1,
+      },
+    },
+  ];
+
+  const result = await Product.aggregate(pipeline);
+
+  return result.map(({ itemDescription, quantity, itemValue, totalIn, totalOut }) => ({
+    itemDescription,
+    quantity,
+    itemValue,
+    totalIn,
+    totalOut,
+  }));
+};
 
 export const addPaymentToInvoice = async (invoiceId, paymentData) => {
   const session = await mongoose.startSession();

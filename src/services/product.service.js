@@ -1,4 +1,5 @@
 import { Product } from '../models/product.model.js';
+import { Invoice } from "../models/invoice.model.js";
 // import { ApiError } from '../utils/responseHandler.js';
 import { handleDuplicateKeyError } from '../utils/dbErrorHandler.js';
 import { StockTransactionType } from '../config/constants.js';
@@ -111,79 +112,71 @@ export const findOrCreateProduct = async (store, data, session = null) => {
   return null;
 };
 
-export const getAllProductsWithSales = async (storeId, startDate, endDate, search = '') => {
-  const invoiceMatch = {
-    status: 'active',
-  };
+export const getAllProductsWithSales = async (
+  storeId,
+  startDate,
+  endDate,
+  search = ""
+) => {
+  const start = startDate instanceof Date ? startDate : null;
+  const end = endDate instanceof Date ? endDate : null;
 
-  // invoice date filter
-  if (startDate || endDate) {
-    invoiceMatch.invoiceDate = {};
-
-    if (startDate) {
-      invoiceMatch.invoiceDate.$gte = startDate;
-    }
-
-    if (endDate) {
-      invoiceMatch.invoiceDate.$lte = endDate;
-    }
+  if (end) {
+    end.setHours(23, 59, 59, 999);
   }
 
   return Product.aggregate([
     {
       $match: {
         store: new mongoose.Types.ObjectId(storeId),
-
-        // product name search
-        name: {
-          $regex: search,
-          $options: 'i',
-        },
+        name: { $regex: search, $options: "i" },
       },
     },
 
     {
       $lookup: {
-        from: 'invoices',
-        let: {
-          productId: '$_id',
-        },
+        from: "invoices",
+        let: { productId: "$_id" },
 
         pipeline: [
-          {
-            $match: invoiceMatch,
-          },
-
-          {
-            $unwind: '$items',
-          },
+          { $unwind: "$items" },
 
           {
             $match: {
               $expr: {
-                $eq: ['$items.product', '$$productId'],
+                $eq: ["$items.product", "$$productId"],
               },
+            },
+          },
+
+          {
+            $match: {
+              store: new mongoose.Types.ObjectId(storeId),
+              status: "active",
+              ...(start && end
+                ? { invoiceDate: { $gte: start, $lte: end } }
+                : start
+                  ? { invoiceDate: { $gte: start } }
+                  : end
+                    ? { invoiceDate: { $lte: end } }
+                    : {}),
             },
           },
 
           {
             $group: {
               _id: null,
-
-              totalQuantity: {
-                $sum: '$items.quantity',
-              },
-
+              totalQuantity: { $sum: "$items.quantity" },
               totalRevenue: {
                 $sum: {
-                  $multiply: ['$items.quantity', '$items.sellingPrice'],
+                  $multiply: ["$items.quantity", "$items.sellingPrice"],
                 },
               },
             },
           },
         ],
 
-        as: 'salesData',
+        as: "salesData",
       },
     },
 
@@ -194,32 +187,18 @@ export const getAllProductsWithSales = async (storeId, startDate, endDate, searc
         hsn: 1,
         unit: 1,
         sellingPrice: 1,
-
         totalSold: {
-          $ifNull: [
-            {
-              $arrayElemAt: ['$salesData.totalQuantity', 0],
-            },
-            0,
-          ],
+          $ifNull: [{ $arrayElemAt: ["$salesData.totalQuantity", 0] }, 0],
         },
-
         totalRevenue: {
-          $ifNull: [
-            {
-              $arrayElemAt: ['$salesData.totalRevenue', 0],
-            },
-            0,
-          ],
+          $ifNull: [{ $arrayElemAt: ["$salesData.totalRevenue", 0] }, 0],
         },
       },
     },
 
     {
       $match: {
-        totalSold: {
-          $gt: 0,
-        },
+        totalSold: { $gt: 0 },
       },
     },
 

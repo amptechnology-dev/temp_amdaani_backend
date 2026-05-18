@@ -9,7 +9,7 @@ import { updateStockAfterSale, reverseStockAfterSale } from './product.service.j
 import { Product } from '../models/product.model.js';
 import { Purchase } from '../models/purchase.model.js';
 import { StockTransaction } from '../models/stockTransaction.model.js';
-
+import { Expense } from '../models/expense.model.js';
 import { Store } from '../models/store.model.js';
 import { json } from 'express';
 
@@ -888,30 +888,171 @@ export const getProfitLossReport = async (filters = {}) => {
   const { store, startDate, endDate } = filters;
 
   const matchStage = {
-    status: 'active',
+    status: { $ne: 'cancelled' },
   };
 
   if (store) {
-    matchStage.store = store;
+    matchStage.store = new mongoose.Types.ObjectId(String(store));
   }
 
   if (startDate && endDate) {
     matchStage.invoiceDate = {
-      $gte: startDate,
-      $lte: endDate,
+      $gte: new Date(startDate),
+      $lte: new Date(endDate),
     };
   }
 
   const result = await Invoice.aggregate([
-    { $match: matchStage },
+    {
+      $match: matchStage,
+    },
 
-    { $unwind: '$items' },
+    {
+      $unwind: '$items',
+    },
+
+    // product wise purchase cost বের করবে
+    {
+      $lookup: {
+        from: 'purchases',
+        let: {
+          productId: '$items.product',
+        },
+        pipeline: [
+          {
+            $match: {
+              status: { $ne: 'cancelled' },
+            },
+          },
+          {
+            $unwind: '$items',
+          },
+          {
+            $match: {
+              $expr: {
+                $eq: ['$items.product', '$$productId'],
+              },
+            },
+          },
+          {
+            $sort: {
+              createdAt: -1,
+            },
+          },
+          {
+            $limit: 1,
+          },
+          {
+            $project: {
+              gstRate: '$items.gstRate',
+              isTaxInclusive: '$items.isTaxInclusive',
+              quantity: '$items.quantity',
+              total: '$items.total',
+              rate: '$items.rate',
+            },
+          },
+        ],
+        as: 'purchaseData',
+      },
+    },
 
     {
       $addFields: {
-        costPrice: {
-          $multiply: ['$items.quantity', '$items.sellingPrice'],
+        purchaseItem: {
+          $arrayElemAt: ['$purchaseData', 0],
         },
+      },
+    },
+
+    // GST included হলে remove GST from purchase cost
+    {
+      $addFields: {
+        itemPurchaseCost: {
+          $multiply: [
+            '$items.quantity',
+            {
+              $cond: {
+                if: {
+                  $gt: ['$purchaseItem.gstRate', 0],
+                },
+                then: {
+                  $cond: {
+                    if: '$purchaseItem.isTaxInclusive',
+                    then: {
+                      $divide: [
+                        '$purchaseItem.total',
+                        {
+                          $add: [
+                            1,
+                            {
+                              $divide: [
+                                '$purchaseItem.gstRate',
+                                100,
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    else: '$purchaseItem.total',
+                  },
+                },
+                else: '$purchaseItem.total',
+              },
+            },
+          ],
+        },
+      },
+    },
+
+    // invoice date অনুযায়ী expense match
+    {
+      $lookup: {
+        from: 'expenses',
+        let: {
+          invoiceDate: {
+            $dateToString: {
+              format: '%Y-%m-%d',
+              date: '$invoiceDate',
+              timezone: 'Asia/Kolkata',
+            },
+          },
+          storeId: '$store',
+        },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  {
+                    $eq: ['$store', '$$storeId'],
+                  },
+                  {
+                    $eq: [
+                      {
+                        $dateToString: {
+                          format: '%Y-%m-%d',
+                          date: '$date',
+                          timezone: 'Asia/Kolkata',
+                        },
+                      },
+                      '$$invoiceDate',
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalExpense: {
+                $sum: '$amount',
+              },
+            },
+          },
+        ],
+        as: 'expenseData',
       },
     },
 
@@ -919,14 +1060,43 @@ export const getProfitLossReport = async (filters = {}) => {
       $group: {
         _id: '$_id',
 
-        invoiceDate: { $first: '$invoiceDate' },
-        invoiceNumber: { $first: '$invoiceNumber' },
-        customerName: { $first: '$customerName' },
-        customerMobile: { $first: '$customerMobile' },
+        invoiceDate: {
+          $first: '$invoiceDate',
+        },
 
-        invoiceAmount: { $first: '$grandTotal' },
+        invoiceNumber: {
+          $first: '$invoiceNumber',
+        },
 
-        totalCost: { $sum: '$costPrice' },
+        customerName: {
+          $first: '$customerName',
+        },
+
+        customerMobile: {
+          $first: '$customerMobile',
+        },
+
+        invoiceAmount: {
+          $first: '$grandTotal',
+        },
+
+        purchaseCost: {
+          $sum: '$itemPurchaseCost',
+        },
+
+        expenseAmount: {
+          $first: {
+            $ifNull: [
+              {
+                $arrayElemAt: [
+                  '$expenseData.totalExpense',
+                  0,
+                ],
+              },
+              0,
+            ],
+          },
+        },
       },
     },
 
@@ -934,20 +1104,54 @@ export const getProfitLossReport = async (filters = {}) => {
       $project: {
         invoiceDate: 1,
         invoiceNumber: 1,
+        invoiceAmount: 1,
+        purchaseCost: {
+          $round: ['$purchaseCost', 2],
+        },
+        expenseAmount: 1,
 
         customerDescription: {
-          $concat: [{ $ifNull: ['$customerName', 'Cash Customer'] }, ' , ', { $ifNull: ['$customerMobile', '-'] }],
+          $concat: [
+            {
+              $ifNull: [
+                '$customerName',
+                'Cash Customer',
+              ],
+            },
+            ' , ',
+            {
+              $ifNull: [
+                '$customerMobile',
+                '-',
+              ],
+            },
+          ],
         },
 
-        invoiceAmount: 1,
-
         profitLoss: {
-          $subtract: ['$invoiceAmount', '$totalCost'],
+          $round: [
+            {
+              $subtract: [
+                '$invoiceAmount',
+                {
+                  $add: [
+                    '$purchaseCost',
+                    '$expenseAmount',
+                  ],
+                },
+              ],
+            },
+            2,
+          ],
         },
       },
     },
 
-    { $sort: { invoiceDate: 1 } },
+    {
+      $sort: {
+        invoiceDate: 1,
+      },
+    },
   ]);
 
   return result;

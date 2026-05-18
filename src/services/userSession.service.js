@@ -1,4 +1,5 @@
 import { UserSession } from '../models/userSession.model.js';
+import { LoginActivity } from "../models/LoginActivity.model.js";
 
 export const createUserSession = async ({
   userId,
@@ -39,22 +40,24 @@ export const getActiveSession = async (
   });
 };
 
-export const logoutOtherDevices = async (
-  userId,
-  currentAccessToken
-) => {
-  return UserSession.updateMany(
+export const logoutOtherDevices = async (userId, currentAccessToken) => {
+    const sessionResult = await UserSession.updateMany(
     {
       user: userId,
-      accessToken: {
-        $ne: currentAccessToken,
-      },
+      accessToken: { $ne: currentAccessToken },
       isActive: true,
     },
     {
-      $set: {
-        isActive: false,
-      },
+      $set: { isActive: false },
     }
   );
+
+    const loginActivityResult = await LoginActivity.deleteMany({
+    user: userId,
+  });
+
+  return {
+    sessionResult,
+    loginActivityResult,
+  };
 };

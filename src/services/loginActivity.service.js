@@ -2,81 +2,57 @@ import { UAParser } from 'ua-parser-js';
 import geoip from 'geoip-lite';
 import { LoginActivity } from '../models/loginActivity.model.js';
 
-export const saveLoginActivity = async (
-    userId,
-    req
-) => {
-    try {
-        const parser = new UAParser(req.headers['user-agent']);
+export const saveLoginActivity = async (userId, req) => {
+  try {
+    const parser = new UAParser(req.headers['user-agent']);
 
-        const ua = parser.getResult();
+    const ua = parser.getResult();
 
-        const ip =
-            req.headers['x-forwarded-for'] ||
-            req.socket.remoteAddress;
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-        const geo = geoip.lookup(ip);
+    console.log('pars', JSON.stringify(parser));
+    console.log('ip', JSON.stringify);
 
-        const loginData = {
-            ipAddress: ip,
+    const geo = geoip.lookup(ip);
 
-            browser:
-                ua?.browser
-                    ?.name ||
-                'Unknown',
+    const loginData = {
+      ipAddress: ip,
 
-            os:
-                ua?.os
-                    ?.name ||
-                'Unknown',
+      browser: ua?.browser?.name || 'Unknown',
 
-            device:
-                ua?.device
-                    ?.model ||
-                ua?.device
-                    ?.type ||
-                'Desktop',
+      os: ua?.os?.name || 'Unknown',
 
-            location: {
-                city:
-                    geo?.city ||
-                    'Unknown',
+      device: ua?.device?.model || ua?.device?.type || 'Desktop',
 
-                country:
-                    geo?.country ||
-                    'Unknown',
-            },
-        };
+      location: {
+        city: geo?.city || 'Unknown',
 
-        await LoginActivity.create({
-            user: userId,
+        country: geo?.country || 'Unknown',
+      },
+    };
 
-            ...loginData,
+    await LoginActivity.create({
+      user: userId,
 
-            loginAt:
-                new Date(),
-        });
+      ...loginData,
 
-        return loginData;
-    } catch (error) {
-        console.log('Login activity error', error);
-    }
+      loginAt: new Date(),
+    });
+
+    return loginData;
+  } catch (error) {
+    console.log('Login activity error', error);
+  }
 };
 
-export const getLoginHistoryService =
-    async (
-        userId,
-        limit = 20
-    ) => {
+export const getLoginHistoryService = async (userId, limit = 20) => {
+  const activities = await LoginActivity.find({
+    user: userId,
+  })
+    .sort({
+      loginAt: -1,
+    })
+    .limit(limit);
 
-        const activities =
-            await LoginActivity.find({
-                user: userId,
-            })
-                .sort({
-                    loginAt: -1,
-                })
-                .limit(limit);
-
-        return activities;
-    };
+  return activities;
+};

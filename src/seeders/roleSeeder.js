@@ -34,6 +34,7 @@ const seedRoles = async () => {
                     permissions.CAN_CREATE_INVOICES,
                     permissions.CAN_EDIT_INVOICES,
                     permissions.CAN_VIEW_INVOICES,
+                    permissions.CAN_SEE_REPORTS
                 ],
             },
         ];

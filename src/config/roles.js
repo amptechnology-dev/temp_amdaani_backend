@@ -23,5 +23,5 @@ export const permissions = {
   CAN_EDIT_PURCHASES: 'edit_purchases',
   CAN_CANCEL_PURCHASES: 'cancel_purchases',
   CAN_VIEW_PURCHASES: 'view_purchases',
-  
+  CAN_SEE_REPORTS: 'see_reports',
 };

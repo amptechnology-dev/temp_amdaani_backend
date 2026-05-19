@@ -36,12 +36,6 @@ export const sendOtp = async (phone) => {
       { source: 'body', field: 'phone', message: 'Phone is required' },
     ]);
   }
-  const userExists = await User.exists({ phone });
-  if (!userExists) {
-    throw new ApiError(404, 'User not found', [
-      { source: 'body', field: 'phone', message: 'No account found with this phone number' },
-    ]);
-  }
   const user = await User.findOne({ phone });
   if (!user.isActive) {
     throw new ApiError(403, 'You are not an active user', [

@@ -19,5 +19,6 @@ router
 
 // Get expenses grouped by head
 router.get('/grouped-by-head', expenseController.getExpensesGroupedByHead);
+router.get('/ledger', expenseController.getExpenseLedger);
 
 export default router;

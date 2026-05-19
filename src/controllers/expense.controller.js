@@ -92,3 +92,33 @@ export const getExpensesGroupedByHead = expressAsyncHandler(async (req, res) => 
   ).send(res);
 
 });
+
+export const getExpenseLedger =
+  expressAsyncHandler(
+    async (
+      req,
+      res
+    ) => {
+      const {
+        startDate,
+        endDate,
+      } = req.query;
+
+      const result =
+        await expenseService.getExpenseLedgerReport(
+          {
+            store:
+              req.user
+                .store,
+            startDate,
+            endDate,
+          }
+        );
+
+      return new ApiResponse(
+        200,
+        result,
+        'Expense ledger fetched successfully'
+      ).send(res);
+    }
+  );

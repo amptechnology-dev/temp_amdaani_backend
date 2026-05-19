@@ -678,109 +678,57 @@ export const getGstSalesReport = async (filters = {}) => {
     { $match: { 'items.gstRate': { $gt: 0 } } },
 
     {
-      $project: {
-        invoiceDate: 1,
-        invoiceNumber: 1,
+      $group: {
+        _id: '$product',
+        itemDescription: { $first: '$productInfo.name' },
 
-        customerName: {
-          $ifNull: ['$customerName', 'Cash Customer'],
+        totalIn: {
+          $sum: {
+            $cond: [
+              { $eq: ['$direction', 'IN'] },
+              {
+                $cond: [
+                  { $eq: ['$transactionType', 'PURCHASE_REVERSE'] },
+                  { $multiply: [{ $abs: '$quantity' }, -1] }, // reverses the original IN
+                  { $abs: '$quantity' },
+                ],
+              },
+              0,
+            ],
+          },
         },
 
-        customerGst: {
-          $ifNull: ['$customerGstNumber', '-'],
+        totalOut: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: ['$direction', 'OUT'] },
+                  { $ne: ['$transactionType', 'PURCHASE_REVERSE'] }, // not counted as OUT
+                ],
+              },
+              { $abs: '$quantity' },
+              0,
+            ],
+          },
         },
 
-        item: '$items.name',
-        hsn: '$items.hsn',
-        unit: '$items.unit',
-        quantity: '$items.quantity',
-
-        taxableValue: {
-          $round: [
-            {
-              $divide: [
-                '$items.total',
-                {
-                  $add: [
-                    1,
-                    {
-                      $divide: ['$items.gstRate', 100],
-                    },
-                  ],
-                },
-              ],
-            },
-            2,
-          ],
+        totalInValue: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: ['$direction', 'IN'] },
+                  { $ne: ['$transactionType', 'PURCHASE_REVERSE'] }, // don't include reversed value
+                ],
+              },
+              {
+                $multiply: [{ $abs: '$quantity' }, { $ifNull: ['$rate', 0] }],
+              },
+              0,
+            ],
+          },
         },
-
-        cgstPercent: {
-          $divide: ['$items.gstRate', 2],
-        },
-
-        sgstPercent: {
-          $divide: ['$items.gstRate', 2],
-        },
-
-        cgstAmount: {
-          $round: [
-            {
-              $divide: [
-                {
-                  $subtract: [
-                    '$items.total',
-                    {
-                      $divide: [
-                        '$items.total',
-                        {
-                          $add: [
-                            1,
-                            {
-                              $divide: ['$items.gstRate', 100],
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                  ],
-                },
-                2,
-              ],
-            },
-            2,
-          ],
-        },
-
-        sgstAmount: {
-          $round: [
-            {
-              $divide: [
-                {
-                  $subtract: [
-                    '$items.total',
-                    {
-                      $divide: [
-                        '$items.total',
-                        {
-                          $add: [
-                            1,
-                            {
-                              $divide: ['$items.gstRate', 100],
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                  ],
-                },
-                2,
-              ],
-            },
-            2,
-          ],
-        },
-
-        invoiceAmount: '$grandTotal',
       },
     },
   ]);
@@ -984,10 +932,7 @@ export const getProfitLossReport = async (filters = {}) => {
                           $add: [
                             1,
                             {
-                              $divide: [
-                                '$purchaseItem.gstRate',
-                                100,
-                              ],
+                              $divide: ['$purchaseItem.gstRate', 100],
                             },
                           ],
                         },
@@ -1087,10 +1032,7 @@ export const getProfitLossReport = async (filters = {}) => {
           $first: {
             $ifNull: [
               {
-                $arrayElemAt: [
-                  '$expenseData.totalExpense',
-                  0,
-                ],
+                $arrayElemAt: ['$expenseData.totalExpense', 0],
               },
               0,
             ],
@@ -1112,17 +1054,11 @@ export const getProfitLossReport = async (filters = {}) => {
         customerDescription: {
           $concat: [
             {
-              $ifNull: [
-                '$customerName',
-                'Cash Customer',
-              ],
+              $ifNull: ['$customerName', 'Cash Customer'],
             },
             ' , ',
             {
-              $ifNull: [
-                '$customerMobile',
-                '-',
-              ],
+              $ifNull: ['$customerMobile', '-'],
             },
           ],
         },
@@ -1133,10 +1069,7 @@ export const getProfitLossReport = async (filters = {}) => {
               $subtract: [
                 '$invoiceAmount',
                 {
-                  $add: [
-                    '$purchaseCost',
-                    '$expenseAmount',
-                  ],
+                  $add: ['$purchaseCost', '$expenseAmount'],
                 },
               ],
             },

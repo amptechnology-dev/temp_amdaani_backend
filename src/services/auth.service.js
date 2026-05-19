@@ -32,24 +32,58 @@ import { UserTracking } from '../models/UserTracking.model.js';
 
 export const sendOtp = async (phone) => {
   if (!phone) {
-    throw new ApiError(400, 'Phone number is required', [
-      { source: 'body', field: 'phone', message: 'Phone is required' },
-    ]);
+    throw new ApiError(
+      400,
+      'Phone number is required',
+      [
+        {
+          source: 'body',
+          field: 'phone',
+          message: 'Phone is required',
+        },
+      ]
+    );
   }
   const user = await User.findOne({ phone });
-  if (!user.isActive) {
-    throw new ApiError(403, 'You are not an active user', [
-      {
-        source: 'body',
-        field: 'user',
-        message: 'Your account is not active. OTP cannot be sent.',
-      },
-    ]);
+  if (user && !user.isActive) {
+    throw new ApiError(
+      403,
+      'You are not an active user',
+      [
+        {
+          source: 'body',
+          field: 'user',
+          message:
+            'Your account is not active. OTP cannot be sent.',
+        },
+      ]
+    );
   }
-  if (phone === '9999999999') return true;
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const hash = crypto.createHash('sha256').update(otp).digest('hex');
-  await redis.set(`otp:${phone}`, hash, 'EX', 60 * 5); // 5 min TTL
+
+  if (phone === '9999999999') {
+    return true;
+  }
+
+  // Generate OTP
+  const otp = Math.floor(
+    100000 + Math.random() * 900000
+  ).toString();
+
+  // Hash OTP
+  const hash = crypto
+    .createHash('sha256')
+    .update(otp)
+    .digest('hex');
+
+  // Store OTP in Redis (5 min expiry)
+  await redis.set(
+    `otp:${phone}`,
+    hash,
+    'EX',
+    60 * 5
+  );
+
+  // SMS message
   const message = `${otp} is your OTP to login into AMDANI. Please do not share this OTP with anyone.- AMPTECH`;
 
   const params = {
@@ -64,16 +98,33 @@ export const sendOtp = async (phone) => {
     format: 'JSON',
   };
 
-  const smsResponse = await axios.get(
-    'http://text.mboxsolution.com/sms-panel/api/http/index.php',
-    { params }
-  );
+  // Send SMS
+  const smsResponse =
+    await axios.get(
+      'http://text.mboxsolution.com/sms-panel/api/http/index.php',
+      { params }
+    );
 
-  if (smsResponse.data.status !== 'success') {
-    console.error('Failed to send SMS:', smsResponse.data);
-    throw new ApiError(500, 'Failed to send SMS.', [
-      { message: 'Failed to send SMS' },
-    ]);
+  // SMS failed
+  if (
+    smsResponse.data.status !==
+    'success'
+  ) {
+    console.error(
+      'Failed to send SMS:',
+      smsResponse.data
+    );
+
+    throw new ApiError(
+      500,
+      'Failed to send SMS.',
+      [
+        {
+          message:
+            'Failed to send SMS',
+        },
+      ]
+    );
   }
 
   return true;

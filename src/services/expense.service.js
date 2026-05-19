@@ -1,4 +1,6 @@
+import mongoose from 'mongoose';
 import { Expense } from '../models/expense.model.js';
+import {Purchase} from '../models/purchase.model.js';
 
 export const createExpense = async (expenseData) => {
   return Expense.create(expenseData);
@@ -147,4 +149,291 @@ export const getExpensesGroupedByHead = async (storeId, { startDate, endDate }) 
 
     { $sort: { headName: 1 } },
   ]);
+};
+
+export const getExpenseLedgerReport = async (
+  filters = {}
+) => {
+  const {
+    store,
+    startDate,
+    endDate,
+  } = filters;
+
+  const purchaseMatch = {
+    store:
+      new mongoose.Types.ObjectId(
+        String(store)
+      ),
+    status: {
+      $ne: 'cancelled',
+    },
+  };
+
+  const expenseMatch = {
+    store:
+      new mongoose.Types.ObjectId(
+        String(store)
+      ),
+  };
+
+  // date filter
+  if (startDate && endDate) {
+    const start =
+      new Date(startDate);
+    start.setHours(
+      0,
+      0,
+      0,
+      0
+    );
+
+    const end =
+      new Date(endDate);
+    end.setHours(
+      23,
+      59,
+      59,
+      999
+    );
+
+    purchaseMatch.date = {
+      $gte: start,
+      $lte: end,
+    };
+
+    expenseMatch.date = {
+      $gte: start,
+      $lte: end,
+    };
+  }
+
+  // purchase ledger
+  const purchaseData =
+    await Purchase.aggregate([
+      {
+        $match:
+          purchaseMatch,
+      },
+
+      {
+        $lookup: {
+          from:
+            'vendors',
+          localField:
+            'vendor',
+          foreignField:
+            '_id',
+          as: 'vendor',
+        },
+      },
+
+      {
+        $unwind: {
+          path: '$vendor',
+          preserveNullAndEmptyArrays:
+            true,
+        },
+      },
+
+      {
+        $unwind:
+          '$items',
+      },
+
+      {
+        $addFields: {
+          gstAmount: {
+            $round: [
+              {
+                $multiply:
+                  [
+                    {
+                      $multiply:
+                        [
+                          '$items.rate',
+                          '$items.quantity',
+                        ],
+                    },
+                    {
+                      $divide:
+                        [
+                          '$items.gstRate',
+                          100,
+                        ],
+                    },
+                  ],
+              },
+              2,
+            ],
+          },
+
+          itemAmount:
+            {
+              $multiply:
+                [
+                  '$items.rate',
+                  '$items.quantity',
+                ],
+            },
+        },
+      },
+
+      {
+        $project: {
+          _id: 1,
+          date: '$date',
+          type: {
+            $literal:
+              'purchase',
+          },
+
+          invoiceNumber:
+            '$invoiceNumber',
+
+          vendorName:
+            '$vendor.name',
+
+          productName:
+            '$items.name',
+
+          quantity:
+            '$items.quantity',
+
+          rate:
+            '$items.rate',
+
+          gstRate:
+            '$items.gstRate',
+
+          gstAmount: 1,
+
+          discount:
+            '$items.discount',
+
+          amount:
+            '$itemAmount',
+
+          grandTotal:
+            '$grandTotal',
+
+          paymentMethod:
+            '$paymentMethod',
+        },
+      },
+    ]);
+
+  // other expense ledger
+  const expenseData =
+    await Expense.aggregate([
+      {
+        $match:
+          expenseMatch,
+      },
+
+      {
+        $lookup: {
+          from:
+            'expenseheads',
+          localField:
+            'head',
+          foreignField:
+            '_id',
+          as: 'head',
+        },
+      },
+
+      {
+        $unwind: {
+          path: '$head',
+          preserveNullAndEmptyArrays:
+            true,
+        },
+      },
+
+      {
+        $project: {
+          _id: 1,
+          date: 1,
+          type: {
+            $literal:
+              'expense',
+          },
+
+          expenseHead:
+            '$head.name',
+
+          amount: 1,
+
+          paymentMethod: 1,
+
+          paidTo: 1,
+
+          notes: 1,
+        },
+      },
+    ]);
+
+  // merge
+  const ledger = [
+    ...purchaseData,
+    ...expenseData,
+  ];
+
+  // date wise sort
+  ledger.sort(
+    (a, b) =>
+      new Date(a.date) -
+      new Date(b.date)
+  );
+
+  // summary
+  const summary = {
+    totalPurchaseAmount:
+      purchaseData.reduce(
+        (sum, item) =>
+          sum +
+          (item.amount ||
+            0),
+        0
+      ),
+
+    totalPurchaseGST:
+      purchaseData.reduce(
+        (sum, item) =>
+          sum +
+          (item.gstAmount ||
+            0),
+        0
+      ),
+
+    totalPurchaseDiscount:
+      purchaseData.reduce(
+        (sum, item) =>
+          sum +
+          (item.discount ||
+            0),
+        0
+      ),
+
+    totalOtherExpense:
+      expenseData.reduce(
+        (sum, item) =>
+          sum +
+          (item.amount ||
+            0),
+        0
+      ),
+  };
+
+  summary.grandTotalExpense =
+    summary.totalPurchaseAmount +
+    summary.totalPurchaseGST -
+    summary.totalPurchaseDiscount +
+    summary.totalOtherExpense;
+
+  return {
+    summary,
+    data: ledger,
+  };
 };

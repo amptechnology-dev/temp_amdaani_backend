@@ -159,3 +159,120 @@ export const changePurchaseStatus = expressAsyncHandler(async (req, res) => {
   }
   return new ApiResponse(200, invoice, 'Invoice status changed successfully').send(res);
 });
+
+export const getPurchasesReport =
+  expressAsyncHandler(async (req, res) => {
+    const filters = pick(req.query, [
+      'status',
+      'startDate',
+      'endDate',
+    ]);
+
+    const { range } = req.query;
+
+    filters.store = req.user.store;
+
+    const now = new Date();
+
+    let startDate;
+    let endDate;
+
+    // ✅ First priority: custom date range
+    if (
+      req.query.startDate &&
+      req.query.endDate
+    ) {
+      startDate = new Date(
+        req.query.startDate
+      );
+
+      startDate.setHours(0, 0, 0, 0);
+
+      endDate = new Date(
+        req.query.endDate
+      );
+
+      endDate.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+    }
+
+    // ✅ this month
+    else if (range === 'thisMonth') {
+      startDate = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        1
+      );
+
+      endDate = new Date(
+        now.getFullYear(),
+        now.getMonth() + 1,
+        0,
+        23,
+        59,
+        59,
+        999
+      );
+    }
+
+    // ✅ previous month
+    else if (
+      range === 'previousMonth'
+    ) {
+      startDate = new Date(
+        now.getFullYear(),
+        now.getMonth() - 1,
+        1
+      );
+
+      endDate = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        0,
+        23,
+        59,
+        59,
+        999
+      );
+    }
+
+    // ✅ current year
+    else if (range === 'year') {
+      startDate = new Date(
+        now.getFullYear(),
+        0,
+        1
+      );
+
+      endDate = new Date(
+        now.getFullYear(),
+        11,
+        31,
+        23,
+        59,
+        59,
+        999
+      );
+    }
+
+    // ✅ apply date filter
+    if (startDate && endDate) {
+      filters.startDate = startDate;
+      filters.endDate = endDate;
+    }
+
+    const purchases =
+      await purchaseService.queryPurchasesReport(
+        filters
+      );
+
+    return new ApiResponse(
+      200,
+      purchases,
+      'Purchase report fetched successfully'
+    ).send(res);
+  });

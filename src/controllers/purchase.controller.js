@@ -74,52 +74,27 @@ export const removePaymentFromPurchase = expressAsyncHandler(async (req, res) =>
 //   return new ApiResponse(200, purchase, 'Purchase deleted successfully').send(res);
 // });
 
-export const getAllVendorPaymentsByStore =
-  expressAsyncHandler(
-    async (req, res) => {
+export const getAllVendorPaymentsByStore = expressAsyncHandler(async (req, res) => {
+  const { startDate, endDate } = req.query;
 
-      const {
-        startDate,
-        endDate,
-      } = req.query;
+  let parsedStartDate = null;
+  let parsedEndDate = null;
 
-      let parsedStartDate = null;
-      let parsedEndDate = null;
+  // Validate only if date exists
+  if (startDate && endDate) {
+    parsedStartDate = new Date(startDate);
 
-      // Validate only if date exists
-      if (startDate && endDate) {
+    parsedEndDate = new Date(endDate);
 
-        parsedStartDate =
-          new Date(startDate);
-
-        parsedEndDate =
-          new Date(endDate);
-
-        if (
-          isNaN(parsedStartDate.getTime()) ||
-          isNaN(parsedEndDate.getTime())
-        ) {
-          throw new ApiError(
-            400,
-            'Invalid date range!'
-          );
-        }
-      }
-
-      const transactions =
-        await getVendorPaymentsByStore(
-          req.user.store,
-          parsedStartDate,
-          parsedEndDate
-        );
-
-      return new ApiResponse(
-        200,
-        transactions,
-        'Payments fetched successfully'
-      ).send(res);
+    if (isNaN(parsedStartDate.getTime()) || isNaN(parsedEndDate.getTime())) {
+      throw new ApiError(400, 'Invalid date range!');
     }
-  );
+  }
+
+  const transactions = await getVendorPaymentsByStore(req.user.store, parsedStartDate, parsedEndDate);
+
+  return new ApiResponse(200, transactions, 'Payments fetched successfully').send(res);
+});
 
 export const getLastPurchase = expressAsyncHandler(async (req, res) => {
   const purchase = await purchaseService.getLastPurchase(req.user.store);
@@ -160,119 +135,64 @@ export const changePurchaseStatus = expressAsyncHandler(async (req, res) => {
   return new ApiResponse(200, invoice, 'Invoice status changed successfully').send(res);
 });
 
-export const getPurchasesReport =
-  expressAsyncHandler(async (req, res) => {
-    const filters = pick(req.query, [
-      'status',
-      'startDate',
-      'endDate',
-    ]);
+export const getPurchasesReport = expressAsyncHandler(async (req, res) => {
+  const filters = pick(req.query, ['status', 'startDate', 'endDate']);
 
-    const { range } = req.query;
+  console.log('hsdfb', filters);
 
-    filters.store = req.user.store;
+  const { range } = req.query;
 
-    const now = new Date();
+  filters.store = req.user.store;
 
-    let startDate;
-    let endDate;
+  const now = new Date();
 
-    // ✅ First priority: custom date range
-    if (
-      req.query.startDate &&
-      req.query.endDate
-    ) {
-      startDate = new Date(
-        req.query.startDate
-      );
+  let startDate;
+  let endDate;
 
-      startDate.setHours(0, 0, 0, 0);
+  // ✅ First priority: custom date range (accepts timestamp OR ISO string)
+  if (req.query.startDate && req.query.endDate) {
+    const rawStart = req.query.startDate;
+    const rawEnd = req.query.endDate;
 
-      endDate = new Date(
-        req.query.endDate
-      );
+    startDate = new Date(/^\d+$/.test(rawStart) ? Number(rawStart) : rawStart);
+    endDate = new Date(/^\d+$/.test(rawEnd) ? Number(rawEnd) : rawEnd);
 
-      endDate.setHours(
-        23,
-        59,
-        59,
-        999
-      );
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid date format.',
+      });
     }
+  }
 
-    // ✅ this month
-    else if (range === 'thisMonth') {
-      startDate = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        1
-      );
+  // ✅ this month
+  else if (range === 'thisMonth') {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  }
 
-      endDate = new Date(
-        now.getFullYear(),
-        now.getMonth() + 1,
-        0,
-        23,
-        59,
-        59,
-        999
-      );
-    }
+  // ✅ previous month
+  else if (range === 'previousMonth') {
+    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+  }
 
-    // ✅ previous month
-    else if (
-      range === 'previousMonth'
-    ) {
-      startDate = new Date(
-        now.getFullYear(),
-        now.getMonth() - 1,
-        1
-      );
+  // ✅ current year
+  else if (range === 'year') {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+  }
 
-      endDate = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        0,
-        23,
-        59,
-        59,
-        999
-      );
-    }
+  // ✅ apply date filter
+  if (startDate && endDate) {
+    filters.startDate = startDate;
+    filters.endDate = endDate;
+  }
 
-    // ✅ current year
-    else if (range === 'year') {
-      startDate = new Date(
-        now.getFullYear(),
-        0,
-        1
-      );
+  console.log('start date', startDate);
+  console.log('endDate', endDate);
 
-      endDate = new Date(
-        now.getFullYear(),
-        11,
-        31,
-        23,
-        59,
-        59,
-        999
-      );
-    }
+  const purchases = await purchaseService.queryPurchasesReport(filters);
 
-    // ✅ apply date filter
-    if (startDate && endDate) {
-      filters.startDate = startDate;
-      filters.endDate = endDate;
-    }
-
-    const purchases =
-      await purchaseService.queryPurchasesReport(
-        filters
-      );
-
-    return new ApiResponse(
-      200,
-      purchases,
-      'Purchase report fetched successfully'
-    ).send(res);
-  });
+  return new ApiResponse(200, purchases, 'Purchase report fetched successfully').send(res);
+});

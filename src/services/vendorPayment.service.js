@@ -13,19 +13,13 @@ export const updateVendorPaymentStatus = async (paymentId, status) => {
   return VendorPayment.findByIdAndUpdate(paymentId, { status }, { new: true });
 };
 
-export const getVendorPaymentsByStore = async (
-  storeId,
-  startDate,
-  endDate
-) => {
-
+export const getVendorPaymentsByStore = async (storeId, startDate, endDate) => {
   const filter = {
     store: storeId,
   };
 
   // Date filter only if dates exist
   if (startDate && endDate) {
-
     const start = new Date(startDate);
     start.setHours(0, 0, 0, 0);
 
@@ -38,14 +32,9 @@ export const getVendorPaymentsByStore = async (
     };
   }
 
-  return VendorPayment.find(filter)
-    .populate(
-      'purchase',
-      'invoiceNumber vendorName vendorMobile'
-    )
-    .sort({
-      paymentDate: -1,
-    });
+  return VendorPayment.find(filter).populate('purchase', 'invoiceNumber vendorName vendorMobile').sort({
+    paymentDate: -1,
+  });
 };
 
 export const cancelVendorPayment = async (paymentId) => {

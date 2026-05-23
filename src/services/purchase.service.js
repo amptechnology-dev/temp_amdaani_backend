@@ -495,164 +495,140 @@ export const cancelAfterPurchaseStock = async (purchaseId) => {
   }
 };
 
-export const queryPurchasesReport =
-  async (filters = {}) => {
-    const {
-      store,
-      startDate,
-      endDate,
-      status,
-    } = filters;
+export const queryPurchasesReport = async (filters = {}) => {
+  const { store, startDate, endDate, status } = filters;
 
-    const matchStage = {
-      status: {
-        $ne: 'cancelled',
-      },
+  const matchStage = {
+    status: {
+      $ne: 'cancelled',
+    },
+  };
+
+  // ✅ store filter
+  if (store) {
+    matchStage.store = new mongoose.Types.ObjectId(String(store));
+  }
+
+  // ✅ custom date filter
+  if (startDate && endDate) {
+    matchStage.date = {
+      $gte: new Date(startDate),
+      $lte: new Date(endDate),
     };
+  }
 
-    // ✅ store filter
-    if (store) {
-      matchStage.store =
-        new mongoose.Types.ObjectId(
-          String(store)
-        );
-    }
+  // ✅ optional status
+  if (status) {
+    matchStage.status = status;
+  }
 
-    // ✅ custom date filter
-    if (startDate && endDate) {
-      matchStage.date = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      };
-    }
+  const result = await Purchase.aggregate([
+    {
+      $match: matchStage,
+    },
 
-    // ✅ optional status
-    if (status) {
-      matchStage.status = status;
-    }
-
-    const result =
-      await Purchase.aggregate([
-        {
-          $match: matchStage,
-        },
-
-        // ✅ store details
-        {
-          $lookup: {
-            from: 'stores',
-            localField: 'store',
-            foreignField: '_id',
-            as: 'store',
-            pipeline: [
-              {
-                $project: {
-                  name: 1,
-                  type: 1,
-                  gstNumber: 1,
-                  contactNo: 1,
-                  email: 1,
-                  address: 1,
-                  logoUrl: 1,
-                  signatureUrl: 1,
-                  bankDetails: 1,
-                  settings: 1,
-                },
-              },
-            ],
+    // ✅ store details
+    {
+      $lookup: {
+        from: 'stores',
+        localField: 'store',
+        foreignField: '_id',
+        as: 'store',
+        pipeline: [
+          {
+            $project: {
+              name: 1,
+              type: 1,
+              gstNumber: 1,
+              contactNo: 1,
+              email: 1,
+              address: 1,
+              logoUrl: 1,
+              signatureUrl: 1,
+              bankDetails: 1,
+              settings: 1,
+            },
           },
-        },
+        ],
+      },
+    },
 
-        {
-          $unwind: {
-            path: '$store',
-            preserveNullAndEmptyArrays: true,
-          },
-        },
+    {
+      $unwind: {
+        path: '$store',
+        preserveNullAndEmptyArrays: true,
+      },
+    },
 
-        // ✅ get all products
-        {
-          $lookup: {
-            from: 'products',
-            localField:
-              'items.product',
-            foreignField: '_id',
-            as: 'products',
-          },
-        },
+    // ✅ get all products
+    {
+      $lookup: {
+        from: 'products',
+        localField: 'items.product',
+        foreignField: '_id',
+        as: 'products',
+      },
+    },
 
-        // ✅ merge item + product details
-        {
-          $addFields: {
-            items: {
-              $map: {
-                input: '$items',
-                as: 'item',
-                in: {
-                  _id: '$$item._id',
-                  product:
-                    '$$item.product',
-                  name: '$$item.name',
-                  hsn: '$$item.hsn',
-                  unit: '$$item.unit',
-                  quantity:
-                    '$$item.quantity',
-                  rate:
-                    '$$item.rate',
-                  gstRate:
-                    '$$item.gstRate',
-                  isTaxInclusive:
-                    '$$item.isTaxInclusive',
-                  mrp: '$$item.mrp',
-                  discount:
-                    '$$item.discount',
-                  total:
-                    '$$item.total',
-                  sellingPrice:
-                    '$$item.sellingPrice',
-                  sellingDiscount:
-                    '$$item.sellingDiscount',
+    // ✅ merge item + product details
+    {
+      $addFields: {
+        items: {
+          $map: {
+            input: '$items',
+            as: 'item',
+            in: {
+              _id: '$$item._id',
+              product: '$$item.product',
+              name: '$$item.name',
+              hsn: '$$item.hsn',
+              unit: '$$item.unit',
+              quantity: '$$item.quantity',
+              rate: '$$item.rate',
+              gstRate: '$$item.gstRate',
+              isTaxInclusive: '$$item.isTaxInclusive',
+              mrp: '$$item.mrp',
+              discount: '$$item.discount',
+              total: '$$item.total',
+              sellingPrice: '$$item.sellingPrice',
+              sellingDiscount: '$$item.sellingDiscount',
 
-                  // ✅ product info
-                  productDetails: {
-                    $arrayElemAt: [
-                      {
-                        $filter: {
-                          input:
-                            '$products',
-                          as: 'product',
-                          cond: {
-                            $eq: [
-                              '$$product._id',
-                              '$$item.product',
-                            ],
-                          },
-                        },
+              // ✅ product info
+              productDetails: {
+                $arrayElemAt: [
+                  {
+                    $filter: {
+                      input: '$products',
+                      as: 'product',
+                      cond: {
+                        $eq: ['$$product._id', '$$item.product'],
                       },
-                      0,
-                    ],
+                    },
                   },
-                },
+                  0,
+                ],
               },
             },
           },
         },
+      },
+    },
 
-        // remove temp products
-        {
-          $project: {
-            products: 0,
-          },
-        },
+    // remove temp products
+    {
+      $project: {
+        products: 0,
+      },
+    },
 
-        // latest first
-        {
-          $sort: {
-            date: -1,
-            createdAt: -1,
-          },
-        },
-      ]);
+    // latest first
+    {
+      $sort: {
+        date: -1,
+        createdAt: -1,
+      },
+    },
+  ]);
 
-    return result;
-  };
+  return result;
+};

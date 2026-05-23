@@ -372,9 +372,21 @@ export const getProfitLossReport = expressAsyncHandler(async (req, res) => {
     endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
   }
 
-  if (startDate && endDate) {
-    filters.startDate = startDate;
-    filters.endDate = endDate;
+  if (req.query.startDate && req.query.endDate) {
+    // Decode in case of URL encoding issues
+    const rawStart = decodeURIComponent(req.query.startDate);
+    const rawEnd = decodeURIComponent(req.query.endDate);
+
+    startDate = new Date(rawStart);
+    endDate = new Date(rawEnd);
+
+    // Guard against Invalid Date
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid date format. Please provide valid ISO dates.',
+      });
+    }
   }
 
   const report = await invoiceService.getProfitLossReport({

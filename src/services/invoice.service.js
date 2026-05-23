@@ -12,6 +12,7 @@ import { StockTransaction } from '../models/stockTransaction.model.js';
 import { Expense } from '../models/expense.model.js';
 import { Store } from '../models/store.model.js';
 import { json } from 'express';
+import { Transaction } from '../models/transaction.model.js';
 
 //NOTE: Trusting frontend for valid data
 export const createInvoice = async (data) => {
@@ -197,7 +198,7 @@ export const updateInvoice = async (invoiceId, data) => {
     const invoice = await Invoice.findById(invoiceId).session(session);
     if (!invoice) throw new ApiError(404, 'Invoice not found');
 
-    // --- Step 1: Build invoice items exactly like createInvoice ---
+    // --- Step 1: Build invoice items ---
     const invoiceItems = [];
     for (const item of items) {
       const productId = await findOrCreateProduct(invoice.store, item, session);
@@ -224,10 +225,14 @@ export const updateInvoice = async (invoiceId, data) => {
       session
     );
 
-    // --- Step 3: Reverse old stock transactions ---
+    // --- Step 3: Reverse old stock ---
     await reverseStockAfterSale(invoice, session);
 
-    // --- Step 4: Update invoice fields ---
+    // --- Step 4: Reverse old transaction ---
+    // Delete the existing transaction tied to this invoice so we can recreate it fresh
+    await Transaction.deleteMany({ invoice: invoice._id }, { session });
+
+    // --- Step 5: Update invoice fields ---
     invoice.set({
       ...data,
       items: invoiceItems,
@@ -237,7 +242,19 @@ export const updateInvoice = async (invoiceId, data) => {
 
     await invoice.save({ session });
 
-    // --- Step 5: Apply new stock based on updated invoice ---
+    // --- Step 6: Recreate transaction with updated payment data ---
+    await createTransaction(
+      {
+        store: invoice.store,
+        invoice: invoice._id,
+        amount: invoice.amountPaid,
+        paymentMethod: invoice.paymentMethod,
+        note: invoice.paymentNote,
+      },
+      session
+    );
+
+    // --- Step 7: Apply new stock ---
     await updateStockAfterSale(invoice, session);
 
     await session.commitTransaction();
@@ -916,327 +933,253 @@ export const getGstPurchaseReport = async (filters = {}) => {
   return result;
 };
 
-export const getProfitLossReport =
-  async (filters = {}) => {
-    const {
-      store,
-      startDate,
-      endDate,
-    } = filters;
+export const getProfitLossReport = async (filters = {}) => {
+  const { store, startDate, endDate } = filters;
 
-    const matchStage = {
-      status: {
-        $ne: 'cancelled',
-      },
-    };
-
-    // store filter
-    if (store) {
-      matchStage.store =
-        new mongoose.Types.ObjectId(
-          String(store)
-        );
-    }
-
-    // date filter
-    if (startDate && endDate) {
-      matchStage.invoiceDate = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      };
-    }
-
-    const result =
-      await Invoice.aggregate([
-        {
-          $match: matchStage,
-        },
-
-        {
-          $unwind: '$items',
-        },
-
-        // latest purchase
-        {
-          $lookup: {
-            from: 'purchases',
-            let: {
-              productId:
-                '$items.product',
-            },
-            pipeline: [
-              {
-                $match: {
-                  status: {
-                    $ne:
-                      'cancelled',
-                  },
-                },
-              },
-
-              {
-                $unwind:
-                  '$items',
-              },
-
-              {
-                $match: {
-                  $expr: {
-                    $eq: [
-                      '$items.product',
-                      '$$productId',
-                    ],
-                  },
-                },
-              },
-
-              {
-                $sort: {
-                  createdAt:
-                    -1,
-                },
-              },
-
-              {
-                $limit: 1,
-              },
-
-              {
-                $project: {
-                  rate:
-                    '$items.rate',
-                  quantity:
-                    '$items.quantity',
-                  productName:
-                    '$items.name',
-                },
-              },
-            ],
-            as: 'purchaseData',
-          },
-        },
-
-        {
-          $addFields: {
-            purchaseItem: {
-              $arrayElemAt: [
-                '$purchaseData',
-                0,
-              ],
-            },
-          },
-        },
-
-        // calculation
-        {
-          $addFields: {
-            itemSalesAmount: {
-              $multiply: [
-                {
-                  $ifNull: [
-                    '$items.sellingPrice',
-                    0,
-                  ],
-                },
-                {
-                  $ifNull: [
-                    '$items.quantity',
-                    0,
-                  ],
-                },
-              ],
-            },
-
-            itemPurchaseCost: {
-              $multiply: [
-                {
-                  $ifNull: [
-                    '$purchaseItem.rate',
-                    0,
-                  ],
-                },
-                {
-                  $ifNull: [
-                    '$items.quantity',
-                    0,
-                  ],
-                },
-              ],
-            },
-          },
-        },
-
-        // item profit
-        {
-          $addFields: {
-            itemProfit: {
-              $subtract: [
-                '$itemSalesAmount',
-                '$itemPurchaseCost',
-              ],
-            },
-          },
-        },
-
-        // invoice group
-        {
-          $group: {
-            _id: '$_id',
-
-            invoiceDate: {
-              $first:
-                '$invoiceDate',
-            },
-
-            invoiceNumber: {
-              $first:
-                '$invoiceNumber',
-            },
-
-            customerName: {
-              $first:
-                '$customerName',
-            },
-
-            customerMobile: {
-              $first:
-                '$customerMobile',
-            },
-
-            // details per item
-            items: {
-              $push: {
-                product:
-                  '$items.name',
-
-                quantity:
-                  '$items.quantity',
-
-                invoicePrice:
-                  '$items.sellingPrice',
-
-                invoiceAmount:
-                  '$itemSalesAmount',
-
-                purchasePrice:
-                  '$purchaseItem.rate',
-
-                purchaseAmount:
-                  '$itemPurchaseCost',
-
-                itemProfit:
-                  '$itemProfit',
-              },
-            },
-
-            totalSales: {
-              $sum:
-                '$itemSalesAmount',
-            },
-
-            totalPurchase: {
-              $sum:
-                '$itemPurchaseCost',
-            },
-
-            totalProfit: {
-              $sum:
-                '$itemProfit',
-            },
-          },
-        },
-
-        {
-          $project: {
-            invoiceDate: 1,
-            invoiceNumber: 1,
-
-            customerDescription:
-            {
-              $concat: [
-                {
-                  $ifNull: [
-                    '$customerName',
-                    'Cash Customer',
-                  ],
-                },
-                ' , ',
-                {
-                  $ifNull: [
-                    '$customerMobile',
-                    '-',
-                  ],
-                },
-              ],
-            },
-
-            items: 1,
-
-            totalSales: {
-              $round: [
-                '$totalSales',
-                2,
-              ],
-            },
-
-            totalPurchase: {
-              $round: [
-                '$totalPurchase',
-                2,
-              ],
-            },
-
-            profitLoss: {
-              $round: [
-                '$totalProfit',
-                2,
-              ],
-            },
-          },
-        },
-
-        {
-          $sort: {
-            invoiceDate: 1,
-          },
-        },
-      ]);
-
-    // overall summary
-    const overall = result.reduce(
-      (acc, curr) => {
-        acc.totalSales +=
-          curr.totalSales || 0;
-
-        acc.totalPurchase +=
-          curr.totalPurchase ||
-          0;
-
-        acc.totalProfit +=
-          curr.profitLoss || 0;
-
-        return acc;
-      },
-      {
-        totalSales: 0,
-        totalPurchase: 0,
-        totalProfit: 0,
-      }
-    );
-
-    return {
-      summary: {
-        totalSales:
-          overall.totalSales,
-        totalPurchase:
-          overall.totalPurchase,
-        totalProfit:
-          overall.totalProfit,
-      },
-
-      invoices: result,
-    };
+  const matchStage = {
+    status: {
+      $ne: 'cancelled',
+    },
   };
+
+  // store filter
+  if (store) {
+    matchStage.store = new mongoose.Types.ObjectId(String(store));
+  }
+
+  // date filter
+  if (startDate && endDate) {
+    matchStage.invoiceDate = {
+      $gte: new Date(startDate),
+      $lte: new Date(endDate),
+    };
+  }
+
+  const result = await Invoice.aggregate([
+    {
+      $match: matchStage,
+    },
+
+    {
+      $unwind: '$items',
+    },
+
+    // latest purchase
+    {
+      $lookup: {
+        from: 'purchases',
+        let: {
+          productId: '$items.product',
+        },
+        pipeline: [
+          {
+            $match: {
+              status: {
+                $ne: 'cancelled',
+              },
+            },
+          },
+
+          {
+            $unwind: '$items',
+          },
+
+          {
+            $match: {
+              $expr: {
+                $eq: ['$items.product', '$$productId'],
+              },
+            },
+          },
+
+          {
+            $sort: {
+              createdAt: -1,
+            },
+          },
+
+          {
+            $limit: 1,
+          },
+
+          {
+            $project: {
+              rate: '$items.rate',
+              quantity: '$items.quantity',
+              productName: '$items.name',
+            },
+          },
+        ],
+        as: 'purchaseData',
+      },
+    },
+
+    {
+      $addFields: {
+        purchaseItem: {
+          $arrayElemAt: ['$purchaseData', 0],
+        },
+      },
+    },
+
+    // calculation
+    {
+      $addFields: {
+        itemSalesAmount: {
+          $multiply: [
+            {
+              $ifNull: ['$items.sellingPrice', 0],
+            },
+            {
+              $ifNull: ['$items.quantity', 0],
+            },
+          ],
+        },
+
+        itemPurchaseCost: {
+          $multiply: [
+            {
+              $ifNull: ['$purchaseItem.rate', 0],
+            },
+            {
+              $ifNull: ['$items.quantity', 0],
+            },
+          ],
+        },
+      },
+    },
+
+    // item profit
+    {
+      $addFields: {
+        itemProfit: {
+          $subtract: ['$itemSalesAmount', '$itemPurchaseCost'],
+        },
+      },
+    },
+
+    // invoice group
+    {
+      $group: {
+        _id: '$_id',
+
+        invoiceDate: {
+          $first: '$invoiceDate',
+        },
+
+        invoiceNumber: {
+          $first: '$invoiceNumber',
+        },
+
+        customerName: {
+          $first: '$customerName',
+        },
+
+        customerMobile: {
+          $first: '$customerMobile',
+        },
+
+        // details per item
+        items: {
+          $push: {
+            product: '$items.name',
+
+            quantity: '$items.quantity',
+
+            invoicePrice: '$items.sellingPrice',
+
+            invoiceAmount: '$itemSalesAmount',
+
+            purchasePrice: '$purchaseItem.rate',
+
+            purchaseAmount: '$itemPurchaseCost',
+
+            itemProfit: '$itemProfit',
+          },
+        },
+
+        totalSales: {
+          $sum: '$itemSalesAmount',
+        },
+
+        totalPurchase: {
+          $sum: '$itemPurchaseCost',
+        },
+
+        totalProfit: {
+          $sum: '$itemProfit',
+        },
+      },
+    },
+
+    {
+      $project: {
+        invoiceDate: 1,
+        invoiceNumber: 1,
+
+        customerDescription: {
+          $concat: [
+            {
+              $ifNull: ['$customerName', 'Cash Customer'],
+            },
+            ' , ',
+            {
+              $ifNull: ['$customerMobile', '-'],
+            },
+          ],
+        },
+
+        items: 1,
+
+        totalSales: {
+          $round: ['$totalSales', 2],
+        },
+
+        totalPurchase: {
+          $round: ['$totalPurchase', 2],
+        },
+
+        profitLoss: {
+          $round: ['$totalProfit', 2],
+        },
+      },
+    },
+
+    {
+      $sort: {
+        invoiceDate: 1,
+      },
+    },
+  ]);
+
+  // overall summary
+  const overall = result.reduce(
+    (acc, curr) => {
+      acc.totalSales += curr.totalSales || 0;
+
+      acc.totalPurchase += curr.totalPurchase || 0;
+
+      acc.totalProfit += curr.profitLoss || 0;
+
+      return acc;
+    },
+    {
+      totalSales: 0,
+      totalPurchase: 0,
+      totalProfit: 0,
+    }
+  );
+
+  return {
+    summary: {
+      totalSales: overall.totalSales,
+      totalPurchase: overall.totalPurchase,
+      totalProfit: overall.totalProfit,
+    },
+
+    invoices: result,
+  };
+};
 
 // export async function getStockBalance(filters) {
 //   const { store, itemName, asOnDate, startDate, endDate } = filters;

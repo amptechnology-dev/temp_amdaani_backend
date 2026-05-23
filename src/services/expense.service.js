@@ -161,41 +161,27 @@ export const getExpenseLedgerReport = async (
   } = filters;
 
   const purchaseMatch = {
-    store:
-      new mongoose.Types.ObjectId(
-        String(store)
-      ),
+    store: new mongoose.Types.ObjectId(
+      String(store)
+    ),
     status: {
-      $ne: 'cancelled',
+      $ne: "cancelled",
     },
   };
 
   const expenseMatch = {
-    store:
-      new mongoose.Types.ObjectId(
-        String(store)
-      ),
+    store: new mongoose.Types.ObjectId(
+      String(store)
+    ),
   };
 
   // date filter
   if (startDate && endDate) {
-    const start =
-      new Date(startDate);
-    start.setHours(
-      0,
-      0,
-      0,
-      0
-    );
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
 
-    const end =
-      new Date(endDate);
-    end.setHours(
-      23,
-      59,
-      59,
-      999
-    );
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
 
     purchaseMatch.date = {
       $gte: start,
@@ -208,37 +194,33 @@ export const getExpenseLedgerReport = async (
     };
   }
 
-  // purchase ledger
+  // ==========================
+  // PURCHASE LEDGER
+  // ==========================
   const purchaseData =
     await Purchase.aggregate([
       {
-        $match:
-          purchaseMatch,
+        $match: purchaseMatch,
       },
 
       {
         $lookup: {
-          from:
-            'vendors',
-          localField:
-            'vendor',
-          foreignField:
-            '_id',
-          as: 'vendor',
+          from: "vendors",
+          localField: "vendor",
+          foreignField: "_id",
+          as: "vendor",
         },
       },
 
       {
         $unwind: {
-          path: '$vendor',
-          preserveNullAndEmptyArrays:
-            true,
+          path: "$vendor",
+          preserveNullAndEmptyArrays: true,
         },
       },
 
       {
-        $unwind:
-          '$items',
+        $unwind: "$items",
       },
 
       {
@@ -246,106 +228,98 @@ export const getExpenseLedgerReport = async (
           gstAmount: {
             $round: [
               {
-                $multiply:
-                  [
-                    {
-                      $multiply:
-                        [
-                          '$items.rate',
-                          '$items.quantity',
-                        ],
-                    },
-                    {
-                      $divide:
-                        [
-                          '$items.gstRate',
-                          100,
-                        ],
-                    },
-                  ],
+                $multiply: [
+                  {
+                    $multiply: [
+                      "$items.rate",
+                      "$items.quantity",
+                    ],
+                  },
+                  {
+                    $divide: [
+                      "$items.gstRate",
+                      100,
+                    ],
+                  },
+                ],
               },
               2,
             ],
           },
 
-          itemAmount:
-            {
-              $multiply:
-                [
-                  '$items.rate',
-                  '$items.quantity',
-                ],
-            },
+          itemAmount: {
+            $multiply: [
+              "$items.rate",
+              "$items.quantity",
+            ],
+          },
         },
       },
 
       {
         $project: {
           _id: 1,
-          date: '$date',
+          date: "$date",
+
           type: {
-            $literal:
-              'purchase',
+            $literal: "purchase",
           },
 
           invoiceNumber:
-            '$invoiceNumber',
+            "$invoiceNumber",
 
           vendorName:
-            '$vendor.name',
+            "$vendor.name",
 
           productName:
-            '$items.name',
+            "$items.name",
 
           quantity:
-            '$items.quantity',
+            "$items.quantity",
 
-          rate:
-            '$items.rate',
+          rate: "$items.rate",
 
           gstRate:
-            '$items.gstRate',
+            "$items.gstRate",
 
           gstAmount: 1,
 
           discount:
-            '$items.discount',
+            "$items.discount",
 
           amount:
-            '$itemAmount',
+            "$itemAmount",
 
           grandTotal:
-            '$grandTotal',
+            "$grandTotal",
 
           paymentMethod:
-            '$paymentMethod',
+            "$paymentMethod",
         },
       },
     ]);
 
-  // other expense ledger
-  const expenseData =
+  // ==========================
+  // OTHER EXPENSES
+  // ==========================
+  const otherExpenses =
     await Expense.aggregate([
       {
-        $match:
-          expenseMatch,
+        $match: expenseMatch,
       },
 
       {
         $lookup: {
-          from:
-            'expenseheads',
-          localField:
-            'head',
-          foreignField:
-            '_id',
-          as: 'head',
+          from: "expenseheads",
+          localField: "head",
+          foreignField: "_id",
+          as: "head",
         },
       },
 
       {
         $unwind: {
-          path: '$head',
+          path: "$head",
           preserveNullAndEmptyArrays:
             true,
         },
@@ -355,13 +329,13 @@ export const getExpenseLedgerReport = async (
         $project: {
           _id: 1,
           date: 1,
+
           type: {
-            $literal:
-              'expense',
+            $literal: "expense",
           },
 
           expenseHead:
-            '$head.name',
+            "$head.name",
 
           amount: 1,
 
@@ -374,27 +348,28 @@ export const getExpenseLedgerReport = async (
       },
     ]);
 
-  // merge
-  const ledger = [
-    ...purchaseData,
-    ...expenseData,
-  ];
-
-  // date wise sort
-  ledger.sort(
+  // purchase only sort
+  purchaseData.sort(
     (a, b) =>
       new Date(a.date) -
       new Date(b.date)
   );
 
-  // summary
+  // other expense sort
+  otherExpenses.sort(
+    (a, b) =>
+      new Date(a.date) -
+      new Date(b.date)
+  );
+
+  // ==========================
+  // SUMMARY
+  // ==========================
   const summary = {
     totalPurchaseAmount:
       purchaseData.reduce(
         (sum, item) =>
-          sum +
-          (item.amount ||
-            0),
+          sum + (item.amount || 0),
         0
       ),
 
@@ -402,8 +377,7 @@ export const getExpenseLedgerReport = async (
       purchaseData.reduce(
         (sum, item) =>
           sum +
-          (item.gstAmount ||
-            0),
+          (item.gstAmount || 0),
         0
       ),
 
@@ -411,17 +385,14 @@ export const getExpenseLedgerReport = async (
       purchaseData.reduce(
         (sum, item) =>
           sum +
-          (item.discount ||
-            0),
+          (item.discount || 0),
         0
       ),
 
     totalOtherExpense:
-      expenseData.reduce(
+      otherExpenses.reduce(
         (sum, item) =>
-          sum +
-          (item.amount ||
-            0),
+          sum + (item.amount || 0),
         0
       ),
   };
@@ -434,6 +405,11 @@ export const getExpenseLedgerReport = async (
 
   return {
     summary,
-    data: ledger,
+
+    // purchase data
+    data: purchaseData,
+
+    // expense table data
+    otherExpenses,
   };
 };

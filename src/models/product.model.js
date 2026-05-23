@@ -1,6 +1,29 @@
 import mongoose from 'mongoose';
 import mongooseAggregatePaginate from 'mongoose-aggregate-paginate-v2';
 
+const financialYearStockSchema =
+  new mongoose.Schema(
+    {
+      financialYear: {
+        type: String,
+        required: true,
+      },
+
+      stock: {
+        type: Number,
+        default: 0,
+        // min: 0,
+      },
+      value:{
+        type: Number,
+        default: 0,
+      }
+    },
+    {
+      _id: false,
+    }
+  );
+
 const productSchema = new mongoose.Schema(
   {
     store: { type: mongoose.SchemaTypes.ObjectId, ref: 'Store', required: true },
@@ -33,6 +56,10 @@ const productSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    financialYearStocks:
+      [
+        financialYearStockSchema,
+      ],
     tags: [String],
     status: { type: String, enum: ['active', 'inactive', 'cancelled'], default: 'active' },
   },

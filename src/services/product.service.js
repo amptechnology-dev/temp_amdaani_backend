@@ -1,4 +1,5 @@
 import { Product } from '../models/product.model.js';
+import { Store } from '../models/store.model.js';
 import { Invoice } from "../models/invoice.model.js";
 // import { ApiError } from '../utils/responseHandler.js';
 import { handleDuplicateKeyError } from '../utils/dbErrorHandler.js';
@@ -6,13 +7,75 @@ import { StockTransactionType } from '../config/constants.js';
 import { StockTransaction } from '../models/stockTransaction.model.js';
 import mongoose from 'mongoose';
 
-export const createProduct = async (data, session = null) => {
+export const createProduct = async (
+  data,
+  session = null
+) => {
   try {
-    const product = new Product(data);
-    console.log(JSON.stringify(data));
-    return await product.save(session ? { session } : undefined);
+    const {
+      openingStock = 0,
+      value = 0,
+      ...productData
+    } = data;
+
+    // Find store
+    const store =
+      await Store.findById(
+        productData.store
+      ).session(session);
+
+    if (!store) {
+      throw new Error(
+        'Store not found'
+      );
+    }
+
+    const currentFY =
+      store.currentFinancialYear;
+
+    if (!currentFY) {
+      throw new Error(
+        'Current financial year not found'
+      );
+    }
+
+    // Always create FY stock entry
+    productData.financialYearStocks = [
+      {
+        financialYear:
+          currentFY,
+        stock:
+          Number(
+            openingStock
+          ) || 0,
+        value: Number(value) || 0,
+      },
+    ];
+
+    // Set current stock
+    productData.currentStock =
+      Number(
+        openingStock
+      ) || 0;
+
+      productData.costPrice = value && openingStock ? Number(value) / Number(openingStock) : 0;
+
+    // Create product
+    const product =
+      new Product(
+        productData
+      );
+
+    return await product.save(
+      session
+        ? { session }
+        : undefined
+    );
   } catch (error) {
-    handleDuplicateKeyError(error, Product);
+    handleDuplicateKeyError(
+      error,
+      Product
+    );
   }
 };
 
@@ -522,4 +585,84 @@ export const updateStockAfterSale = async (sale, session = null) => {
       session
     );
   }
+};
+
+export const carryForwardStockToNextFinancialYear = async (storeId) => {
+  const store =
+    await Store.findById(
+      storeId
+    );
+
+  if (!store) {
+    throw new ApiError(
+      404,
+      'Store not found'
+    );
+  }
+
+  const currentFY =
+    store.currentFinancialYear;
+
+  if (!currentFY) {
+    throw new ApiError(
+      400,
+      'Current financial year not found'
+    );
+  }
+
+  // Generate next FY
+  const [
+    startYear,
+    endYear,
+  ] =
+    currentFY
+      .split('-')
+      .map(Number);
+
+  const nextFY = `${startYear + 1}-${endYear + 1}`;
+
+  // Get all products
+  const products =
+    await Product.find({
+      store: storeId,
+    });
+
+  for (const product of products) {
+    const alreadyExists =
+      product.financialYearStocks.some(
+        (item) =>
+          item.financialYear ===
+          nextFY
+      );
+
+    // Skip if already exists
+    if (alreadyExists)
+      continue;
+
+    // Add next FY opening stock
+    product.financialYearStocks.push(
+      {
+        financialYear:
+          nextFY,
+        stock:
+          product.currentStock,
+          value: product.costPrice && product.currentStock ? Number(product.costPrice) * Number(product.currentStock) : 0,
+      }
+    );
+
+    await product.save();
+  }
+
+  // Update store current FY
+  store.currentFinancialYear =
+    nextFY;
+
+  await store.save();
+
+  return {
+    message:
+      'Stock carried forward successfully',
+    currentFY,
+    nextFY,
+  };
 };

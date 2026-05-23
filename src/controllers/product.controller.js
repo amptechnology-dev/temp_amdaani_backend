@@ -89,3 +89,22 @@ export const getStockTransactionsByProduct = expressAsyncHandler(async (req, res
   const result = await productService.getStockTransactionsByProduct(req.params.id, filters, options);
   return new ApiResponse(200, result, 'Stock transactions fetched successfully').send(res);
 });
+
+export const carryForwardStock = expressAsyncHandler(async (
+  req,
+  res
+) => {
+  const storeId =
+    req.user.store;
+  const result =
+    await productService.carryForwardStockToNextFinancialYear(
+      storeId
+    );
+
+  return new ApiResponse(
+    200,
+    result,
+    'Financial year stock carried forward successfully'
+  ).send(res);
+}
+);

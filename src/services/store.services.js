@@ -4,10 +4,30 @@ import { compressAndUpload, deleteFileFromR2 } from '../services/image.service.j
 import config from '../config/config.js';
 import { getCurrentSubscription } from './subscription.services.js';
 import { getUsage } from './usage.service.js';
+import { getCurrentFinancialYear } from '../utils/getCurrentFinancialYear.js';
 
 export const createStore = async (data, session = null) => {
-  const store = new Store(data);
-  await store.save(session ? { session } : undefined);
+  const financialYear =
+    getCurrentFinancialYear();
+  const storeData = {
+    ...data,
+    registeredFinancialYear:
+      data.registeredFinancialYear ||
+      financialYear,
+    currentFinancialYear:
+      data.currentFinancialYear ||
+      financialYear,
+  };
+
+  const store =
+    new Store(storeData);
+
+  await store.save(
+    session
+      ? { session }
+      : undefined
+  );
+
   return store;
 };
 

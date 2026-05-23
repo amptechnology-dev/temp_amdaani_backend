@@ -49,6 +49,8 @@ export const createProductSchema = {
       .min(0, 'GST rate cannot be negative')
       .max(28, 'GST rate cannot be more than 100'),
     mrp: yup.number().typeError('GST rate must be a number').min(0, 'GST rate cannot be negative'),
+    openingStock: yup.number().typeError('Opening stock must be a number').min(0, 'Opening stock cannot be negative')
+      .default(0),
     purchaseGstRate: yup
       .number()
       .typeError('GST rate must be a number')

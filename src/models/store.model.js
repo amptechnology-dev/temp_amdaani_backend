@@ -12,6 +12,16 @@ const storeSchema = new mongoose.Schema(
     registrationNo: { type: String, trim: true },
     contactNo: { type: String, trim: true },
     email: { type: String, trim: true, lowercase: true },
+    registeredFinancialYear:
+    {
+      type: String,
+      required: true,
+    },
+    currentFinancialYear:
+    {
+      type: String,
+      required: true,
+    },
     address: {
       street: String,
       city: String,
@@ -53,7 +63,7 @@ const storeSchema = new mongoose.Schema(
       ref: "Store",
       default: null,
     },
-    agentCode:{
+    agentCode: {
       type: String,
     },
     logoUrl: String,

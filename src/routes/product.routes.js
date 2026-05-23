@@ -19,5 +19,6 @@ router
 router.route('/adjust-stock').post(validate(productSchema.adjustStockSchema), productController.adjustProductStock);
 router.route('/stock-transaction/:id').get(productController.getStockTransactionsByProduct);
 router.route('/sales').get(productController.getAllProductsWithSales);
+router.route('/carry-forward-stock').post(productController.carryForwardStock);
 
 export default router;

@@ -37,21 +37,58 @@ export const createInvoice = async (data) => {
   const session = await mongoose.startSession();
   try {
     session.startTransaction();
-
-    // Build invoice items
     const invoiceItems = [];
     for (const item of items) {
-      const productId = await findOrCreateProduct(data.store, item, session);
+      const productId =
+        await findOrCreateProduct(
+          data.store,
+          item,
+          session
+        );
+
+      if (productId) {
+        const product =
+          await Product.findById(
+            productId
+          ).session(session);
+
+        if (!product) {
+          throw new ApiError(
+            404,
+            `Product not found: ${item.name}`
+          );
+        }
+
+        // Available stock check
+        if (
+          product.currentStock <
+          item.quantity
+        ) {
+          throw new ApiError(
+            400,
+            `Insufficient stock for ${product.name}`,
+            {
+              source: 'body',
+              field: 'items',
+              message: `${product.name} stock is only ${product.currentStock}, but you are trying to sell ${item.quantity}`,
+            }
+          );
+        }
+      }
+
       invoiceItems.push({
         ...item,
-        // ✅ Only attach product ref if one exists — don't force it
-        ...(productId ? { product: productId } : {}),
+
+        ...(productId
+          ? {
+            product: productId,
+          }
+          : {}),
       });
     }
 
     console.log('Invoice Items:', JSON.stringify(invoiceItems));
 
-    // Handle customer
     const customerId = await findOrCreateCustomer(
       data.store,
       {
@@ -68,13 +105,11 @@ export const createInvoice = async (data) => {
       session
     );
 
-    // Build full invoice doc WITH store snapshot — all in one shot
     const invoiceDoc = {
       ...data,
       items: invoiceItems,
       customer: customerId,
 
-      // Store snapshot embedded at creation time
       name: store.name,
       tagline: store.tagline,
       ownershipType: store.ownershipType,
@@ -118,9 +153,7 @@ export const createInvoice = async (data) => {
     };
 
     const invoice = new Invoice(invoiceDoc);
-    await invoice.save({ session }); // ✅ correct syntax
-
-    // Create transaction if partial payment
+    await invoice.save({ session });
 
     await createTransaction(
       {
@@ -135,11 +168,11 @@ export const createInvoice = async (data) => {
 
     await updateStockAfterSale(invoice, session);
 
-    await session.commitTransaction(); // ✅ everything commits together
+    await session.commitTransaction();
     return invoice;
   } catch (error) {
     await session.abortTransaction();
-    throw handleDuplicateKeyError(error) || error; // ✅ always throws
+    throw handleDuplicateKeyError(error) || error;
   } finally {
     await session.endSession();
   }
@@ -1407,17 +1440,23 @@ export const getItemStockReport = async (filters = {}) => {
 };
 
 export const getStockBalance = async (filters = {}) => {
-  const { store, itemName, asOnDate, startDate, endDate } = filters;
+  const {
+    store,
+    itemName,
+    asOnDate,
+    startDate,
+    endDate,
+  } = filters;
+
+  const storeId =
+    new mongoose.Types.ObjectId(String(store));
 
   const baseMatch = {
-    store: new mongoose.Types.ObjectId(String(store)),
-
-    status: {
-      $ne: 'cancelled',
-    },
+    store: storeId,
+    status: { $ne: 'cancelled' },
   };
 
-  // Item name search
+  // Search by item name
   if (itemName) {
     baseMatch.name = {
       $regex: itemName,
@@ -1425,31 +1464,42 @@ export const getStockBalance = async (filters = {}) => {
     };
   }
 
-  // Date filter for transactions
+  // Date condition
   let dateCondition = [];
 
   if (asOnDate) {
     dateCondition = [
       {
-        $lte: ['$date', new Date(asOnDate)],
+        $lte: [
+          '$date',
+          new Date(asOnDate),
+        ],
       },
     ];
   } else if (startDate && endDate) {
     dateCondition = [
       {
-        $gte: ['$date', new Date(startDate)],
+        $gte: [
+          '$date',
+          new Date(startDate),
+        ],
       },
       {
-        $lte: ['$date', new Date(endDate)],
+        $lte: [
+          '$date',
+          new Date(endDate),
+        ],
       },
     ];
   }
 
   const pipeline = [
+    // Match Products
     {
       $match: baseMatch,
     },
 
+    // Get Stock Transactions
     {
       $lookup: {
         from: 'stocktransactions',
@@ -1464,13 +1514,17 @@ export const getStockBalance = async (filters = {}) => {
               $expr: {
                 $and: [
                   {
-                    $eq: ['$product', '$$productId'],
+                    $eq: [
+                      '$product',
+                      '$$productId',
+                    ],
                   },
-
                   {
-                    $eq: ['$store', new mongoose.Types.ObjectId(String(store))],
+                    $eq: [
+                      '$store',
+                      storeId,
+                    ],
                   },
-
                   ...dateCondition,
                 ],
               },
@@ -1482,128 +1536,190 @@ export const getStockBalance = async (filters = {}) => {
       },
     },
 
-    // Calculate stock movement
+    // Calculate Quantities
     {
       $addFields: {
-        totalIn: {
+        // Opening Stock
+        openingQty: {
           $sum: {
             $map: {
-              input: '$transactions',
-
-              as: 'tx',
-
-              in: {
-                $cond: [
-                  {
-                    $eq: ['$$tx.direction', 'IN'],
-                  },
-
-                  {
-                    $abs: '$$tx.quantity',
-                  },
-
-                  0,
-                ],
-              },
+              input:
+                '$financialYearStocks',
+              as: 'fy',
+              in: '$$fy.stock',
             },
           },
         },
 
-        totalOut: {
+        // Purchase
+        purchaseQty: {
           $sum: {
             $map: {
-              input: '$transactions',
-
+              input:
+                '$transactions',
               as: 'tx',
-
               in: {
                 $cond: [
                   {
-                    $eq: ['$$tx.direction', 'OUT'],
-                  },
-
-                  {
-                    $abs: '$$tx.quantity',
-                  },
-
-                  0,
-                ],
-              },
-            },
-          },
-        },
-
-        totalInValue: {
-          $sum: {
-            $map: {
-              input: '$transactions',
-
-              as: 'tx',
-
-              in: {
-                $cond: [
-                  {
-                    $eq: ['$$tx.direction', 'IN'],
-                  },
-
-                  {
-                    $multiply: [
-                      {
-                        $abs: '$$tx.quantity',
-                      },
-
-                      {
-                        $ifNull: ['$$tx.rate', 0],
-                      },
+                    $eq: [
+                      '$$tx.transactionType',
+                      'PURCHASE',
                     ],
                   },
-
+                  '$$tx.quantity',
                   0,
                 ],
               },
             },
           },
         },
-      },
-    },
 
-    // Historical stock calculation
-    {
-      $addFields: {
-        quantity: {
-          $subtract: ['$totalIn', '$totalOut'],
+        // Return In (Customer Return)
+        returnInQty: {
+          $sum: {
+            $map: {
+              input:
+                '$transactions',
+              as: 'tx',
+              in: {
+                $cond: [
+                  {
+                    $eq: [
+                      '$$tx.transactionType',
+                      'SALE_RETURN',
+                    ],
+                  },
+                  '$$tx.quantity',
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
+        // Sale
+        saleQty: {
+          $sum: {
+            $map: {
+              input:
+                '$transactions',
+              as: 'tx',
+              in: {
+                $cond: [
+                  {
+                    $eq: [
+                      '$$tx.transactionType',
+                      'SALE',
+                    ],
+                  },
+                  '$$tx.quantity',
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
+        // Return Out (Vendor Return)
+        returnOutQty: {
+          $sum: {
+            $map: {
+              input:
+                '$transactions',
+              as: 'tx',
+              in: {
+                $cond: [
+                  {
+                    $in: [
+                      '$$tx.transactionType',
+                      [
+                        'PURCHASE_RETURN',
+                        'RETURN_TO_VENDOR',
+                      ],
+                    ],
+                  },
+                  '$$tx.quantity',
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
+        // Damage
+        damageQty: {
+          $sum: {
+            $map: {
+              input:
+                '$transactions',
+              as: 'tx',
+              in: {
+                $cond: [
+                  {
+                    $eq: [
+                      '$$tx.transactionType',
+                      'DAMAGE',
+                    ],
+                  },
+                  '$$tx.quantity',
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
+        // Adjustment
+        adjustmentQty: {
+          $sum: {
+            $map: {
+              input:
+                '$transactions',
+              as: 'tx',
+              in: {
+                $cond: [
+                  {
+                    $eq: [
+                      '$$tx.transactionType',
+                      'ADJUSTMENT',
+                    ],
+                  },
+                  '$$tx.quantity',
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
+        // Average Purchase Rate
+        avgRate: {
+          $ifNull: [
+            '$lastPurchasePrice',
+            '$costPrice',
+          ],
         },
       },
     },
 
+    // Closing Stock Formula
     {
-      $project: {
-        _id: 0,
-
-        itemDescription: '$name',
-
-        quantity: 1,
-
-        totalIn: 1,
-        totalOut: 1,
-
-        avgRate: {
-          $cond: [
+      $addFields: {
+        closingQty: {
+          $subtract: [
             {
-              $gt: ['$totalIn', 0],
+              $add: [
+                '$openingQty',
+                '$purchaseQty',
+                '$returnInQty',
+                '$adjustmentQty',
+              ],
             },
-
             {
-              $divide: ['$totalInValue', '$totalIn'],
-            },
-
-            {
-              $ifNull: [
-                '$lastPurchasePrice',
-
-                {
-                  $ifNull: ['$costPrice', 0],
-                },
+              $add: [
+                '$saleQty',
+                '$returnOutQty',
+                '$damageQty',
               ],
             },
           ],
@@ -1611,20 +1727,39 @@ export const getStockBalance = async (filters = {}) => {
       },
     },
 
+    // Final Response
     {
-      $addFields: {
-        itemValue: {
+      $project: {
+        _id: 0,
+
+        itemDescription:
+          '$name',
+
+        openingQty: 1,
+        purchaseQty: 1,
+        returnInQty: 1,
+        saleQty: 1,
+        returnOutQty: 1,
+        damageQty: 1,
+        adjustmentQty: 1,
+        closingQty: 1,
+        avgRate: 1,
+
+        stockValue: {
           $round: [
             {
-              $multiply: ['$quantity', '$avgRate'],
+              $multiply: [
+                '$closingQty',
+                '$avgRate',
+              ],
             },
-
             2,
           ],
         },
       },
     },
 
+    // Sort by Name
     {
       $sort: {
         itemDescription: 1,
@@ -1632,15 +1767,7 @@ export const getStockBalance = async (filters = {}) => {
     },
   ];
 
-  const result = await Product.aggregate(pipeline);
-
-  return result.map(({ itemDescription, quantity, itemValue, totalIn, totalOut }) => ({
-    itemDescription,
-    quantity,
-    itemValue,
-    totalIn,
-    totalOut,
-  }));
+  return Product.aggregate(pipeline);
 };
 
 export const addPaymentToInvoice = async (invoiceId, paymentData) => {

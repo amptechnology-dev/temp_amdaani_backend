@@ -8,17 +8,51 @@ import { deleteTransaction, cancelAllTransactionsForInvoice } from '../services/
 import ExcelJS from 'exceljs';
 import * as purchaseService from '../services/purchase.service.js';
 import mongoose from 'mongoose';
+import { Role } from '../models/role.model.js';
+import { roles } from '../config/roles.js';
 
-export const createInvoice = expressAsyncHandler(async (req, res) => {
-  req.body.store = req.user.store;
-  req.body.userId = req.user.id;
-  console.log('Request to create invoice with data:', JSON.stringify(req.body));
-  const invoice = await invoiceService.createInvoice(req.body);
-  if (req.subscription) {
-    await updateUsage(req.subscription._id, { $inc: { invoicesUsed: 1 } });
-  }
-  return new ApiResponse(201, invoice, 'Invoice created successfully').send(res);
-});
+export const createInvoice =
+  expressAsyncHandler(
+    async (req, res) => {
+      req.body.store =
+        req.user.store;
+
+      req.body.userId =
+        req.user.id;
+
+      console.log(
+        'Request to create invoice with data:',
+        JSON.stringify(
+          req.body
+        )
+      );
+
+      const invoice =
+        await invoiceService.createInvoice(
+          req.body
+        );
+
+      if (
+        req.subscription
+      ) {
+        await updateUsage(
+          req.subscription
+            ._id,
+          {
+            $inc: {
+              invoicesUsed: 1,
+            },
+          }
+        );
+      }
+
+      return new ApiResponse(
+        201,
+        invoice,
+        'Invoice created successfully'
+      ).send(res);
+    }
+  );
 
 export const updateInvoice = expressAsyncHandler(async (req, res) => {
   const invoice = await invoiceService.updateInvoice(req.params.id, req.body);
@@ -34,12 +68,26 @@ export const getInvoiceById = expressAsyncHandler(async (req, res) => {
   }
   return new ApiResponse(200, invoice, 'Invoice fetched successfully').send(res);
 });
+
 export const getInvoices = expressAsyncHandler(async (req, res) => {
   const filters = pick(req.query, ['status']);
   const options = pick(req.query, ['page', 'limit', 'sortBy', 'order']);
   const { range } = req.query;
 
-  filters.store = req.user.store;
+  filters.store = new mongoose.Types.ObjectId(req.user.store);
+
+  const staffRole = await Role.findOne({
+    name: roles.STAFF,
+  }).lean();
+
+  const isStaff = req.user?.role?.name === 'staff';
+
+  console.log("IS STAFF:", isStaff);
+
+  if (isStaff) {
+    filters.userId = new mongoose.Types.ObjectId(req.user._id);
+    console.log("STAFF FILTER APPLIED:", filters.userId);
+  }
 
   const now = new Date();
   let startDate;
@@ -69,8 +117,16 @@ export const getInvoices = expressAsyncHandler(async (req, res) => {
 
   const invoices = await invoiceService.queryInvoices(filters, options);
 
-  return new ApiResponse(200, invoices, 'Invoices fetched successfully').send(res);
+  console.log("USER:", req.user);
+  console.log("IS STAFF FILTER APPLIED:", filters.userId);
+
+  return new ApiResponse(
+    200,
+    invoices,
+    'Invoices fetched successfully'
+  ).send(res);
 });
+
 export const getLastInvoice = expressAsyncHandler(async (req, res) => {
   const invoice = await invoiceService.getLastInvoice(req.user.store);
   return new ApiResponse(200, invoice, 'Last invoice fetched successfully').send(res);
@@ -516,65 +572,189 @@ export async function getStockBalance(filters) {
   }));
 }
 
-export const getItemStockReport = expressAsyncHandler(async (req, res) => {
-  const { range, startDate: startRaw, endDate: endRaw, itemName, asOnDate: asOnDateRaw } = req.query;
+export const getItemStockReport =
+  expressAsyncHandler(
+    async (req, res) => {
+      const {
+        range,
+        startDate:
+        startRaw,
+        endDate:
+        endRaw,
+        itemName,
+        asOnDate:
+        asOnDateRaw,
+        transactionType,
+      } = req.query;
 
-  //console.log('Received request for item stock report with query:', JSON.stringify(req.query));
+      const now =
+        new Date();
 
-  console.log('Received request for item stock report with query:', JSON.stringify(req.query));
+      let startDate;
+      let endDate;
 
-  const now = new Date();
-  let startDate;
-  let endDate;
+      if (
+        range ===
+        'thisMonth'
+      ) {
+        startDate =
+          new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            1
+          );
 
-  if (range === 'thisMonth') {
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-  } else if (range === 'previousMonth') {
-    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-  } else if (range === 'year') {
-    startDate = new Date(now.getFullYear(), 0, 1);
-    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
-  } else if (startRaw && endRaw) {
-    const [sy, sm, sd] = startRaw.split('-').map(Number);
-    const [ey, em, ed] = endRaw.split('-').map(Number);
-    startDate = new Date(sy, sm - 1, sd, 0, 0, 0);
-    endDate = new Date(ey, em - 1, ed, 23, 59, 59, 999);
-  }
+        endDate =
+          new Date(
+            now.getFullYear(),
+            now.getMonth() +
+            1,
+            0,
+            23,
+            59,
+            59
+          );
+      } else if (
+        range ===
+        'previousMonth'
+      ) {
+        startDate =
+          new Date(
+            now.getFullYear(),
+            now.getMonth() -
+            1,
+            1
+          );
 
-  // Parse asOnDate if provided (used for point-in-time stock snapshot)
-  let asOnDate;
-  if (asOnDateRaw) {
-    const [y, m, d] = asOnDateRaw.split('-').map(Number);
-    asOnDate = new Date(y, m - 1, d, 23, 59, 59, 999);
-  }
+        endDate =
+          new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            0,
+            23,
+            59,
+            59
+          );
+      } else if (
+        range === 'year'
+      ) {
+        startDate =
+          new Date(
+            now.getFullYear(),
+            0,
+            1
+          );
 
-  // Either a date range OR asOnDate must be provided
-  if (!asOnDate && (!startDate || !endDate)) {
-    return new ApiResponse(400, null, 'Please provide startDate & endDate, a valid range, or asOnDate').send(res);
-  }
+        endDate =
+          new Date(
+            now.getFullYear(),
+            11,
+            31,
+            23,
+            59,
+            59
+          );
+      } else if (
+        startRaw &&
+        endRaw
+      ) {
+        const [
+          sy,
+          sm,
+          sd,
+        ] = startRaw
+          .split('-')
+          .map(Number);
 
-  console.log('--->', JSON.stringify({ startDate, endDate, asOnDate }));
+        const [
+          ey,
+          em,
+          ed,
+        ] = endRaw
+          .split('-')
+          .map(Number);
 
-  console.log('Generating item stock report with filters:', {
-    store: req.user.store,
-    itemName,
-    asOnDate,
-    startDate,
-    endDate,
-  });
+        startDate =
+          new Date(
+            sy,
+            sm - 1,
+            sd,
+            0,
+            0,
+            0
+          );
 
-  const report = await invoiceService.getStockBalance({
-    store: req.user.store,
-    itemName,
-    asOnDate,
-    startDate,
-    endDate,
-  });
+        endDate =
+          new Date(
+            ey,
+            em - 1,
+            ed,
+            23,
+            59,
+            59,
+            999
+          );
+      }
 
-  return new ApiResponse(200, report, 'Item stock report fetched successfully').send(res);
-});
+      let asOnDate;
+
+      if (
+        asOnDateRaw
+      ) {
+        const [
+          y,
+          m,
+          d,
+        ] =
+          asOnDateRaw
+            .split('-')
+            .map(Number);
+
+        asOnDate =
+          new Date(
+            y,
+            m - 1,
+            d,
+            23,
+            59,
+            59,
+            999
+          );
+      }
+
+      if (
+        !asOnDate &&
+        (!startDate ||
+          !endDate)
+      ) {
+        return new ApiResponse(
+          400,
+          null,
+          'Please provide startDate & endDate, range or asOnDate'
+        ).send(res);
+      }
+
+      const report =
+        await invoiceService.getStockBalance(
+          {
+            store:
+              req.user
+                .store,
+            itemName,
+            asOnDate,
+            startDate,
+            endDate,
+            transactionType,
+          }
+        );
+
+      return new ApiResponse(
+        200,
+        report,
+        'Item stock report fetched successfully'
+      ).send(res);
+    }
+  );
 
 export const addPayment = expressAsyncHandler(async (req, res) => {
   const { invoiceId } = req.params;

@@ -21,6 +21,7 @@ import {
   updateUserPhone,
   getOnlyUserByEmail,
   updateUserEmail,
+  toggleStoreAndUsersStatus,
 } from '../services/user.services.js';
 import { createOrRenewFreePlan } from '../services/subscription.services.js';
 import jwt from 'jsonwebtoken';
@@ -539,3 +540,23 @@ export const logoutAllOtherDevices = asyncHandler(async (req, res) => {
 export const verifySession = asyncHandler(async (req, res) => {
   return new ApiResponse(200, req.user, 'Session valid').send(res);
 });
+
+export const toggleStoreStatus =
+  asyncHandler(
+    async (req, res) => {
+      const {
+        storeId,
+      } = req.params;
+
+      const result =
+        await toggleStoreAndUsersStatus(
+          storeId
+        );
+
+      return new ApiResponse(
+        200,
+        result,
+        result.message
+      ).send(res);
+    }
+  );

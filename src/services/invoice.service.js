@@ -17,28 +17,42 @@ import { Transaction } from '../models/transaction.model.js';
 //NOTE: Trusting frontend for valid data
 export const createInvoice = async (data) => {
   const { items = [] } = data;
-
   if (!items.length) {
-    throw new ApiError(400, 'Invalid invoice items!', {
-      source: 'body',
-      field: 'items',
-      message: 'Invoice must have at least one item',
-    });
+    throw new ApiError(
+      400,
+      'Invalid invoice items!',
+      {
+        source: 'body',
+        field: 'items',
+        message:
+          'Invoice must have at least one item',
+      }
+    );
   }
+  const store =
+    await Store.findById(data.store);
 
-  const store = await Store.findById(data.store);
   if (!store) {
-    throw new ApiError(404, 'Store not found!', {
-      source: 'body',
-      field: 'store',
-      message: 'Store data not found',
-    });
+    throw new ApiError(
+      404,
+      'Store not found!',
+      {
+        source: 'body',
+        field: 'store',
+        message:
+          'Store data not found',
+      }
+    );
   }
 
-  const session = await mongoose.startSession();
+  const session =
+    await mongoose.startSession();
+
   try {
     session.startTransaction();
+
     const invoiceItems = [];
+
     for (const item of items) {
       const productId =
         await findOrCreateProduct(
@@ -60,23 +74,24 @@ export const createInvoice = async (data) => {
           );
         }
 
-        // Available stock check
-        // if (
-        //   product.currentStock <
-        //   item.quantity
-        // ) {
-        //   throw new ApiError(
-        //     400,
-        //     `Insufficient stock for ${product.name}`,
-        //     {
-        //       source: 'body',
-        //       field: 'items',
-        //       message: `${product.name} stock is only ${product.currentStock}, but you are trying to sell ${item.quantity}`,
-        //     }
-        //   );
-        // }
-      }
+        if (
+          store.settings
+            ?.stockManagement &&
+          product.currentStock <
+          item.quantity
+        ) {
+          throw new ApiError(
+            400,
+            `Insufficient stock for ${product.name}`,
+            {
+              source: 'body',
+              field: 'items',
+              message: `${product.name} stock is only ${product.currentStock}, but you are trying to sell ${item.quantity}`,
+            }
+          );
+        }
 
+      }
       invoiceItems.push({
         ...item,
 
@@ -88,92 +103,197 @@ export const createInvoice = async (data) => {
       });
     }
 
-    console.log('Invoice Items:', JSON.stringify(invoiceItems));
-
-    const customerId = await findOrCreateCustomer(
-      data.store,
-      {
-        _id: data.customer,
-        name: data.customerName,
-        mobile: data.customerMobile,
-        address: data.customerAddress,
-        city: data.customerCity,
-        state: data.customerState,
-        country: data.customerCountry,
-        postalCode: data.customerPostalCode,
-        gstNumber: data.customerGstNumber,
-      },
-      session
+    console.log(
+      'Invoice Items:',
+      JSON.stringify(invoiceItems)
     );
+
+    const customerId =
+      await findOrCreateCustomer(
+        data.store,
+        {
+          _id: data.customer,
+          name:
+            data.customerName,
+          mobile:
+            data.customerMobile,
+          address:
+            data.customerAddress,
+          city:
+            data.customerCity,
+          state:
+            data.customerState,
+          country:
+            data.customerCountry,
+          postalCode:
+            data.customerPostalCode,
+          gstNumber:
+            data.customerGstNumber,
+        },
+        session
+      );
 
     const invoiceDoc = {
       ...data,
       items: invoiceItems,
       customer: customerId,
+      userId: data.userId,
 
       name: store.name,
-      tagline: store.tagline,
-      ownershipType: store.ownershipType,
-      gstNumber: store.gstNumber,
-      panNumber: store.panNumber,
-      registrationNo: store.registrationNo,
-      contactNo: store.contactNo,
+      tagline:
+        store.tagline,
+      ownershipType:
+        store.ownershipType,
+      gstNumber:
+        store.gstNumber,
+      panNumber:
+        store.panNumber,
+      registrationNo:
+        store.registrationNo,
+      contactNo:
+        store.contactNo,
       email: store.email,
+
       address: {
-        street: store.address?.street,
-        city: store.address?.city,
-        state: store.address?.state,
-        country: store.address?.country || 'IN',
-        postalCode: store.address?.postalCode,
+        street:
+          store.address
+            ?.street,
+        city:
+          store.address
+            ?.city,
+        state:
+          store.address
+            ?.state,
+        country:
+          store.address
+            ?.country ||
+          'IN',
+        postalCode:
+          store.address
+            ?.postalCode,
       },
+
       bankDetails: {
-        bankName: store.bankDetails?.bankName,
-        accountNo: store.bankDetails?.accountNo,
-        holderName: store.bankDetails?.holderName,
-        ifsc: store.bankDetails?.ifsc,
-        branch: store.bankDetails?.branch,
-        upiId: store.bankDetails?.upiId,
+        bankName:
+          store
+            .bankDetails
+            ?.bankName,
+        accountNo:
+          store
+            .bankDetails
+            ?.accountNo,
+        holderName:
+          store
+            .bankDetails
+            ?.holderName,
+        ifsc:
+          store
+            .bankDetails
+            ?.ifsc,
+        branch:
+          store
+            .bankDetails
+            ?.branch,
+        upiId:
+          store
+            .bankDetails
+            ?.upiId,
       },
+
       settings: {
-        invoicePrefix: data.settings?.invoicePrefix || store.settings?.invoicePrefix || 'INV',
+        invoicePrefix:
+          data.settings
+            ?.invoicePrefix ||
+          store.settings
+            ?.invoicePrefix ||
+          'INV',
 
-        invoiceStartNumber: data.settings?.invoiceStartNumber || store.settings?.invoiceStartNumber || 1,
+        invoiceStartNumber:
+          data.settings
+            ?.invoiceStartNumber ||
+          store.settings
+            ?.invoiceStartNumber ||
+          1,
 
-        taxRates: data.settings?.taxRates || store.settings?.taxRates || [],
+        taxRates:
+          data.settings
+            ?.taxRates ||
+          store.settings
+            ?.taxRates ||
+          [],
 
-        invoiceTerms: data.settings?.invoiceTerms || store.settings?.invoiceTerms,
+        invoiceTerms:
+          data.settings
+            ?.invoiceTerms ||
+          store.settings
+            ?.invoiceTerms,
 
-        stockManagement: data.settings?.stockManagement ?? store.settings?.stockManagement ?? false,
+        stockManagement:
+          data.settings
+            ?.stockManagement ??
+          store.settings
+            ?.stockManagement ??
+          false,
 
         purchaseOrderManagement:
-          data.settings?.purchaseOrderManagement ?? store.settings?.purchaseOrderManagement ?? false,
+          data.settings
+            ?.purchaseOrderManagement ??
+          store.settings
+            ?.purchaseOrderManagement ??
+          false,
       },
-      logoUrl: store.logoUrl,
-      signatureUrl: store.signatureUrl,
-      isActive: store.isActive,
+
+      logoUrl:
+        store.logoUrl,
+
+      signatureUrl:
+        store.signatureUrl,
+
+      isActive:
+        store.isActive,
     };
 
-    const invoice = new Invoice(invoiceDoc);
-    await invoice.save({ session });
+    const invoice =
+      new Invoice(
+        invoiceDoc
+      );
+
+    await invoice.save({
+      session,
+    });
 
     await createTransaction(
       {
-        store: invoice.store,
-        invoice: invoice._id,
-        amount: invoice.amountPaid,
-        paymentMethod: invoice.paymentMethod,
-        note: invoice.paymentNote,
+        store:
+          invoice.store,
+        invoice:
+          invoice._id,
+        amount:
+          invoice.amountPaid,
+        paymentMethod:
+          invoice.paymentMethod,
+        note:
+          invoice.paymentNote,
       },
       session
     );
 
-    await updateStockAfterSale(invoice, session);
+    await updateStockAfterSale(
+      invoice,
+      session
+    );
 
     await session.commitTransaction();
+
     return invoice;
   } catch (error) {
     await session.abortTransaction();
-    throw handleDuplicateKeyError(error) || error;
+
+    throw (
+      handleDuplicateKeyError(
+        error
+      ) || error
+    );
   } finally {
     await session.endSession();
   }
@@ -403,10 +523,14 @@ export const getInvoiceById = async (id) => {
 export const queryInvoices = async (filter = {}, options = {}) => {
   const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;
 
+  // 🧠 FIX: convert userId properly
+  if (filter.userId) {
+    filter.userId = new mongoose.Types.ObjectId(String(filter.userId));
+  }
+
   const aggregate = Invoice.aggregate([
-    {
-      $match: filter,
-    },
+    { $match: filter },
+
     {
       $lookup: {
         from: 'stores',
@@ -431,17 +555,20 @@ export const queryInvoices = async (filter = {}, options = {}) => {
         ],
       },
     },
+
     {
       $unwind: {
         path: '$store',
         preserveNullAndEmptyArrays: true,
       },
     },
+
     {
       $project: {
         items: 0,
       },
     },
+
     {
       $sort: {
         [sortBy]: order === 'desc' ? -1 : 1,
@@ -449,14 +576,12 @@ export const queryInvoices = async (filter = {}, options = {}) => {
     },
   ]);
 
-  const paginationOptions = {
+  return Invoice.aggregatePaginate(aggregate, {
     page: Number(page),
     limit: Number(limit),
     lean: true,
     leanWithId: false,
-  };
-
-  return Invoice.aggregatePaginate(aggregate, paginationOptions);
+  });
 };
 
 export const getLastInvoice = async (store) => {
@@ -1382,24 +1507,68 @@ export const getItemStockReport = async (filters = {}) => {
   }));
 };
 
-export const getStockBalance = async (filters = {}) => {
+export const getStockBalance = async (
+  filters = {}
+) => {
   const {
     store,
     itemName,
     asOnDate,
     startDate,
     endDate,
+    transactionType,
   } = filters;
 
   const storeId =
-    new mongoose.Types.ObjectId(String(store));
+    new mongoose.Types.ObjectId(
+      String(store)
+    );
+
+  // Get Store
+  const storeData =
+    await Store.findById(
+      storeId
+    ).lean();
+
+  if (!storeData) {
+    throw new ApiError(
+      404,
+      'Store not found'
+    );
+  }
+
+  /**
+   * stockManagement = false
+   * => stock report allow na
+   *
+   * stockManagement = true
+   * => stock report allow
+   */
+  if (
+    !storeData.settings
+      ?.stockManagement
+  ) {
+    throw new ApiError(
+      400,
+      'Stock management is disabled for this store',
+      {
+        source: 'store',
+        field:
+          'stockManagement',
+        message:
+          'Please enable stock management to view stock reports',
+      }
+    );
+  }
 
   const baseMatch = {
     store: storeId,
-    status: { $ne: 'cancelled' },
+    status: {
+      $ne: 'cancelled',
+    },
   };
 
-  // Search by item name
+  // Item Search
   if (itemName) {
     baseMatch.name = {
       $regex: itemName,
@@ -1407,20 +1576,44 @@ export const getStockBalance = async (filters = {}) => {
     };
   }
 
-  // Date condition
-  let dateCondition = [];
+  /**
+   * Transaction Match
+   */
+  let transactionMatch = {
+    $expr: {
+      $and: [
+        {
+          $eq: [
+            '$product',
+            '$$productId',
+          ],
+        },
+        {
+          $eq: [
+            '$store',
+            storeId,
+          ],
+        },
+      ],
+    },
+  };
 
+  // asOnDate filter
   if (asOnDate) {
-    dateCondition = [
-      {
-        $lte: [
-          '$date',
-          new Date(asOnDate),
-        ],
-      },
-    ];
-  } else if (startDate && endDate) {
-    dateCondition = [
+    transactionMatch.$expr.$and.push({
+      $lte: [
+        '$date',
+        new Date(asOnDate),
+      ],
+    });
+  }
+
+  // Date Range filter
+  if (
+    startDate &&
+    endDate
+  ) {
+    transactionMatch.$expr.$and.push(
       {
         $gte: [
           '$date',
@@ -1432,69 +1625,59 @@ export const getStockBalance = async (filters = {}) => {
           '$date',
           new Date(endDate),
         ],
-      },
-    ];
+      }
+    );
+  }
+
+  // Transaction Type Filter
+  if (transactionType) {
+    transactionMatch.transactionType =
+      transactionType;
   }
 
   const pipeline = [
-    // Match Products
     {
       $match: baseMatch,
     },
 
-    // Get Stock Transactions
+    // Get Transactions
     {
       $lookup: {
-        from: 'stocktransactions',
+        from:
+          'stocktransactions',
 
         let: {
-          productId: '$_id',
+          productId:
+            '$_id',
         },
 
         pipeline: [
           {
-            $match: {
-              $expr: {
-                $and: [
-                  {
-                    $eq: [
-                      '$product',
-                      '$$productId',
-                    ],
-                  },
-                  {
-                    $eq: [
-                      '$store',
-                      storeId,
-                    ],
-                  },
-                  ...dateCondition,
-                ],
-              },
-            },
+            $match:
+              transactionMatch,
           },
         ],
 
-        as: 'transactions',
+        as:
+          'transactions',
       },
     },
 
-    // Calculate Quantities
+    // Calculate quantities
     {
       $addFields: {
-        // Opening Stock
         openingQty: {
           $sum: {
             $map: {
               input:
                 '$financialYearStocks',
               as: 'fy',
-              in: '$$fy.stock',
+              in:
+                '$$fy.stock',
             },
           },
         },
 
-        // Purchase
         purchaseQty: {
           $sum: {
             $map: {
@@ -1517,30 +1700,6 @@ export const getStockBalance = async (filters = {}) => {
           },
         },
 
-        // Return In (Customer Return)
-        returnInQty: {
-          $sum: {
-            $map: {
-              input:
-                '$transactions',
-              as: 'tx',
-              in: {
-                $cond: [
-                  {
-                    $eq: [
-                      '$$tx.transactionType',
-                      'SALE_RETURN',
-                    ],
-                  },
-                  '$$tx.quantity',
-                  0,
-                ],
-              },
-            },
-          },
-        },
-
-        // Sale
         saleQty: {
           $sum: {
             $map: {
@@ -1563,7 +1722,28 @@ export const getStockBalance = async (filters = {}) => {
           },
         },
 
-        // Return Out (Vendor Return)
+        returnInQty: {
+          $sum: {
+            $map: {
+              input:
+                '$transactions',
+              as: 'tx',
+              in: {
+                $cond: [
+                  {
+                    $eq: [
+                      '$$tx.transactionType',
+                      'SALE_RETURN',
+                    ],
+                  },
+                  '$$tx.quantity',
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
         returnOutQty: {
           $sum: {
             $map: {
@@ -1578,6 +1758,8 @@ export const getStockBalance = async (filters = {}) => {
                       [
                         'PURCHASE_RETURN',
                         'RETURN_TO_VENDOR',
+                        'PURCHASE_REVERSE',
+                        'STOCK_REDUCE',
                       ],
                     ],
                   },
@@ -1589,7 +1771,6 @@ export const getStockBalance = async (filters = {}) => {
           },
         },
 
-        // Damage
         damageQty: {
           $sum: {
             $map: {
@@ -1612,7 +1793,6 @@ export const getStockBalance = async (filters = {}) => {
           },
         },
 
-        // Adjustment
         adjustmentQty: {
           $sum: {
             $map: {
@@ -1635,7 +1815,28 @@ export const getStockBalance = async (filters = {}) => {
           },
         },
 
-        // Average Purchase Rate
+        transferQty: {
+          $sum: {
+            $map: {
+              input:
+                '$transactions',
+              as: 'tx',
+              in: {
+                $cond: [
+                  {
+                    $eq: [
+                      '$$tx.transactionType',
+                      'TRANSFER',
+                    ],
+                  },
+                  '$$tx.quantity',
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
         avgRate: {
           $ifNull: [
             '$lastPurchasePrice',
@@ -1645,7 +1846,7 @@ export const getStockBalance = async (filters = {}) => {
       },
     },
 
-    // Closing Stock Formula
+    // Closing Qty
     {
       $addFields: {
         closingQty: {
@@ -1663,6 +1864,7 @@ export const getStockBalance = async (filters = {}) => {
                 '$saleQty',
                 '$returnOutQty',
                 '$damageQty',
+                '$transferQty',
               ],
             },
           ],
@@ -1680,11 +1882,12 @@ export const getStockBalance = async (filters = {}) => {
 
         openingQty: 1,
         purchaseQty: 1,
-        returnInQty: 1,
         saleQty: 1,
+        returnInQty: 1,
         returnOutQty: 1,
         damageQty: 1,
         adjustmentQty: 1,
+        transferQty: 1,
         closingQty: 1,
         avgRate: 1,
 
@@ -1702,7 +1905,6 @@ export const getStockBalance = async (filters = {}) => {
       },
     },
 
-    // Sort by Name
     {
       $sort: {
         itemDescription: 1,
@@ -1710,7 +1912,9 @@ export const getStockBalance = async (filters = {}) => {
     },
   ];
 
-  return Product.aggregate(pipeline);
+  return Product.aggregate(
+    pipeline
+  );
 };
 
 export const addPaymentToInvoice = async (invoiceId, paymentData) => {

@@ -1,4 +1,6 @@
+import mongoose from 'mongoose';
 import { User } from '../models/user.model.js';
+import {Store} from '../models/store.model.js';
 import { Role } from '../models/role.model.js';
 import { roles } from '../config/roles.js';
 import { ApiResponse, ApiError } from '../utils/responseHandler.js';
@@ -223,3 +225,91 @@ export const updateUserEmail = async (userId, email) => {
   await user.save();
   return user;
 };
+
+export const toggleStoreAndUsersStatus =
+  async (storeId) => {
+    const session =
+      await mongoose.startSession();
+
+    try {
+      session.startTransaction();
+
+      // Find Store
+      const store =
+        await Store.findById(
+          storeId
+        ).session(session);
+
+      if (!store) {
+        throw new ApiError(
+          404,
+          'Store not found',
+          [
+            {
+              source:
+                'params',
+              field:
+                'storeId',
+              message:
+                'Invalid store id',
+            },
+          ]
+        );
+      }
+
+      // Toggle status
+      const newStatus =
+        !store.isActive;
+
+      // Update Store
+      await Store.findByIdAndUpdate(
+        storeId,
+        {
+          isActive:
+            newStatus,
+        },
+        {
+          session,
+        }
+      );
+
+      // Update all users
+      await User.updateMany(
+        {
+          store:
+            new mongoose.Types.ObjectId(
+              String(
+                storeId
+              )
+            ),
+        },
+        {
+          $set: {
+            isActive:
+              newStatus,
+          },
+        },
+        {
+          session,
+        }
+      );
+
+      await session.commitTransaction();
+
+      return {
+        storeId,
+        isActive:
+          newStatus,
+        message:
+          newStatus
+            ? 'Store and users activated successfully'
+            : 'Store and users deactivated successfully',
+      };
+    } catch (error) {
+      await session.abortTransaction();
+
+      throw error;
+    } finally {
+      await session.endSession();
+    }
+  };

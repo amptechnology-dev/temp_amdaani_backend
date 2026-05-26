@@ -577,14 +577,13 @@ export const getItemStockReport =
     async (req, res) => {
       const {
         range,
-        startDate:
-        startRaw,
-        endDate:
-        endRaw,
+        startDate: startRaw,
+        endDate: endRaw,
         itemName,
-        asOnDate:
-        asOnDateRaw,
+        asOnDate: asOnDateRaw,
         transactionType,
+        minStock,
+        maxStock,
       } = req.query;
 
       const now =
@@ -593,6 +592,7 @@ export const getItemStockReport =
       let startDate;
       let endDate;
 
+      // This Month
       if (
         range ===
         'thisMonth'
@@ -608,13 +608,17 @@ export const getItemStockReport =
           new Date(
             now.getFullYear(),
             now.getMonth() +
-            1,
+              1,
             0,
             23,
             59,
-            59
+            59,
+            999
           );
-      } else if (
+      }
+
+      // Previous Month
+      else if (
         range ===
         'previousMonth'
       ) {
@@ -622,7 +626,7 @@ export const getItemStockReport =
           new Date(
             now.getFullYear(),
             now.getMonth() -
-            1,
+              1,
             1
           );
 
@@ -633,10 +637,15 @@ export const getItemStockReport =
             0,
             23,
             59,
-            59
+            59,
+            999
           );
-      } else if (
-        range === 'year'
+      }
+
+      // Current Year
+      else if (
+        range ===
+        'year'
       ) {
         startDate =
           new Date(
@@ -652,9 +661,13 @@ export const getItemStockReport =
             31,
             23,
             59,
-            59
+            59,
+            999
           );
-      } else if (
+      }
+
+      // Custom Range
+      else if (
         startRaw &&
         endRaw
       ) {
@@ -681,6 +694,7 @@ export const getItemStockReport =
             sd,
             0,
             0,
+            0,
             0
           );
 
@@ -696,6 +710,7 @@ export const getItemStockReport =
           );
       }
 
+      // As On Date
       let asOnDate;
 
       if (
@@ -722,6 +737,7 @@ export const getItemStockReport =
           );
       }
 
+      // Validation
       if (
         !asOnDate &&
         (!startDate ||
@@ -734,6 +750,9 @@ export const getItemStockReport =
         ).send(res);
       }
 
+      /**
+       * Get Report
+       */
       const report =
         await invoiceService.getStockBalance(
           {
@@ -745,6 +764,8 @@ export const getItemStockReport =
             startDate,
             endDate,
             transactionType,
+            minStock,
+            maxStock,
           }
         );
 

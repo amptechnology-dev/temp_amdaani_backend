@@ -58,7 +58,7 @@ export const createProduct = async (
         openingStock
       ) || 0;
 
-      // productData.costPrice = value && openingStock ? Number(value) / Number(openingStock) : 0;
+    // productData.costPrice = value && openingStock ? Number(value) / Number(openingStock) : 0;
 
     // Create product
     const product =
@@ -347,64 +347,194 @@ export const reverseStockAfterPurchaseDelete = async (purchase, session = null) 
   }
 };
 
-export const adjustProductStock = async (data, session = null) => {
-  const {
-    productId,
-    date = new Date(),
-    transactionType = StockTransactionType.ADJUSTMENT,
-    quantity,
-    rate,
-    batchId = null,
-    purchaseId = null,
-    saleId = null,
-    purchasePrice,
-    salePrice,
-    sellingDiscount,
-    remarks = '',
-    purchaseDiscount,
-    hsn,
-    isTaxInclusive = false,
-    isPurchaseTaxInclusive = false,
-    gstRate,
-  } = data;
+export const adjustProductStock =
+  async (
+    data,
+    session = null
+  ) => {
+    const {
+      productId,
+      date = new Date(),
+      transactionType,
 
-  const product = await Product.findById(productId).session(session);
-  if (!product) return;
+      quantity,
+      rate = 0,
 
-  // Calculate new stock value
-  const newStock = product.currentStock + quantity;
+      batchId = null,
+      purchaseId = null,
+      saleId = null,
 
-  // Update product fields
-  product.currentStock = newStock;
+      purchasePrice,
+      salePrice,
+      sellingDiscount,
+      purchaseDiscount,
 
-  if (purchasePrice) product.costPrice = purchasePrice;
-  if (salePrice) product.sellingPrice = salePrice;
-  if (sellingDiscount) product.discountPrice = sellingDiscount;
-  if (purchaseDiscount) product.purchaseDiscount = purchaseDiscount;
-  if (data.hsn) product.hsn = data.hsn;
-  if (data.isTaxInclusive !== undefined) product.isTaxInclusive = isTaxInclusive;
-  if (data.isPurchaseTaxInclusive !== undefined) product.isPurchaseTaxInclusive = isPurchaseTaxInclusive;
-  if (gstRate) product.gstRate = gstRate;
-  if (gstRate) product.purchaseGstRate = gstRate;
-  await product.save({ session });
+      remarks = '',
 
-  // Record stock transaction
-  const stockTransaction = new StockTransaction({
-    product: productId,
-    store: product.store,
-    batch: batchId,
-    date,
-    transactionType,
-    quantity: Math.abs(quantity),
-    direction: quantity >= 0 ? 'IN' : 'OUT',
-    rate,
-    purchaseId,
-    saleId,
-    totalAmount: rate * Math.abs(quantity),
-    remarks,
-  });
-  return stockTransaction.save({ session });
-};
+      hsn,
+      isTaxInclusive = false,
+      isPurchaseTaxInclusive = false,
+      gstRate,
+    } = data;
+
+    // ==========================
+    // VALIDATE TRANSACTION TYPE
+    // ==========================
+    const validTransactionTypes =
+      Object.values(
+        StockTransactionType
+      );
+
+    if (
+      !transactionType ||
+      !validTransactionTypes.includes(
+        transactionType
+      )
+    ) {
+      throw new Error(
+        `Invalid transaction type. Allowed values: ${validTransactionTypes.join(
+          ', '
+        )}`
+      );
+    }
+
+    // ==========================
+    // FIND PRODUCT
+    // ==========================
+    const product =
+      await Product.findById(
+        productId
+      ).session(session);
+
+    if (!product) {
+      throw new Error(
+        'Product not found'
+      );
+    }
+
+    // ==========================
+    // UPDATE STOCK
+    // ==========================
+    const newStock =
+      product.currentStock +
+      quantity;
+
+    product.currentStock =
+      newStock;
+
+    // ==========================
+    // UPDATE PRODUCT INFO
+    // ==========================
+    if (
+      purchasePrice !==
+      undefined
+    ) {
+      product.costPrice =
+        purchasePrice;
+    }
+
+    if (
+      salePrice !==
+      undefined
+    ) {
+      product.sellingPrice =
+        salePrice;
+    }
+
+    if (
+      sellingDiscount !==
+      undefined
+    ) {
+      product.discountPrice =
+        sellingDiscount;
+    }
+
+    if (
+      purchaseDiscount !==
+      undefined
+    ) {
+      product.purchaseDiscount =
+        purchaseDiscount;
+    }
+
+    if (hsn) {
+      product.hsn = hsn;
+    }
+
+    if (
+      isTaxInclusive !==
+      undefined
+    ) {
+      product.isTaxInclusive =
+        isTaxInclusive;
+    }
+
+    if (
+      isPurchaseTaxInclusive !==
+      undefined
+    ) {
+      product.isPurchaseTaxInclusive =
+        isPurchaseTaxInclusive;
+    }
+
+    if (
+      gstRate !==
+      undefined
+    ) {
+      product.gstRate =
+        gstRate;
+
+      product.purchaseGstRate =
+        gstRate;
+    }
+
+    await product.save({
+      session,
+    });
+
+    // ==========================
+    // CREATE STOCK TRANSACTION
+    // ==========================
+    const stockTransaction =
+      new StockTransaction({
+        product: productId,
+        store: product.store,
+        batch: batchId,
+
+        date,
+        transactionType,
+
+        quantity:
+          Math.abs(quantity),
+
+        direction:
+          quantity >= 0
+            ? 'IN'
+            : 'OUT',
+
+        rate,
+
+        purchaseId,
+        saleId,
+
+        totalAmount:
+          rate *
+          Math.abs(
+            quantity
+          ),
+
+        remarks,
+      });
+
+    // ==========================
+    // SAVE TRANSACTION
+    // ==========================
+    return await stockTransaction.save(
+      {
+        session,
+      }
+    );
+  };
 
 export const getStockTransactionsByProduct = async (productId, filters = {}, options = {}) => {
   const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;
@@ -646,7 +776,7 @@ export const carryForwardStockToNextFinancialYear = async (storeId) => {
           nextFY,
         stock:
           product.currentStock,
-          value: product.costPrice && product.currentStock ? Number(product.costPrice) * Number(product.currentStock) : 0,
+        value: product.costPrice && product.currentStock ? Number(product.costPrice) * Number(product.currentStock) : 0,
       }
     );
 

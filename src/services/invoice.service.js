@@ -1508,9 +1508,7 @@ export const getItemStockReport = async (filters = {}) => {
   }));
 };
 
-// Financial Year string থেকে start ও end date বের করার helper
 const getFinancialYearDateRange = (financialYear) => {
-  // "2026-27" → startYear = 2026
   const startYear = parseInt(financialYear.split("-")[0]);
   const endYear = startYear + 1;
 
@@ -1535,7 +1533,6 @@ export const getStockBalance = async (filters = {}) => {
 
   const storeId = new mongoose.Types.ObjectId(String(store));
 
-  // Financial year date range
   const { startDate: fyStartDate, endDate: fyEndDate } = financialYear
     ? getFinancialYearDateRange(financialYear)
     : { startDate: null, endDate: null };
@@ -1554,7 +1551,6 @@ export const getStockBalance = async (filters = {}) => {
 
     // ===================
     // PURCHASE TABLE
-    // Financial year date range দিয়ে filter
     // ===================
     {
       $lookup: {
@@ -1594,7 +1590,6 @@ export const getStockBalance = async (filters = {}) => {
 
     // ===================
     // SALES TABLE
-    // Financial year date range দিয়ে filter
     // ===================
     {
       $lookup: {
@@ -1629,7 +1624,6 @@ export const getStockBalance = async (filters = {}) => {
 
     // ===================
     // STOCK TRANSACTION
-    // Financial year date range দিয়ে filter
     // ===================
     {
       $lookup: {
@@ -1644,9 +1638,9 @@ export const getStockBalance = async (filters = {}) => {
                   { $eq: ["$store", storeId] },
                   ...(fyStartDate && fyEndDate
                     ? [
-                      { $gte: ["$date", fyStartDate] },
-                      { $lte: ["$date", fyEndDate] },
-                    ]
+                        { $gte: ["$date", fyStartDate] },
+                        { $lte: ["$date", fyEndDate] },
+                      ]
                     : []),
                 ],
               },
@@ -1659,11 +1653,9 @@ export const getStockBalance = async (filters = {}) => {
 
     // ===================
     // CALCULATE QUANTITIES
-    // Opening stock → financialYearStocks থেকে matching year এর data
     // ===================
     {
       $addFields: {
-        // ✅ Matching financial year এর opening stock ও value
         matchedFYStock: {
           $ifNull: [
             {
@@ -1811,7 +1803,6 @@ export const getStockBalance = async (filters = {}) => {
 
     {
       $addFields: {
-        // ✅ Financial year এর opening qty ও value
         openingQty: { $ifNull: ["$matchedFYStock.stock", 0] },
         openingValue: { $ifNull: ["$matchedFYStock.value", 0] },
 
@@ -1819,40 +1810,67 @@ export const getStockBalance = async (filters = {}) => {
           $subtract: ["$adjustmentInQty", "$adjustmentOutQty"],
         },
 
-        // ✅ Closing Stock:
-        // Financial year pass করলে → transaction based calculated closing
-        // না হলে → product.currentStock (live)
         closingStock: financialYear
           ? {
-            $subtract: [
-              {
-                $add: [
-                  "$matchedFYStock.stock", // openingQty
-                  "$purchaseQty",
-                  "$returnInQty",
-                  "$adjustmentInQty",
-                ],
-              },
-              {
-                $add: [
-                  "$saleQty",
-                  "$returnOutQty",
-                  "$damageQty",
-                  "$adjustmentOutQty",
-                ],
-              },
-            ],
-          }
+              $subtract: [
+                {
+                  $add: [
+                    "$matchedFYStock.stock",
+                    "$purchaseQty",
+                    "$returnInQty",
+                    "$adjustmentInQty",
+                  ],
+                },
+                {
+                  $add: [
+                    "$saleQty",
+                    "$returnOutQty",
+                    "$damageQty",
+                    "$adjustmentOutQty",
+                  ],
+                },
+              ],
+            }
           : "$currentStock",
       },
     },
+
+    // ===================
+    // ✅ FINANCIAL YEAR FILTER
+    // Financial year pass হলে — সেই year এ কোনো activity না থাকলে hide করো
+    // opening stock 0, purchase 0, sale 0, transactions 0 → বাদ দাও
+    // ===================
+    ...(financialYear
+      ? [
+          {
+            $match: {
+              $expr: {
+                $gt: [
+                  {
+                    $add: [
+                      "$openingQty",
+                      "$purchaseQty",
+                      "$saleQty",
+                      "$returnInQty",
+                      "$returnOutQty",
+                      "$damageQty",
+                      "$adjustmentInQty",
+                      "$adjustmentOutQty",
+                    ],
+                  },
+                  0,
+                ],
+              },
+            },
+          },
+        ]
+      : []),
 
     // ===================
     // RATE CALCULATIONS
     // ===================
     {
       $addFields: {
-        // Average Purchase Rate = (Opening Value + Purchase Value) / (Opening Qty + Purchase Qty)
         avgPurchaseRate: {
           $cond: {
             if: {
@@ -1873,7 +1891,6 @@ export const getStockBalance = async (filters = {}) => {
           },
         },
 
-        // Last Purchase Rate → fallback opening rate → fallback costPrice
         effectiveLastPurchaseRate: {
           $cond: {
             if: { $gt: ["$lastPurchaseRate", 0] },
@@ -1903,7 +1920,6 @@ export const getStockBalance = async (filters = {}) => {
             2,
           ],
         },
-
         currentStockValue: {
           $round: [
             { $multiply: ["$closingStock", "$effectiveLastPurchaseRate"] },
@@ -1913,38 +1929,48 @@ export const getStockBalance = async (filters = {}) => {
       },
     },
 
+    // ===================
+    // ✅ TRANSACTION TYPE FILTER
+    // DAMAGE   → damageQty > 0 এমন items only
+    // PURCHASE → purchaseQty > 0 এমন items only
+    // SALES    → saleQty > 0 এমন items only
+    // ADJUSTMENT → adjustmentQty != 0 এমন items only
+    // ===================
     ...(transactionType
       ? [
-        {
-          $match: (() => {
-            switch (transactionType) {
-              case "DAMAGE":
-                return { damageQty: { $gt: 0 } };
-              case "PURCHASE":
-                return { purchaseQty: { $gt: 0 } };
-              case "SALES":
-                return { saleQty: { $gt: 0 } };
-              case "ADJUSTMENT":
-                return { adjustmentQty: { $ne: 0 } };
-              default:
-                return {};
-            }
-          })(),
-        },
-      ]
+          {
+            $match: (() => {
+              switch (transactionType) {
+                case "DAMAGE":
+                  return { damageQty: { $gt: 0 } };
+                case "PURCHASE":
+                  return { purchaseQty: { $gt: 0 } };
+                case "SALES":
+                  return { saleQty: { $gt: 0 } };
+                case "ADJUSTMENT":
+                  return { adjustmentQty: { $ne: 0 } };
+                default:
+                  return {};
+              }
+            })(),
+          },
+        ]
       : []),
 
+    // ===================
+    // MIN/MAX STOCK FILTER
+    // ===================
     ...(minStock || maxStock
       ? [
-        {
-          $match: {
-            closingStock: {
-              ...(minStock ? { $gte: Number(minStock) } : {}),
-              ...(maxStock ? { $lte: Number(maxStock) } : {}),
+          {
+            $match: {
+              closingStock: {
+                ...(minStock ? { $gte: Number(minStock) } : {}),
+                ...(maxStock ? { $lte: Number(maxStock) } : {}),
+              },
             },
           },
-        },
-      ]
+        ]
       : []),
 
     {

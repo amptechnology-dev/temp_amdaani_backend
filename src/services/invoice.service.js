@@ -1508,276 +1508,501 @@ export const getItemStockReport = async (filters = {}) => {
   }));
 };
 
+// Financial Year string থেকে start ও end date বের করার helper
+const getFinancialYearDateRange = (financialYear) => {
+  // "2026-27" → startYear = 2026
+  const startYear = parseInt(financialYear.split("-")[0]);
+  const endYear = startYear + 1;
+
+  const startDate = new Date(startYear, 3, 1); // April 1
+  startDate.setHours(0, 0, 0, 0);
+
+  const endDate = new Date(endYear, 2, 31); // March 31
+  endDate.setHours(23, 59, 59, 999);
+
+  return { startDate, endDate };
+};
+
 export const getStockBalance = async (filters = {}) => {
-  const { store, itemName, asOnDate, minStock, maxStock } = filters;
+  const {
+    store,
+    itemName,
+    transactionType,
+    minStock,
+    maxStock,
+    financialYear,
+  } = filters;
 
   const storeId = new mongoose.Types.ObjectId(String(store));
 
-  const storeData = await Store.findById(storeId).lean();
-  if (!storeData) throw new ApiError(404, 'Store not found');
-  if (!storeData.settings?.stockManagement) {
-    throw new ApiError(400, 'Stock management is disabled for this store');
-  }
+  // Financial year date range
+  const { startDate: fyStartDate, endDate: fyEndDate } = financialYear
+    ? getFinancialYearDateRange(financialYear)
+    : { startDate: null, endDate: null };
 
   const productMatch = {
     store: storeId,
-    status: { $ne: 'cancelled' },
+    status: { $ne: "cancelled" },
   };
+
   if (itemName) {
-    productMatch.name = { $regex: itemName, $options: 'i' };
+    productMatch.name = { $regex: itemName, $options: "i" };
   }
 
-  const reportEndDate = asOnDate || new Date();
-
-  const KNOWN_TYPES = [
-    'PURCHASE', 'SALE', 'PURCHASE_RETURN', 'SALE_RETURN',
-    'TRANSFER', 'PURCHASE_REVERSE', 'STOCK_REDUCE',
-    'RETURN_TO_VENDOR', 'DAMAGE', 'ADJUSTMENT',
-  ];
-
-  // direction IN বা undefined → stock বাড়ায়
-  const sumIn = (typeCondition) => ({
-    $sum: {
-      $map: {
-        input: '$transactions',
-        as: 'tx',
-        in: {
-          $cond: [
-            {
-              $and: [
-                typeCondition,
-                { $ne: ['$$tx.direction', 'OUT'] },
-              ],
-            },
-            '$$tx.quantity',
-            0,
-          ],
-        },
-      },
-    },
-  });
-
-  // direction OUT → stock কমায়
-  const sumOut = (typeCondition) => ({
-    $sum: {
-      $map: {
-        input: '$transactions',
-        as: 'tx',
-        in: {
-          $cond: [
-            {
-              $and: [
-                typeCondition,
-                { $eq: ['$$tx.direction', 'OUT'] },
-              ],
-            },
-            '$$tx.quantity',
-            0,
-          ],
-        },
-      },
-    },
-  });
-
-  const adjustmentCondition = {
-    $or: [
-      { $eq: ['$$tx.transactionType', 'ADJUSTMENT'] },
-      { $not: [{ $in: ['$$tx.transactionType', KNOWN_TYPES] }] },
-    ],
-  };
-
-  const pipeline = [
+  const data = await Product.aggregate([
     { $match: productMatch },
 
+    // ===================
+    // PURCHASE TABLE
+    // Financial year date range দিয়ে filter
+    // ===================
     {
       $lookup: {
-        from: 'stocktransactions',
-        let: { productId: '$_id' },
+        from: "purchases",
+        let: { productId: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              store: storeId,
+              status: { $ne: "cancelled" },
+              ...(fyStartDate && fyEndDate
+                ? { date: { $gte: fyStartDate, $lte: fyEndDate } }
+                : {}),
+            },
+          },
+          { $unwind: "$items" },
+          {
+            $match: {
+              $expr: { $eq: ["$items.product", "$$productId"] },
+            },
+          },
+          { $sort: { date: -1 } },
+          {
+            $group: {
+              _id: null,
+              totalQty: { $sum: "$items.quantity" },
+              totalValue: {
+                $sum: { $multiply: ["$items.quantity", "$items.rate"] },
+              },
+              lastPurchaseRate: { $first: "$items.rate" },
+            },
+          },
+        ],
+        as: "purchaseData",
+      },
+    },
+
+    // ===================
+    // SALES TABLE
+    // Financial year date range দিয়ে filter
+    // ===================
+    {
+      $lookup: {
+        from: "invoices",
+        let: { productId: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              store: storeId,
+              status: { $ne: "cancelled" },
+              ...(fyStartDate && fyEndDate
+                ? { invoiceDate: { $gte: fyStartDate, $lte: fyEndDate } }
+                : {}),
+            },
+          },
+          { $unwind: "$items" },
+          {
+            $match: {
+              $expr: { $eq: ["$items.product", "$$productId"] },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              qty: { $sum: "$items.quantity" },
+            },
+          },
+        ],
+        as: "salesData",
+      },
+    },
+
+    // ===================
+    // STOCK TRANSACTION
+    // Financial year date range দিয়ে filter
+    // ===================
+    {
+      $lookup: {
+        from: "stocktransactions",
+        let: { productId: "$_id" },
         pipeline: [
           {
             $match: {
               $expr: {
                 $and: [
-                  { $eq: ['$product', '$$productId'] },
-                  { $eq: ['$store', storeId] },
-                  { $lte: ['$date', new Date(reportEndDate)] },
+                  { $eq: ["$product", "$$productId"] },
+                  { $eq: ["$store", storeId] },
+                  ...(fyStartDate && fyEndDate
+                    ? [
+                      { $gte: ["$date", fyStartDate] },
+                      { $lte: ["$date", fyEndDate] },
+                    ]
+                    : []),
                 ],
               },
             },
           },
         ],
-        as: 'transactions',
+        as: "transactions",
       },
     },
 
+    // ===================
+    // CALCULATE QUANTITIES
+    // Opening stock → financialYearStocks থেকে matching year এর data
+    // ===================
     {
       $addFields: {
-        openingQty: {
-          $ifNull: [{ $sum: '$financialYearStocks.stock' }, 0],
-        },
-
-        // ── IN types: direction IN বা undefined ──
-        purchaseQty: sumIn({
-          $eq: ['$$tx.transactionType', 'PURCHASE'],
-        }),
-        saleReturnQty: sumIn({
-          $eq: ['$$tx.transactionType', 'SALE_RETURN'],
-        }),
-
-        // ── OUT types: direction OUT ──
-        saleQty: sumOut({
-          $eq: ['$$tx.transactionType', 'SALE'],
-        }),
-        purchaseReturnQty: sumOut({
-          $eq: ['$$tx.transactionType', 'PURCHASE_RETURN'],
-        }),
-        purchaseReverseQty: sumOut({
-          $eq: ['$$tx.transactionType', 'PURCHASE_REVERSE'],
-        }),
-        stockReduceQty: sumOut({
-          $eq: ['$$tx.transactionType', 'STOCK_REDUCE'],
-        }),
-        returnToVendorQty: sumOut({
-          $eq: ['$$tx.transactionType', 'RETURN_TO_VENDOR'],
-        }),
-        transferQty: sumOut({
-          $eq: ['$$tx.transactionType', 'TRANSFER'],
-        }),
-        damageQty: sumOut({
-          $eq: ['$$tx.transactionType', 'DAMAGE'],
-        }),
-
-        // ── ADJUSTMENT: direction দিয়ে IN/OUT আলাদা ──
-        adjustmentInQty: sumIn(adjustmentCondition),
-        adjustmentOutQty: sumOut(adjustmentCondition),
-
-        avgStockValue: {
-          $ifNull: ['$lastPurchasePrice', '$costPrice'],
-        },
-      },
-    },
-
-    {
-      $addFields: {
-        adjustmentQty: {
-          $subtract: ['$adjustmentInQty', '$adjustmentOutQty'],
-        },
-
-        // Formula (note অনুযায়ী):
-        // a = openingQty + purchaseQty + saleReturnQty + adjustmentIN
-        // b = saleQty + purchaseReturnQty + purchaseReverseQty
-        //     + stockReduceQty + returnToVendorQty + transferQty
-        //     + damageQty + adjustmentOUT
-        // closingStock = a - b
-        closingStock: {
-          $subtract: [
+        // ✅ Matching financial year এর opening stock ও value
+        matchedFYStock: {
+          $ifNull: [
             {
-              $add: [
-                '$openingQty',
-                '$purchaseQty',
-                '$saleReturnQty',
-                '$adjustmentInQty',
+              $arrayElemAt: [
+                {
+                  $filter: {
+                    input: "$financialYearStocks",
+                    as: "fys",
+                    cond: financialYear
+                      ? { $eq: ["$$fys.financialYear", financialYear] }
+                      : true,
+                  },
+                },
+                0,
               ],
             },
-            {
-              $add: [
-                '$saleQty',
-                '$purchaseReturnQty',
-                '$purchaseReverseQty',
-                '$stockReduceQty',
-                '$returnToVendorQty',
-                '$transferQty',
-                '$damageQty',
-                '$adjustmentOutQty',
-              ],
-            },
+            { stock: 0, value: 0 },
           ],
         },
-      },
-    },
 
-    ...(minStock || maxStock
-      ? [
-          {
-            $match: {
-              closingStock: {
-                ...(minStock ? { $gte: Number(minStock) } : {}),
-                ...(maxStock ? { $lte: Number(maxStock) } : {}),
+        purchaseQty: {
+          $ifNull: [{ $arrayElemAt: ["$purchaseData.totalQty", 0] }, 0],
+        },
+        purchaseTotalValue: {
+          $ifNull: [{ $arrayElemAt: ["$purchaseData.totalValue", 0] }, 0],
+        },
+        lastPurchaseRate: {
+          $ifNull: [{ $arrayElemAt: ["$purchaseData.lastPurchaseRate", 0] }, 0],
+        },
+        saleQty: {
+          $ifNull: [{ $arrayElemAt: ["$salesData.qty", 0] }, 0],
+        },
+
+        returnInQty: {
+          $sum: {
+            $map: {
+              input: "$transactions",
+              as: "tx",
+              in: {
+                $cond: [
+                  {
+                    $and: [
+                      { $eq: ["$$tx.transactionType", "SALE_RETURN"] },
+                      { $eq: ["$$tx.direction", "IN"] },
+                    ],
+                  },
+                  "$$tx.quantity",
+                  0,
+                ],
               },
             },
           },
-        ]
-      : []),
+        },
+
+        returnOutQty: {
+          $sum: {
+            $map: {
+              input: "$transactions",
+              as: "tx",
+              in: {
+                $cond: [
+                  {
+                    $and: [
+                      {
+                        $in: [
+                          "$$tx.transactionType",
+                          ["PURCHASE_RETURN", "PURCHASE_REVERSE", "RETURN_TO_VENDOR"],
+                        ],
+                      },
+                      { $eq: ["$$tx.direction", "OUT"] },
+                    ],
+                  },
+                  "$$tx.quantity",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
+        damageQty: {
+          $sum: {
+            $map: {
+              input: "$transactions",
+              as: "tx",
+              in: {
+                $cond: [
+                  {
+                    $and: [
+                      { $eq: ["$$tx.transactionType", "DAMAGE"] },
+                      { $eq: ["$$tx.direction", "OUT"] },
+                    ],
+                  },
+                  "$$tx.quantity",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
+        adjustmentInQty: {
+          $sum: {
+            $map: {
+              input: "$transactions",
+              as: "tx",
+              in: {
+                $cond: [
+                  {
+                    $and: [
+                      { $eq: ["$$tx.transactionType", "ADJUSTMENT"] },
+                      { $eq: ["$$tx.direction", "IN"] },
+                    ],
+                  },
+                  "$$tx.quantity",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
+        adjustmentOutQty: {
+          $sum: {
+            $map: {
+              input: "$transactions",
+              as: "tx",
+              in: {
+                $cond: [
+                  {
+                    $and: [
+                      { $eq: ["$$tx.transactionType", "ADJUSTMENT"] },
+                      { $eq: ["$$tx.direction", "OUT"] },
+                    ],
+                  },
+                  "$$tx.quantity",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
 
     {
-      $project: {
-        _id: 0,
-        itemDescription: '$name',
-        openingQty: 1,
-        // IN quantities (positive)
-        purchaseQty: 1,
-        saleReturnQty: 1,
-        adjustmentInQty: 1,
-        // OUT quantities (positive)
-        saleQty: 1,
-        purchaseReturnQty: 1,
-        purchaseReverseQty: 1,
-        stockReduceQty: 1,
-        returnToVendorQty: 1,
-        transferQty: 1,
-        damageQty: 1,
-        adjustmentOutQty: 1,
-        // Net adjustment
-        adjustmentQty: 1,
-        avgStockValue: 1,
-        closingStock: 1,
+      $addFields: {
+        // ✅ Financial year এর opening qty ও value
+        openingQty: { $ifNull: ["$matchedFYStock.stock", 0] },
+        openingValue: { $ifNull: ["$matchedFYStock.value", 0] },
+
+        adjustmentQty: {
+          $subtract: ["$adjustmentInQty", "$adjustmentOutQty"],
+        },
+
+        // ✅ Closing Stock:
+        // Financial year pass করলে → transaction based calculated closing
+        // না হলে → product.currentStock (live)
+        closingStock: financialYear
+          ? {
+            $subtract: [
+              {
+                $add: [
+                  "$matchedFYStock.stock", // openingQty
+                  "$purchaseQty",
+                  "$returnInQty",
+                  "$adjustmentInQty",
+                ],
+              },
+              {
+                $add: [
+                  "$saleQty",
+                  "$returnOutQty",
+                  "$damageQty",
+                  "$adjustmentOutQty",
+                ],
+              },
+            ],
+          }
+          : "$currentStock",
+      },
+    },
+
+    // ===================
+    // RATE CALCULATIONS
+    // ===================
+    {
+      $addFields: {
+        // Average Purchase Rate = (Opening Value + Purchase Value) / (Opening Qty + Purchase Qty)
+        avgPurchaseRate: {
+          $cond: {
+            if: {
+              $gt: [{ $add: ["$openingQty", "$purchaseQty"] }, 0],
+            },
+            then: {
+              $round: [
+                {
+                  $divide: [
+                    { $add: ["$openingValue", "$purchaseTotalValue"] },
+                    { $add: ["$openingQty", "$purchaseQty"] },
+                  ],
+                },
+                2,
+              ],
+            },
+            else: 0,
+          },
+        },
+
+        // Last Purchase Rate → fallback opening rate → fallback costPrice
+        effectiveLastPurchaseRate: {
+          $cond: {
+            if: { $gt: ["$lastPurchaseRate", 0] },
+            then: "$lastPurchaseRate",
+            else: {
+              $cond: {
+                if: { $gt: ["$openingQty", 0] },
+                then: {
+                  $round: [
+                    { $divide: ["$openingValue", "$openingQty"] },
+                    2,
+                  ],
+                },
+                else: "$costPrice",
+              },
+            },
+          },
+        },
+      },
+    },
+
+    {
+      $addFields: {
+        avgStockValue: {
+          $round: [
+            { $multiply: ["$closingStock", "$avgPurchaseRate"] },
+            2,
+          ],
+        },
+
         currentStockValue: {
           $round: [
-            { $multiply: ['$closingStock', '$avgStockValue'] },
+            { $multiply: ["$closingStock", "$effectiveLastPurchaseRate"] },
             2,
           ],
         },
       },
     },
 
-    { $sort: { itemDescription: 1 } },
-  ];
+    ...(transactionType
+      ? [
+        {
+          $match: (() => {
+            switch (transactionType) {
+              case "DAMAGE":
+                return { damageQty: { $gt: 0 } };
+              case "PURCHASE":
+                return { purchaseQty: { $gt: 0 } };
+              case "SALES":
+                return { saleQty: { $gt: 0 } };
+              case "ADJUSTMENT":
+                return { adjustmentQty: { $ne: 0 } };
+              default:
+                return {};
+            }
+          })(),
+        },
+      ]
+      : []),
 
-  const data = await Product.aggregate(pipeline);
+    ...(minStock || maxStock
+      ? [
+        {
+          $match: {
+            closingStock: {
+              ...(minStock ? { $gte: Number(minStock) } : {}),
+              ...(maxStock ? { $lte: Number(maxStock) } : {}),
+            },
+          },
+        },
+      ]
+      : []),
+
+    {
+      $project: {
+        _id: 0,
+        itemDescription: "$name",
+        openingQty: 1,
+        purchaseQty: 1,
+        saleQty: 1,
+        returnInQty: 1,
+        returnOutQty: 1,
+        damageQty: 1,
+        adjustmentQty: 1,
+        closingStock: 1,
+        avgPurchaseRate: 1,
+        avgStockValue: 1,
+        lastPurchaseRate: "$effectiveLastPurchaseRate",
+        currentStockValue: 1,
+      },
+    },
+
+    { $sort: { itemDescription: 1 } },
+  ]);
 
   const summary = {
     totalItems: data.length,
 
-    totalCurrentStockValue: data.reduce(
-      (sum, item) => sum + item.currentStockValue,
+    totalClosingStock: data.reduce(
+      (sum, item) => sum + (item.closingStock || 0),
       0
     ),
 
-    totalClosingStock: data.reduce(
-      (sum, item) => sum + item.closingStock,
+    totalAvgStockValue: data.reduce(
+      (sum, item) => sum + (item.avgStockValue || 0),
+      0
+    ),
+
+    totalCurrentStockValue: data.reduce(
+      (sum, item) => sum + (item.currentStockValue || 0),
       0
     ),
 
     totalIn: data.reduce(
       (sum, item) =>
         sum +
-        item.purchaseQty +
-        item.saleReturnQty +
-        item.adjustmentInQty,
+        (item.purchaseQty || 0) +
+        (item.returnInQty || 0) +
+        (item.adjustmentQty > 0 ? item.adjustmentQty : 0),
       0
     ),
 
     totalOut: data.reduce(
       (sum, item) =>
         sum +
-        item.saleQty +
-        item.purchaseReturnQty +
-        item.purchaseReverseQty +
-        item.stockReduceQty +
-        item.returnToVendorQty +
-        item.transferQty +
-        item.damageQty +
-        item.adjustmentOutQty,
+        (item.saleQty || 0) +
+        (item.returnOutQty || 0) +
+        (item.damageQty || 0) +
+        (item.adjustmentQty < 0 ? Math.abs(item.adjustmentQty) : 0),
       0
     ),
   };

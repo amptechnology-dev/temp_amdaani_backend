@@ -572,173 +572,30 @@ export async function getStockBalance(filters) {
   }));
 }
 
-export const getItemStockReport =
-  expressAsyncHandler(
-    async (
-      req,
-      res
-    ) => {
-      const {
-        range,
-        startDate:
-        startRaw,
-        endDate:
-        endRaw,
-        itemName,
-        asOnDate:
-        asOnDateRaw,
-        transactionType,
-        minStock,
-        maxStock,
-      } = req.query;
+export const getItemStockReport = expressAsyncHandler(async (req, res) => {
+  const {
+    itemName,
+    transactionType,
+    minStock,
+    maxStock,
+    financialYear, // e.g. "2026-27"
+  } = req.query;
 
-      const now =
-        new Date();
+  const report = await invoiceService.getStockBalance({
+    store: req.user.store,
+    itemName,
+    transactionType,
+    minStock,
+    maxStock,
+    financialYear,
+  });
 
-      let startDate;
-      let endDate;
-
-      if (
-        range ===
-        'thisMonth'
-      ) {
-        startDate =
-          new Date(
-            now.getFullYear(),
-            now.getMonth(),
-            1
-          );
-
-        endDate =
-          new Date(
-            now.getFullYear(),
-            now.getMonth() +
-            1,
-            0,
-            23,
-            59,
-            59,
-            999
-          );
-      }
-
-      else if (
-        range ===
-        'previousMonth'
-      ) {
-        startDate =
-          new Date(
-            now.getFullYear(),
-            now.getMonth() -
-            1,
-            1
-          );
-
-        endDate =
-          new Date(
-            now.getFullYear(),
-            now.getMonth(),
-            0,
-            23,
-            59,
-            59,
-            999
-          );
-      }
-
-      else if (
-        range ===
-        'year'
-      ) {
-        startDate =
-          new Date(
-            now.getFullYear(),
-            0,
-            1
-          );
-
-        endDate =
-          new Date(
-            now.getFullYear(),
-            11,
-            31,
-            23,
-            59,
-            59,
-            999
-          );
-      }
-
-      else if (
-        startRaw &&
-        endRaw
-      ) {
-        startDate =
-          new Date(
-            startRaw
-          );
-
-        endDate =
-          new Date(
-            endRaw
-          );
-
-        endDate.setHours(
-          23,
-          59,
-          59,
-          999
-        );
-      }
-
-      let asOnDate;
-
-      if (
-        asOnDateRaw
-      ) {
-        asOnDate =
-          new Date(
-            asOnDateRaw
-          );
-
-        asOnDate.setHours(
-          23,
-          59,
-          59,
-          999
-        );
-      }
-
-      const report =
-        await invoiceService.getStockBalance(
-          {
-            store:
-              req.user
-                .store,
-
-            itemName,
-
-            asOnDate,
-
-            startDate,
-
-            endDate,
-
-            transactionType,
-
-            minStock,
-
-            maxStock,
-          }
-        );
-
-      return new ApiResponse(
-        200,
-        report,
-        'Item stock report fetched successfully'
-      ).send(res);
-    }
-  );
+  return new ApiResponse(
+    200,
+    report,
+    "Item stock report fetched successfully"
+  ).send(res);
+});
 
 export const addPayment = expressAsyncHandler(async (req, res) => {
   const { invoiceId } = req.params;

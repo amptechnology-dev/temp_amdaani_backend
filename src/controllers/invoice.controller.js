@@ -574,13 +574,19 @@ export async function getStockBalance(filters) {
 
 export const getItemStockReport =
   expressAsyncHandler(
-    async (req, res) => {
+    async (
+      req,
+      res
+    ) => {
       const {
         range,
-        startDate: startRaw,
-        endDate: endRaw,
+        startDate:
+        startRaw,
+        endDate:
+        endRaw,
         itemName,
-        asOnDate: asOnDateRaw,
+        asOnDate:
+        asOnDateRaw,
         transactionType,
         minStock,
         maxStock,
@@ -592,7 +598,6 @@ export const getItemStockReport =
       let startDate;
       let endDate;
 
-      // This Month
       if (
         range ===
         'thisMonth'
@@ -608,7 +613,7 @@ export const getItemStockReport =
           new Date(
             now.getFullYear(),
             now.getMonth() +
-              1,
+            1,
             0,
             23,
             59,
@@ -617,7 +622,6 @@ export const getItemStockReport =
           );
       }
 
-      // Previous Month
       else if (
         range ===
         'previousMonth'
@@ -626,7 +630,7 @@ export const getItemStockReport =
           new Date(
             now.getFullYear(),
             now.getMonth() -
-              1,
+            1,
             1
           );
 
@@ -642,7 +646,6 @@ export const getItemStockReport =
           );
       }
 
-      // Current Year
       else if (
         range ===
         'year'
@@ -666,105 +669,65 @@ export const getItemStockReport =
           );
       }
 
-      // Custom Range
       else if (
         startRaw &&
         endRaw
       ) {
-        const [
-          sy,
-          sm,
-          sd,
-        ] = startRaw
-          .split('-')
-          .map(Number);
-
-        const [
-          ey,
-          em,
-          ed,
-        ] = endRaw
-          .split('-')
-          .map(Number);
-
         startDate =
           new Date(
-            sy,
-            sm - 1,
-            sd,
-            0,
-            0,
-            0,
-            0
+            startRaw
           );
 
         endDate =
           new Date(
-            ey,
-            em - 1,
-            ed,
-            23,
-            59,
-            59,
-            999
+            endRaw
           );
+
+        endDate.setHours(
+          23,
+          59,
+          59,
+          999
+        );
       }
 
-      // As On Date
       let asOnDate;
 
       if (
         asOnDateRaw
       ) {
-        const [
-          y,
-          m,
-          d,
-        ] =
-          asOnDateRaw
-            .split('-')
-            .map(Number);
-
         asOnDate =
           new Date(
-            y,
-            m - 1,
-            d,
-            23,
-            59,
-            59,
-            999
+            asOnDateRaw
           );
+
+        asOnDate.setHours(
+          23,
+          59,
+          59,
+          999
+        );
       }
 
-      // Validation
-      if (
-        !asOnDate &&
-        (!startDate ||
-          !endDate)
-      ) {
-        return new ApiResponse(
-          400,
-          null,
-          'Please provide startDate & endDate, range or asOnDate'
-        ).send(res);
-      }
-
-      /**
-       * Get Report
-       */
       const report =
         await invoiceService.getStockBalance(
           {
             store:
               req.user
                 .store,
+
             itemName,
+
             asOnDate,
+
             startDate,
+
             endDate,
+
             transactionType,
+
             minStock,
+
             maxStock,
           }
         );

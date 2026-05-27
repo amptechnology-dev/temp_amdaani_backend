@@ -13,6 +13,7 @@ import { Expense } from '../models/expense.model.js';
 import { Store } from '../models/store.model.js';
 import { json } from 'express';
 import { Transaction } from '../models/transaction.model.js';
+import { StockTransactionType } from '../config/constants.js';
 
 //NOTE: Trusting frontend for valid data
 export const createInvoice = async (data) => {
@@ -1507,403 +1508,282 @@ export const getItemStockReport = async (filters = {}) => {
   }));
 };
 
-export const getStockBalance =
-  async (
-    filters = {}
-  ) => {
-    const {
-      store,
-      itemName,
-      asOnDate,
-      startDate,
-      endDate,
-      transactionType,
-      minStock,
-      maxStock,
-    } = filters;
+export const getStockBalance = async (filters = {}) => {
+  const { store, itemName, asOnDate, minStock, maxStock } = filters;
 
-    const storeId =
-      new mongoose.Types.ObjectId(
-        String(store)
-      );
+  const storeId = new mongoose.Types.ObjectId(String(store));
 
-    const storeData =
-      await Store.findById(
-        storeId
-      ).lean();
+  const storeData = await Store.findById(storeId).lean();
+  if (!storeData) throw new ApiError(404, 'Store not found');
+  if (!storeData.settings?.stockManagement) {
+    throw new ApiError(400, 'Stock management is disabled for this store');
+  }
 
-    if (!storeData) {
-      throw new ApiError(
-        404,
-        'Store not found'
-      );
-    }
-
-    if (
-      !storeData.settings
-        ?.stockManagement
-    ) {
-      throw new ApiError(
-        400,
-        'Stock management is disabled for this store'
-      );
-    }
-
-    /**
-     * Product Match
-     */
-    const baseMatch = {
-      store: storeId,
-      status: {
-        $ne:
-          'cancelled',
-      },
-    };
-
-    if (itemName) {
-      baseMatch.name = {
-        $regex:
-          itemName,
-        $options: 'i',
-      };
-    }
-
-    /**
-     * Transaction Match
-     */
-    const transactionConditions =
-      [
-        {
-          $eq: [
-            '$product',
-            '$$productId',
-          ],
-        },
-        {
-          $eq: [
-            '$store',
-            storeId,
-          ],
-        },
-      ];
-
-    // asOnDate
-    if (asOnDate) {
-      transactionConditions.push(
-        {
-          $lte: [
-            '$date',
-            new Date(
-              asOnDate
-            ),
-          ],
-        }
-      );
-    }
-
-    // Date Range
-    if (
-      startDate &&
-      endDate
-    ) {
-      transactionConditions.push(
-        {
-          $gte: [
-            '$date',
-            new Date(
-              startDate
-            ),
-          ],
-        },
-        {
-          $lte: [
-            '$date',
-            new Date(
-              endDate
-            ),
-          ],
-        }
-      );
-    }
-
-    // Transaction Type
-    if (
-      transactionType
-    ) {
-      transactionConditions.push(
-        {
-          $eq: [
-            '$transactionType',
-            transactionType,
-          ],
-        }
-      );
-    }
-
-    /**
-     * Stock Filter
-     */
-    const stockFilter =
-      {};
-
-    if (
-      minStock !==
-        undefined &&
-      minStock !== ''
-    ) {
-      stockFilter.$gte =
-        Number(
-          minStock
-        );
-    }
-
-    if (
-      maxStock !==
-        undefined &&
-      maxStock !== ''
-    ) {
-      stockFilter.$lte =
-        Number(
-          maxStock
-        );
-    }
-
-    const pipeline = [
-      {
-        $match:
-          baseMatch,
-      },
-
-      /**
-       * Lookup Transactions
-       */
-      {
-        $lookup: {
-          from:
-            'stocktransactions',
-
-          let: {
-            productId:
-              '$_id',
-          },
-
-          pipeline: [
-            {
-              $match:
-                {
-                  $expr:
-                    {
-                      $and:
-                        transactionConditions,
-                    },
-                },
-            },
-          ],
-
-          as:
-            'transactions',
-        },
-      },
-
-      // remove empty transaction
-      ...(transactionType
-        ? [
-            {
-              $match:
-                {
-                  transactions:
-                    {
-                      $ne:
-                        [],
-                    },
-                },
-            },
-          ]
-        : []),
-
-      /**
-       * Quantity Calculation
-       */
-      {
-        $addFields: {
-          openingQty:
-            {
-              $sum:
-                '$financialYearStocks.stock',
-            },
-
-          purchaseQty:
-            {
-              $sum:
-                {
-                  $map:
-                    {
-                      input:
-                        '$transactions',
-                      as: 'tx',
-                      in: {
-                        $cond:
-                          [
-                            {
-                              $eq:
-                                [
-                                  '$$tx.transactionType',
-                                  'PURCHASE',
-                                ],
-                            },
-                            '$$tx.quantity',
-                            0,
-                          ],
-                      },
-                    },
-                },
-            },
-
-          saleQty: {
-            $sum: {
-              $map: {
-                input:
-                  '$transactions',
-                as: 'tx',
-                in: {
-                  $cond:
-                    [
-                      {
-                        $eq:
-                          [
-                            '$$tx.transactionType',
-                            'SALE',
-                          ],
-                      },
-                      '$$tx.quantity',
-                      0,
-                    ],
-                },
-              },
-            },
-          },
-
-          adjustmentQty:
-            {
-              $sum: {
-                $map:
-                  {
-                    input:
-                      '$transactions',
-                    as: 'tx',
-                    in: {
-                      $cond:
-                        [
-                          {
-                            $eq:
-                              [
-                                '$$tx.transactionType',
-                                'ADJUSTMENT',
-                              ],
-                          },
-                          '$$tx.quantity',
-                          0,
-                        ],
-                    },
-                  },
-              },
-            },
-
-          avgRate: {
-            $ifNull:
-              [
-                '$lastPurchasePrice',
-                '$costPrice',
-              ],
-          },
-        },
-      },
-
-      /**
-       * Closing Qty
-       */
-      {
-        $addFields: {
-          closingQty:
-            {
-              $subtract:
-                [
-                  {
-                    $add:
-                      [
-                        '$openingQty',
-                        '$purchaseQty',
-                        '$adjustmentQty',
-                      ],
-                  },
-                  '$saleQty',
-                ],
-            },
-        },
-      },
-
-      /**
-       * Stock Range Filter
-       */
-      ...(Object.keys(
-        stockFilter
-      ).length
-        ? [
-            {
-              $match:
-                {
-                  closingQty:
-                    stockFilter,
-                },
-            },
-          ]
-        : []),
-
-      /**
-       * Final Response
-       */
-      {
-        $project: {
-          _id: 0,
-          itemDescription:
-            '$name',
-
-          openingQty: 1,
-          purchaseQty: 1,
-          saleQty: 1,
-          adjustmentQty: 1,
-          closingQty: 1,
-          avgRate: 1,
-
-          stockValue:
-            {
-              $round:
-                [
-                  {
-                    $multiply:
-                      [
-                        '$closingQty',
-                        '$avgRate',
-                      ],
-                  },
-                  2,
-                ],
-            },
-        },
-      },
-
-      {
-        $sort: {
-          itemDescription:
-            1,
-        },
-      },
-    ];
-
-    return Product.aggregate(
-      pipeline
-    );
+  const productMatch = {
+    store: storeId,
+    status: { $ne: 'cancelled' },
   };
+  if (itemName) {
+    productMatch.name = { $regex: itemName, $options: 'i' };
+  }
+
+  const reportEndDate = asOnDate || new Date();
+
+  const KNOWN_TYPES = [
+    'PURCHASE', 'SALE', 'PURCHASE_RETURN', 'SALE_RETURN',
+    'TRANSFER', 'PURCHASE_REVERSE', 'STOCK_REDUCE',
+    'RETURN_TO_VENDOR', 'DAMAGE', 'ADJUSTMENT',
+  ];
+
+  // direction IN বা undefined → stock বাড়ায়
+  const sumIn = (typeCondition) => ({
+    $sum: {
+      $map: {
+        input: '$transactions',
+        as: 'tx',
+        in: {
+          $cond: [
+            {
+              $and: [
+                typeCondition,
+                { $ne: ['$$tx.direction', 'OUT'] },
+              ],
+            },
+            '$$tx.quantity',
+            0,
+          ],
+        },
+      },
+    },
+  });
+
+  // direction OUT → stock কমায়
+  const sumOut = (typeCondition) => ({
+    $sum: {
+      $map: {
+        input: '$transactions',
+        as: 'tx',
+        in: {
+          $cond: [
+            {
+              $and: [
+                typeCondition,
+                { $eq: ['$$tx.direction', 'OUT'] },
+              ],
+            },
+            '$$tx.quantity',
+            0,
+          ],
+        },
+      },
+    },
+  });
+
+  const adjustmentCondition = {
+    $or: [
+      { $eq: ['$$tx.transactionType', 'ADJUSTMENT'] },
+      { $not: [{ $in: ['$$tx.transactionType', KNOWN_TYPES] }] },
+    ],
+  };
+
+  const pipeline = [
+    { $match: productMatch },
+
+    {
+      $lookup: {
+        from: 'stocktransactions',
+        let: { productId: '$_id' },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$product', '$$productId'] },
+                  { $eq: ['$store', storeId] },
+                  { $lte: ['$date', new Date(reportEndDate)] },
+                ],
+              },
+            },
+          },
+        ],
+        as: 'transactions',
+      },
+    },
+
+    {
+      $addFields: {
+        openingQty: {
+          $ifNull: [{ $sum: '$financialYearStocks.stock' }, 0],
+        },
+
+        // ── IN types: direction IN বা undefined ──
+        purchaseQty: sumIn({
+          $eq: ['$$tx.transactionType', 'PURCHASE'],
+        }),
+        saleReturnQty: sumIn({
+          $eq: ['$$tx.transactionType', 'SALE_RETURN'],
+        }),
+
+        // ── OUT types: direction OUT ──
+        saleQty: sumOut({
+          $eq: ['$$tx.transactionType', 'SALE'],
+        }),
+        purchaseReturnQty: sumOut({
+          $eq: ['$$tx.transactionType', 'PURCHASE_RETURN'],
+        }),
+        purchaseReverseQty: sumOut({
+          $eq: ['$$tx.transactionType', 'PURCHASE_REVERSE'],
+        }),
+        stockReduceQty: sumOut({
+          $eq: ['$$tx.transactionType', 'STOCK_REDUCE'],
+        }),
+        returnToVendorQty: sumOut({
+          $eq: ['$$tx.transactionType', 'RETURN_TO_VENDOR'],
+        }),
+        transferQty: sumOut({
+          $eq: ['$$tx.transactionType', 'TRANSFER'],
+        }),
+        damageQty: sumOut({
+          $eq: ['$$tx.transactionType', 'DAMAGE'],
+        }),
+
+        // ── ADJUSTMENT: direction দিয়ে IN/OUT আলাদা ──
+        adjustmentInQty: sumIn(adjustmentCondition),
+        adjustmentOutQty: sumOut(adjustmentCondition),
+
+        avgStockValue: {
+          $ifNull: ['$lastPurchasePrice', '$costPrice'],
+        },
+      },
+    },
+
+    {
+      $addFields: {
+        adjustmentQty: {
+          $subtract: ['$adjustmentInQty', '$adjustmentOutQty'],
+        },
+
+        // Formula (note অনুযায়ী):
+        // a = openingQty + purchaseQty + saleReturnQty + adjustmentIN
+        // b = saleQty + purchaseReturnQty + purchaseReverseQty
+        //     + stockReduceQty + returnToVendorQty + transferQty
+        //     + damageQty + adjustmentOUT
+        // closingStock = a - b
+        closingStock: {
+          $subtract: [
+            {
+              $add: [
+                '$openingQty',
+                '$purchaseQty',
+                '$saleReturnQty',
+                '$adjustmentInQty',
+              ],
+            },
+            {
+              $add: [
+                '$saleQty',
+                '$purchaseReturnQty',
+                '$purchaseReverseQty',
+                '$stockReduceQty',
+                '$returnToVendorQty',
+                '$transferQty',
+                '$damageQty',
+                '$adjustmentOutQty',
+              ],
+            },
+          ],
+        },
+      },
+    },
+
+    ...(minStock || maxStock
+      ? [
+          {
+            $match: {
+              closingStock: {
+                ...(minStock ? { $gte: Number(minStock) } : {}),
+                ...(maxStock ? { $lte: Number(maxStock) } : {}),
+              },
+            },
+          },
+        ]
+      : []),
+
+    {
+      $project: {
+        _id: 0,
+        itemDescription: '$name',
+        openingQty: 1,
+        // IN quantities (positive)
+        purchaseQty: 1,
+        saleReturnQty: 1,
+        adjustmentInQty: 1,
+        // OUT quantities (positive)
+        saleQty: 1,
+        purchaseReturnQty: 1,
+        purchaseReverseQty: 1,
+        stockReduceQty: 1,
+        returnToVendorQty: 1,
+        transferQty: 1,
+        damageQty: 1,
+        adjustmentOutQty: 1,
+        // Net adjustment
+        adjustmentQty: 1,
+        avgStockValue: 1,
+        closingStock: 1,
+        currentStockValue: {
+          $round: [
+            { $multiply: ['$closingStock', '$avgStockValue'] },
+            2,
+          ],
+        },
+      },
+    },
+
+    { $sort: { itemDescription: 1 } },
+  ];
+
+  const data = await Product.aggregate(pipeline);
+
+  const summary = {
+    totalItems: data.length,
+
+    totalCurrentStockValue: data.reduce(
+      (sum, item) => sum + item.currentStockValue,
+      0
+    ),
+
+    totalClosingStock: data.reduce(
+      (sum, item) => sum + item.closingStock,
+      0
+    ),
+
+    totalIn: data.reduce(
+      (sum, item) =>
+        sum +
+        item.purchaseQty +
+        item.saleReturnQty +
+        item.adjustmentInQty,
+      0
+    ),
+
+    totalOut: data.reduce(
+      (sum, item) =>
+        sum +
+        item.saleQty +
+        item.purchaseReturnQty +
+        item.purchaseReverseQty +
+        item.stockReduceQty +
+        item.returnToVendorQty +
+        item.transferQty +
+        item.damageQty +
+        item.adjustmentOutQty,
+      0
+    ),
+  };
+
+  return { summary, data };
+};
 
 export const addPaymentToInvoice = async (invoiceId, paymentData) => {
   const session = await mongoose.startSession();

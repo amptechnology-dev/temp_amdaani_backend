@@ -58,7 +58,7 @@ export const createProduct = async (
         openingStock
       ) || 0;
 
-      productData.costPrice = value && openingStock ? Number(value) / Number(openingStock) : 0;
+      // productData.costPrice = value && openingStock ? Number(value) / Number(openingStock) : 0;
 
     // Create product
     const product =

@@ -485,7 +485,7 @@ export const adjustProductStock = async (
 
       date,
 
-      // যা পাঠাবে তাই save হবে
+      
       transactionType:
         transactionType ||
         'MANUAL',

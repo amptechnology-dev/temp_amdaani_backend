@@ -495,8 +495,15 @@ export const cancelAfterPurchaseStock = async (purchaseId) => {
   }
 };
 
-export const queryPurchasesReport = async (filters = {}) => {
-  const { store, startDate, endDate, status } = filters;
+export const queryPurchasesReport = async (
+  filters = {}
+) => {
+  const {
+    store,
+    startDate,
+    endDate,
+    status,
+  } = filters;
 
   const matchStage = {
     status: {
@@ -504,131 +511,256 @@ export const queryPurchasesReport = async (filters = {}) => {
     },
   };
 
-  // ✅ store filter
+  // ==========================
+  // STORE FILTER
+  // ==========================
   if (store) {
-    matchStage.store = new mongoose.Types.ObjectId(String(store));
+    matchStage.store =
+      new mongoose.Types.ObjectId(
+        String(store)
+      );
   }
 
-  // ✅ custom date filter
-  if (startDate && endDate) {
+  // ==========================
+  // DATE FILTER
+  // ==========================
+  if (
+    startDate &&
+    endDate
+  ) {
     matchStage.date = {
-      $gte: new Date(startDate),
-      $lte: new Date(endDate),
+      $gte: new Date(
+        startDate
+      ),
+      $lte: new Date(
+        endDate
+      ),
     };
   }
 
-  // ✅ optional status
+  // ==========================
+  // STATUS FILTER
+  // ==========================
   if (status) {
-    matchStage.status = status;
+    matchStage.status =
+      status;
   }
 
-  const result = await Purchase.aggregate([
-    {
-      $match: matchStage,
-    },
+  const result =
+    await Purchase.aggregate([
+      {
+        $match:
+          matchStage,
+      },
 
-    // ✅ store details
-    {
-      $lookup: {
-        from: 'stores',
-        localField: 'store',
-        foreignField: '_id',
-        as: 'store',
-        pipeline: [
-          {
-            $project: {
-              name: 1,
-              type: 1,
-              gstNumber: 1,
-              contactNo: 1,
-              email: 1,
-              address: 1,
-              logoUrl: 1,
-              signatureUrl: 1,
-              bankDetails: 1,
-              settings: 1,
+      // ==========================
+      // STORE DETAILS
+      // ==========================
+      {
+        $lookup: {
+          from: 'stores',
+          localField:
+            'store',
+          foreignField:
+            '_id',
+          as: 'store',
+          pipeline: [
+            {
+              $project: {
+                name: 1,
+                type: 1,
+                gstNumber: 1,
+                contactNo: 1,
+                email: 1,
+                address: 1,
+                logoUrl: 1,
+                signatureUrl: 1,
+                bankDetails: 1,
+                settings: 1,
+              },
             },
-          },
-        ],
+          ],
+        },
       },
-    },
 
-    {
-      $unwind: {
-        path: '$store',
-        preserveNullAndEmptyArrays: true,
+      {
+        $unwind: {
+          path: '$store',
+          preserveNullAndEmptyArrays:
+            true,
+        },
       },
-    },
 
-    // ✅ get all products
-    {
-      $lookup: {
-        from: 'products',
-        localField: 'items.product',
-        foreignField: '_id',
-        as: 'products',
+      // ==========================
+      // PRODUCT DETAILS
+      // ==========================
+      {
+        $lookup: {
+          from:
+            'products',
+          localField:
+            'items.product',
+          foreignField:
+            '_id',
+          as: 'products',
+        },
       },
-    },
 
-    // ✅ merge item + product details
-    {
-      $addFields: {
-        items: {
-          $map: {
-            input: '$items',
-            as: 'item',
-            in: {
-              _id: '$$item._id',
-              product: '$$item.product',
-              name: '$$item.name',
-              hsn: '$$item.hsn',
-              unit: '$$item.unit',
-              quantity: '$$item.quantity',
-              rate: '$$item.rate',
-              gstRate: '$$item.gstRate',
-              isTaxInclusive: '$$item.isTaxInclusive',
-              mrp: '$$item.mrp',
-              discount: '$$item.discount',
-              total: '$$item.total',
-              sellingPrice: '$$item.sellingPrice',
-              sellingDiscount: '$$item.sellingDiscount',
+      // ==========================
+      // MERGE ITEM + PRODUCT
+      // ==========================
+      {
+        $addFields: {
+          items: {
+            $map: {
+              input:
+                '$items',
+              as: 'item',
+              in: {
+                _id:
+                  '$$item._id',
 
-              // ✅ product info
-              productDetails: {
-                $arrayElemAt: [
+                product:
+                  '$$item.product',
+
+                name:
+                  '$$item.name',
+
+                hsn:
+                  '$$item.hsn',
+
+                unit:
+                  '$$item.unit',
+
+                quantity:
                   {
-                    $filter: {
-                      input: '$products',
-                      as: 'product',
-                      cond: {
-                        $eq: ['$$product._id', '$$item.product'],
-                      },
-                    },
+                    $ifNull:
+                      [
+                        '$$item.quantity',
+                        0,
+                      ],
                   },
-                  0,
-                ],
+
+                rate:
+                  {
+                    $ifNull:
+                      [
+                        '$$item.rate',
+                        0,
+                      ],
+                  },
+
+                gstRate:
+                  {
+                    $ifNull:
+                      [
+                        '$$item.gstRate',
+                        0,
+                      ],
+                  },
+
+                isTaxInclusive:
+                  '$$item.isTaxInclusive',
+
+                mrp:
+                  {
+                    $ifNull:
+                      [
+                        '$$item.mrp',
+                        0,
+                      ],
+                  },
+
+                // ✅ FIXED DISCOUNT
+                discount:
+                  {
+                    $ifNull:
+                      [
+                        '$$item.discount',
+                        0,
+                      ],
+                  },
+
+                total:
+                  {
+                    $ifNull:
+                      [
+                        '$$item.total',
+                        0,
+                      ],
+                  },
+
+                sellingPrice:
+                  {
+                    $ifNull:
+                      [
+                        '$$item.sellingPrice',
+                        0,
+                      ],
+                  },
+
+                sellingDiscount:
+                  {
+                    $ifNull:
+                      [
+                        '$$item.sellingDiscount',
+                        0,
+                      ],
+                  },
+
+                // ==========================
+                // PRODUCT INFO
+                // ==========================
+                productDetails:
+                  {
+                    $arrayElemAt:
+                      [
+                        {
+                          $filter:
+                            {
+                              input:
+                                '$products',
+                              as:
+                                'product',
+                              cond:
+                                {
+                                  $eq:
+                                    [
+                                      '$$product._id',
+                                      '$$item.product',
+                                    ],
+                                },
+                            },
+                        },
+                        0,
+                      ],
+                  },
               },
             },
           },
         },
       },
-    },
 
-    // remove temp products
-    {
-      $project: {
-        products: 0,
+      // ==========================
+      // REMOVE TEMP FIELD
+      // ==========================
+      {
+        $project: {
+          products: 0,
+        },
       },
-    },
 
-    // latest first
-    {
-      $sort: {
-        date: -1,
-        createdAt: -1,
+      // ==========================
+      // SORT
+      // ==========================
+      {
+        $sort: {
+          date: -1,
+          createdAt:
+            -1,
+        },
       },
-    },
-  ]);
+    ]);
 
   return result;
 };

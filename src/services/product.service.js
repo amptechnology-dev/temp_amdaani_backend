@@ -347,194 +347,182 @@ export const reverseStockAfterPurchaseDelete = async (purchase, session = null) 
   }
 };
 
-export const adjustProductStock =
-  async (
-    data,
-    session = null
-  ) => {
-    const {
-      productId,
-      date = new Date(),
-      transactionType,
+export const adjustProductStock = async (
+  data,
+  session = null
+) => {
+  const {
+    productId,
+    date = new Date(),
+    transactionType,
 
-      quantity,
-      rate = 0,
+    quantity,
+    rate = 0,
 
-      batchId = null,
-      purchaseId = null,
-      saleId = null,
+    batchId = null,
+    purchaseId = null,
+    saleId = null,
 
-      purchasePrice,
-      salePrice,
-      sellingDiscount,
-      purchaseDiscount,
+    purchasePrice,
+    salePrice,
+    sellingDiscount,
+    purchaseDiscount,
 
-      remarks = '',
+    remarks = '',
 
-      hsn,
-      isTaxInclusive = false,
-      isPurchaseTaxInclusive = false,
-      gstRate,
-    } = data;
+    hsn,
+    isTaxInclusive = false,
+    isPurchaseTaxInclusive = false,
+    gstRate,
+  } = data;
 
-    // ==========================
-    // VALIDATE TRANSACTION TYPE
-    // ==========================
-    const validTransactionTypes =
-      Object.values(
-        StockTransactionType
-      );
+  // ==========================
+  // FIND PRODUCT
+  // ==========================
+  const product =
+    await Product.findById(
+      productId
+    ).session(session);
 
-    if (
-      !transactionType ||
-      !validTransactionTypes.includes(
-        transactionType
-      )
-    ) {
-      throw new Error(
-        `Invalid transaction type. Allowed values: ${validTransactionTypes.join(
-          ', '
-        )}`
-      );
-    }
+  if (!product) {
+    throw new Error(
+      'Product not found'
+    );
+  }
 
-    // ==========================
-    // FIND PRODUCT
-    // ==========================
-    const product =
-      await Product.findById(
-        productId
-      ).session(session);
+  // ==========================
+  // UPDATE CURRENT STOCK
+  // ==========================
+  product.currentStock +=
+    quantity;
 
-    if (!product) {
-      throw new Error(
-        'Product not found'
-      );
-    }
+  // ==========================
+  // UPDATE PRODUCT INFO
+  // ==========================
+  if (
+    purchasePrice !==
+    undefined
+  ) {
+    product.costPrice =
+      purchasePrice;
+  }
 
-    // ==========================
-    // UPDATE STOCK
-    // ==========================
-    const newStock =
-      product.currentStock +
-      quantity;
+  if (
+    salePrice !==
+    undefined
+  ) {
+    product.sellingPrice =
+      salePrice;
+  }
 
-    product.currentStock =
-      newStock;
+  if (
+    sellingDiscount !==
+    undefined
+  ) {
+    product.discountPrice =
+      sellingDiscount;
+  }
 
-    // ==========================
-    // UPDATE PRODUCT INFO
-    // ==========================
-    if (
-      purchasePrice !==
-      undefined
-    ) {
-      product.costPrice =
-        purchasePrice;
-    }
+  if (
+    purchaseDiscount !==
+    undefined
+  ) {
+    product.purchaseDiscount =
+      purchaseDiscount;
+  }
 
-    if (
-      salePrice !==
-      undefined
-    ) {
-      product.sellingPrice =
-        salePrice;
-    }
+  if (hsn) {
+    product.hsn = hsn;
+  }
 
-    if (
-      sellingDiscount !==
-      undefined
-    ) {
-      product.discountPrice =
-        sellingDiscount;
-    }
+  if (
+    isTaxInclusive !==
+    undefined
+  ) {
+    product.isTaxInclusive =
+      isTaxInclusive;
+  }
 
-    if (
-      purchaseDiscount !==
-      undefined
-    ) {
-      product.purchaseDiscount =
-        purchaseDiscount;
-    }
+  if (
+    isPurchaseTaxInclusive !==
+    undefined
+  ) {
+    product.isPurchaseTaxInclusive =
+      isPurchaseTaxInclusive;
+  }
 
-    if (hsn) {
-      product.hsn = hsn;
-    }
+  if (
+    gstRate !==
+    undefined
+  ) {
+    product.gstRate =
+      gstRate;
 
-    if (
-      isTaxInclusive !==
-      undefined
-    ) {
-      product.isTaxInclusive =
-        isTaxInclusive;
-    }
+    product.purchaseGstRate =
+      gstRate;
+  }
 
-    if (
-      isPurchaseTaxInclusive !==
-      undefined
-    ) {
-      product.isPurchaseTaxInclusive =
-        isPurchaseTaxInclusive;
-    }
+  // ==========================
+  // SAVE PRODUCT
+  // ==========================
+  await product.save({
+    session,
+  });
 
-    if (
-      gstRate !==
-      undefined
-    ) {
-      product.gstRate =
-        gstRate;
+  // ==========================
+  // CREATE STOCK TRANSACTION
+  // ==========================
+  const stockTransaction =
+    new StockTransaction({
+      product:
+        productId,
 
-      product.purchaseGstRate =
-        gstRate;
-    }
+      store:
+        product.store,
 
-    await product.save({
-      session,
+      batch:
+        batchId,
+
+      date,
+
+      // যা পাঠাবে তাই save হবে
+      transactionType:
+        transactionType ||
+        'MANUAL',
+
+      quantity:
+        Math.abs(
+          quantity
+        ),
+
+      direction:
+        quantity >= 0
+          ? 'IN'
+          : 'OUT',
+
+      rate,
+
+      purchaseId,
+      saleId,
+
+      totalAmount:
+        rate *
+        Math.abs(
+          quantity
+        ),
+
+      remarks,
     });
 
-    // ==========================
-    // CREATE STOCK TRANSACTION
-    // ==========================
-    const stockTransaction =
-      new StockTransaction({
-        product: productId,
-        store: product.store,
-        batch: batchId,
-
-        date,
-        transactionType,
-
-        quantity:
-          Math.abs(quantity),
-
-        direction:
-          quantity >= 0
-            ? 'IN'
-            : 'OUT',
-
-        rate,
-
-        purchaseId,
-        saleId,
-
-        totalAmount:
-          rate *
-          Math.abs(
-            quantity
-          ),
-
-        remarks,
-      });
-
-    // ==========================
-    // SAVE TRANSACTION
-    // ==========================
-    return await stockTransaction.save(
-      {
-        session,
-      }
-    );
-  };
+  // ==========================
+  // SAVE TRANSACTION
+  // ==========================
+  return await stockTransaction.save(
+    {
+      session,
+    }
+  );
+};
 
 export const getStockTransactionsByProduct = async (productId, filters = {}, options = {}) => {
   const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;

@@ -121,16 +121,57 @@ export const adjustStockSchema = {
   body: yup.object().shape({
     productId: yup
       .string()
-      .test('isObjectId', 'Invalid product ID', (v) => isValidObjectId(v))
-      .required('Product ID is required'),
-    date: yup.date().required('Date is required'),
+      .test(
+        'isObjectId',
+        'Invalid product ID',
+        (v) =>
+          isValidObjectId(v)
+      )
+      .required(
+        'Product ID is required'
+      ),
+
+    date: yup
+      .date()
+      .required(
+        'Date is required'
+      ),
+
+    transactionType: yup
+      .string()
+      .trim()
+      .required(
+        'Transaction type is required'
+      ),
+
     quantity: yup
       .number()
-      .typeError('Quantity must be a number')
-      .notOneOf([0], 'Quantity cannot be zero')
-      .required('Quantity is required'),
-    rate: yup.number().typeError('Rate must be a number').required('Rate is required'),
-    batchId: yup.string(),
-    remarks: yup.string().trim().max(500),
+      .typeError(
+        'Quantity must be a number'
+      )
+      .notOneOf(
+        [0],
+        'Quantity cannot be zero'
+      )
+      .required(
+        'Quantity is required'
+      ),
+
+    rate: yup
+      .number()
+      .typeError(
+        'Rate must be a number'
+      )
+      .required(
+        'Rate is required'
+      ),
+
+    batchId:
+      yup.string(),
+
+    remarks: yup
+      .string()
+      .trim()
+      .max(500),
   }),
 };

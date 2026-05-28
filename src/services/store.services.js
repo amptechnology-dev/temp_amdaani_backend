@@ -1,4 +1,6 @@
+import mongoose from 'mongoose';
 import { Store } from '../models/store.model.js';
+import {Product} from '../models/product.model.js';
 import { ApiError } from '../utils/responseHandler.js';
 import { compressAndUpload, deleteFileFromR2 } from '../services/image.service.js';
 import config from '../config/config.js';
@@ -157,3 +159,47 @@ export const getAllStoresWithSubscription = async () => {
 
   return result;
 };
+
+export const getStoreFinancialYears =
+  async (storeId) => {
+    const financialYears =
+      await Product.aggregate([
+        {
+          $match: {
+            store:
+              new mongoose.Types.ObjectId(
+                storeId
+              ),
+          },
+        },
+
+        {
+          $unwind:
+            '$financialYearStocks',
+        },
+
+        {
+          $group: {
+            _id:
+              '$financialYearStocks.financialYear',
+          },
+        },
+
+        {
+          $project: {
+            _id: 0,
+            financialYear:
+              '$_id',
+          },
+        },
+
+        {
+          $sort: {
+            financialYear:
+              -1,
+          },
+        },
+      ]);
+
+    return financialYears;
+  };

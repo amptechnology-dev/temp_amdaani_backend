@@ -485,7 +485,7 @@ export const adjustProductStock = async (
 
       date,
 
-      
+
       transactionType:
         transactionType ||
         'MANUAL',
@@ -784,3 +784,40 @@ export const carryForwardStockToNextFinancialYear = async (storeId) => {
     nextFY,
   };
 };
+
+export const getProductSuggestions =
+  async (
+    storeId,
+    search = ""
+  ) => {
+    if (
+      !search ||
+      !search.trim()
+    ) {
+      return [];
+    }
+
+    return Product.find({
+      store:
+        new mongoose.Types.ObjectId(
+          storeId
+        ),
+
+      status:
+        "active",
+
+      name: {
+        $regex:
+          search.trim(),
+        $options: "i",
+      },
+    })
+      .select(
+        "_id name sku currentStock sellingPrice"
+      )
+      .sort({
+        name: 1,
+      })
+      .limit(10)
+      .lean();
+  };

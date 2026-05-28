@@ -44,3 +44,22 @@ export const deleteStoreUserById = expressAsyncHandler(async (req, res) => {
   }
   return new ApiResponse(200, storeUser, 'Store user deleted successfully!').send(res);
 });
+
+export const getStoreFinancialYears =
+  expressAsyncHandler(
+    async (
+      req,
+      res
+    ) => {
+      const data =
+        await storeService.getStoreFinancialYears(
+          req.user.store
+        );
+
+      return new ApiResponse(
+        200,
+        data,
+        'Financial years fetched successfully!'
+      ).send(res);
+    }
+  );

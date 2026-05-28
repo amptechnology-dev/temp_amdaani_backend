@@ -26,4 +26,6 @@ router.route('/users/:id').delete(authorizeRoles(roles.OWNER), storeController.d
 
 router.route('/all').get(authorizeRoles('super-admin'), storeController.getAllStoresWithSubscription);
 
+router.route('/financial-years').get(storeController.getStoreFinancialYears);
+
 export default router;

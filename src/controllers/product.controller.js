@@ -108,3 +108,27 @@ export const carryForwardStock = expressAsyncHandler(async (
   ).send(res);
 }
 );
+
+export const getProductSuggestions =
+  expressAsyncHandler(
+    async (
+      req,
+      res
+    ) => {
+      const {
+        search = "",
+      } = req.query;
+
+      const data =
+        await productService.getProductSuggestions(
+          req.user.store,
+          search
+        );
+
+      return new ApiResponse(
+        200,
+        data,
+        "Product suggestions fetched successfully!"
+      ).send(res);
+    }
+  );

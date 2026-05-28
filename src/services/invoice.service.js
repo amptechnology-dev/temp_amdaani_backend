@@ -1542,10 +1542,10 @@ export const getStockBalance = async (
     startDate: fyStartDate,
     endDate: fyEndDate,
   } = financialYear
-    ? getFinancialYearDateRange(
+      ? getFinancialYearDateRange(
         financialYear
       )
-    : {
+      : {
         startDate: null,
         endDate: null,
       };
@@ -1560,7 +1560,7 @@ export const getStockBalance = async (
     },
   };
 
-  // ✅ SEARCH BY PRODUCT NAME
+  // SEARCH PRODUCT NAME
   if (
     itemName &&
     itemName.trim()
@@ -1580,41 +1580,70 @@ export const getStockBalance = async (
       },
 
       // ===================
+      // OPENING STOCK
+      // ===================
+      {
+        $addFields: {
+          openingStock: {
+            $ifNull: [
+              {
+                $getField: {
+                  field: "stock",
+                  input: {
+                    $arrayElemAt: [
+                      {
+                        $filter: {
+                          input:
+                            "$financialYearStocks",
+                          as: "fy",
+                          cond: {
+                            $eq: [
+                              "$$fy.financialYear",
+                              financialYear,
+                            ],
+                          },
+                        },
+                      },
+                      0,
+                    ],
+                  },
+                },
+              },
+              0,
+            ],
+          },
+        },
+      },
+
+      // ===================
       // PURCHASE TABLE
       // ===================
       {
         $lookup: {
-          from:
-            "purchases",
-
+          from: "purchases",
           let: {
-            productId:
-              "$_id",
+            productId: "$_id",
           },
-
           pipeline: [
             {
               $match: {
                 store:
                   storeId,
-
-                status:
-                  {
-                    $ne:
-                      "cancelled",
-                  },
+                status: {
+                  $ne:
+                    "cancelled",
+                },
 
                 ...(fyStartDate &&
-                fyEndDate
+                  fyEndDate
                   ? {
-                      date:
-                        {
-                          $gte:
-                            fyStartDate,
-                          $lte:
-                            fyEndDate,
-                        },
-                    }
+                    date: {
+                      $gte:
+                        fyStartDate,
+                      $lte:
+                        fyEndDate,
+                    },
+                  }
                   : {}),
               },
             },
@@ -1626,14 +1655,12 @@ export const getStockBalance = async (
 
             {
               $match: {
-                $expr:
-                  {
-                    $eq:
-                      [
-                        "$items.product",
-                        "$$productId",
-                      ],
-                  },
+                $expr: {
+                  $eq: [
+                    "$items.product",
+                    "$$productId",
+                  ],
+                },
               },
             },
 
@@ -1641,33 +1668,30 @@ export const getStockBalance = async (
               $group: {
                 _id: null,
 
-                totalQty:
-                  {
-                    $sum:
-                      "$items.quantity",
-                  },
+                totalQty: {
+                  $sum:
+                    "$items.quantity",
+                },
 
                 totalValue:
-                  {
-                    $sum:
-                      {
-                        $multiply:
-                          [
-                            "$items.quantity",
-                            "$items.rate",
-                          ],
-                      },
+                {
+                  $sum: {
+                    $multiply:
+                      [
+                        "$items.quantity",
+                        "$items.rate",
+                      ],
                   },
+                },
 
                 lastPurchaseRate:
-                  {
-                    $last:
-                      "$items.rate",
-                  },
+                {
+                  $last:
+                    "$items.rate",
+                },
               },
             },
           ],
-
           as:
             "purchaseData",
         },
@@ -1678,37 +1702,32 @@ export const getStockBalance = async (
       // ===================
       {
         $lookup: {
-          from:
-            "invoices",
-
+          from: "invoices",
           let: {
             productId:
               "$_id",
           },
-
           pipeline: [
             {
               $match: {
                 store:
                   storeId,
-
-                status:
-                  {
-                    $ne:
-                      "cancelled",
-                  },
+                status: {
+                  $ne:
+                    "cancelled",
+                },
 
                 ...(fyStartDate &&
-                fyEndDate
+                  fyEndDate
                   ? {
-                      invoiceDate:
-                        {
-                          $gte:
-                            fyStartDate,
-                          $lte:
-                            fyEndDate,
-                        },
-                    }
+                    invoiceDate:
+                    {
+                      $gte:
+                        fyStartDate,
+                      $lte:
+                        fyEndDate,
+                    },
+                  }
                   : {}),
               },
             },
@@ -1720,21 +1739,18 @@ export const getStockBalance = async (
 
             {
               $match: {
-                $expr:
-                  {
-                    $eq:
-                      [
-                        "$items.product",
-                        "$$productId",
-                      ],
-                  },
+                $expr: {
+                  $eq: [
+                    "$items.product",
+                    "$$productId",
+                  ],
+                },
               },
             },
 
             {
               $group: {
                 _id: null,
-
                 qty: {
                   $sum:
                     "$items.quantity",
@@ -1742,7 +1758,6 @@ export const getStockBalance = async (
               },
             },
           ],
-
           as:
             "salesData",
         },
@@ -1764,47 +1779,40 @@ export const getStockBalance = async (
           pipeline: [
             {
               $match: {
-                $expr:
-                  {
-                    $and:
-                      [
-                        {
-                          $eq:
-                            [
-                              "$product",
-                              "$$productId",
-                            ],
-                        },
-
-                        {
-                          $eq:
-                            [
-                              "$store",
-                              storeId,
-                            ],
-                        },
-
-                        ...(fyStartDate &&
-                        fyEndDate
-                          ? [
-                              {
-                                $gte:
-                                  [
-                                    "$date",
-                                    fyStartDate,
-                                  ],
-                              },
-                              {
-                                $lte:
-                                  [
-                                    "$date",
-                                    fyEndDate,
-                                  ],
-                              },
-                            ]
-                          : []),
+                $expr: {
+                  $and: [
+                    {
+                      $eq: [
+                        "$product",
+                        "$$productId",
                       ],
-                  },
+                    },
+                    {
+                      $eq: [
+                        "$store",
+                        storeId,
+                      ],
+                    },
+
+                    ...(fyStartDate &&
+                      fyEndDate
+                      ? [
+                        {
+                          $gte: [
+                            "$date",
+                            fyStartDate,
+                          ],
+                        },
+                        {
+                          $lte: [
+                            "$date",
+                            fyEndDate,
+                          ],
+                        },
+                      ]
+                      : []),
+                  ],
+                },
               },
             },
           ],
@@ -1911,6 +1919,7 @@ export const getStockBalance = async (
             },
           },
 
+          // ✅ EXPIRED LIKE DAMAGE
           expiredQty: {
             $sum: {
               $map: {
@@ -1933,6 +1942,75 @@ export const getStockBalance = async (
             },
           },
 
+          adjustmentQty: {
+            $subtract: [
+              {
+                $sum: {
+                  $map: {
+                    input: "$transactions",
+                    as: "tx",
+                    in: {
+                      $cond: [
+                        {
+                          $in: [
+                            "$$tx.transactionType",
+                            [
+                              "NEW_PURCHASE",
+                              "STOCK_CORRECTION",
+                              "FREE_STOCK",
+                            ],
+                          ],
+                        },
+                        {
+                          $cond: [
+                            {
+                              $eq: [
+                                "$$tx.direction",
+                                "IN",
+                              ],
+                            },
+                            "$$tx.quantity",
+                            {
+                              $multiply: [
+                                "$$tx.quantity",
+                                -1,
+                              ],
+                            },
+                          ],
+                        },
+                        0,
+                      ],
+                    },
+                  },
+                },
+              },
+
+              {
+                $sum: {
+                  $map: {
+                    input: "$transactions",
+                    as: "tx",
+                    in: {
+                      $cond: [
+                        {
+                          $in: [
+                            "$$tx.transactionType",
+                            [
+                              "INTERNAL_USE",
+                              "STOCK_REDUCE",
+                            ],
+                          ],
+                        },
+                        "$$tx.quantity",
+                        0,
+                      ],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+
           closingStock:
             "$currentStock",
 
@@ -1942,87 +2020,87 @@ export const getStockBalance = async (
       },
 
       // ===================
-      // TRANSACTION FILTER
+      // FILTERING
       // ===================
       ...(transactionType
         ? [
-            {
-              $match:
-                (() => {
-                  switch (
-                    transactionType
-                  ) {
-                    case "DAMAGE":
-                      return {
-                        damageQty:
-                          {
-                            $gt: 0,
-                          },
-                      };
+          {
+            $match:
+              (() => {
+                switch (
+                transactionType
+                ) {
+                  case "DAMAGE":
+                    return {
+                      damageQty:
+                      {
+                        $gt: 0,
+                      },
+                    };
 
-                    case "EXPIRED":
-                      return {
-                        expiredQty:
-                          {
-                            $gt: 0,
-                          },
-                      };
+                  case "EXPIRED":
+                    return {
+                      expiredQty:
+                      {
+                        $gt: 0,
+                      },
+                    };
 
-                    case "PURCHASE":
-                      return {
-                        purchaseQty:
-                          {
-                            $gt: 0,
-                          },
-                      };
+                  case "PURCHASE":
+                    return {
+                      purchaseQty:
+                      {
+                        $gt: 0,
+                      },
+                    };
 
-                    case "SALE":
-                      return {
-                        saleQty:
-                          {
-                            $gt: 0,
-                          },
-                      };
+                  case "SALE":
+                    return {
+                      saleQty:
+                      {
+                        $gt: 0,
+                      },
+                    };
 
-                    default:
-                      return {};
-                  }
-                })(),
-            },
-          ]
+                  default:
+                    return {};
+                }
+              })(),
+          },
+        ]
         : []),
 
       // ===================
       // STOCK FILTER
       // ===================
       ...(minStock ||
-      maxStock
+        maxStock
         ? [
-            {
-              $match: {
-                closingStock:
-                  {
-                    ...(minStock
-                      ? {
-                          $gte:
-                            Number(
-                              minStock
-                            ),
-                        }
-                      : {}),
+          {
+            $match: {
+              closingStock:
+              {
+                ...(minStock
+                  ? {
+                    $gte:
+                      Number(
+                        minStock
+                      ),
+                  }
+                  : {}),
 
-                    ...(maxStock
-                      ? {
-                          $lte:
-                            Number(
-                              maxStock
-                            ),
-                        }
-                      : {}),
-                  },
+                ...(maxStock
+                  ? {
+                    $lte:
+                      Number(
+                        maxStock
+                      ),
+                  }
+                  : {}),
               },
             },
-          ]
+          },
+        ]
         : []),
 
       // ===================
@@ -2035,24 +2113,43 @@ export const getStockBalance = async (
           itemDescription:
             "$name",
 
-          purchaseQty: 1,
-          saleQty: 1,
-          returnInQty: 1,
-          returnOutQty: 1,
-          damageQty: 1,
-          expiredQty: 1,
+          openingStock:
+            1,
 
-          closingStock: 1,
-          avgRate: 1,
+          purchaseQty:
+            1,
+
+          saleQty:
+            1,
+
+          returnInQty:
+            1,
+
+          returnOutQty:
+            1,
+
+          damageQty:
+            1,
+
+          // ✅ SHOW EXPIRED
+          expiredQty:
+            1,
+
+          adjustmentQty: 1,
+
+          closingStock:
+            1,
+
+          avgRate:
+            1,
 
           currentStockValue:
-            {
-              $multiply:
-                [
-                  "$closingStock",
-                  "$avgRate",
-                ],
-            },
+          {
+            $multiply: [
+              "$closingStock",
+              "$avgRate",
+            ],
+          },
         },
       },
 

@@ -168,7 +168,7 @@ export const getExpenseLedgerReport = async (
   const purchaseMatch = {
     store: storeId,
     status: {
-      $ne: 'cancelled',
+      $ne: "cancelled",
     },
   };
 
@@ -179,10 +179,14 @@ export const getExpenseLedgerReport = async (
   // ==========================
   // DATE FILTER
   // ==========================
-  if (startDate && endDate) {
-    const start = new Date(
-      startDate
-    );
+  if (
+    startDate &&
+    endDate
+  ) {
+    const start =
+      new Date(
+        startDate
+      );
 
     start.setHours(
       0,
@@ -191,9 +195,8 @@ export const getExpenseLedgerReport = async (
       0
     );
 
-    const end = new Date(
-      endDate
-    );
+    const end =
+      new Date(endDate);
 
     end.setHours(
       23,
@@ -202,15 +205,17 @@ export const getExpenseLedgerReport = async (
       999
     );
 
-    purchaseMatch.date = {
-      $gte: start,
-      $lte: end,
-    };
+    purchaseMatch.date =
+      {
+        $gte: start,
+        $lte: end,
+      };
 
-    expenseMatch.date = {
-      $gte: start,
-      $lte: end,
-    };
+    expenseMatch.date =
+      {
+        $gte: start,
+        $lte: end,
+      };
   }
 
   // ==========================
@@ -225,18 +230,20 @@ export const getExpenseLedgerReport = async (
 
       {
         $lookup: {
-          from: 'vendors',
+          from:
+            "vendors",
           localField:
-            'vendor',
+            "vendor",
           foreignField:
-            '_id',
-          as: 'vendor',
+            "_id",
+          as: "vendor",
         },
       },
 
       {
         $unwind: {
-          path: '$vendor',
+          path:
+            "$vendor",
           preserveNullAndEmptyArrays:
             true,
         },
@@ -244,76 +251,72 @@ export const getExpenseLedgerReport = async (
 
       {
         $addFields: {
-          totalQuantity: {
-            $sum:
-              '$items.quantity',
-          },
-
-          totalRate: {
-            $sum:
-              '$items.rate',
-          },
+          totalQuantity:
+            {
+              $sum:
+                "$items.quantity",
+            },
 
           taxableValue:
             {
               $sum: {
                 $map: {
                   input:
-                    '$items',
-                  as: 'item',
+                    "$items",
+                  as: "item",
                   in: {
                     $multiply:
                       [
-                        '$$item.quantity',
-                        '$$item.rate',
+                        "$$item.quantity",
+                        "$$item.rate",
                       ],
                   },
                 },
               },
             },
 
-          totalGST: {
-            $sum: {
-              $map: {
-                input:
-                  '$items',
-                as: 'item',
-                in: {
-                  $multiply:
-                    [
-                      {
-                        $multiply:
-                          [
-                            '$$item.quantity',
-                            '$$item.rate',
-                          ],
-                      },
-                      {
-                        $divide:
-                          [
-                            '$$item.gstRate',
-                            100,
-                          ],
-                      },
-                    ],
+          totalGST:
+            {
+              $sum: {
+                $map: {
+                  input:
+                    "$items",
+                  as: "item",
+                  in: {
+                    $multiply:
+                      [
+                        {
+                          $multiply:
+                            [
+                              "$$item.quantity",
+                              "$$item.rate",
+                            ],
+                        },
+                        {
+                          $divide:
+                            [
+                              "$$item.gstRate",
+                              100,
+                            ],
+                        },
+                      ],
+                  },
                 },
               },
             },
-          },
         },
       },
 
       {
         $project: {
           _id: 1,
-
           date: 1,
 
           invoiceNo:
-            '$invoiceNumber',
+            "$invoiceNumber",
 
           purchaseVendor:
-            '$vendor.name',
+            "$vendor.name",
 
           totalQuantity:
             1,
@@ -324,15 +327,15 @@ export const getExpenseLedgerReport = async (
                 $cond: [
                   {
                     $gt: [
-                      '$totalQuantity',
+                      "$totalQuantity",
                       0,
                     ],
                   },
                   {
                     $divide:
                       [
-                        '$taxableValue',
-                        '$totalQuantity',
+                        "$taxableValue",
+                        "$totalQuantity",
                       ],
                   },
                   0,
@@ -345,7 +348,7 @@ export const getExpenseLedgerReport = async (
           taxableValue:
             {
               $round: [
-                '$taxableValue',
+                "$taxableValue",
                 2,
               ],
             },
@@ -355,7 +358,7 @@ export const getExpenseLedgerReport = async (
               {
                 $divide:
                   [
-                    '$totalGST',
+                    "$totalGST",
                     2,
                   ],
               },
@@ -368,7 +371,7 @@ export const getExpenseLedgerReport = async (
               {
                 $divide:
                   [
-                    '$totalGST',
+                    "$totalGST",
                     2,
                   ],
               },
@@ -381,8 +384,8 @@ export const getExpenseLedgerReport = async (
               $round: [
                 {
                   $add: [
-                    '$taxableValue',
-                    '$totalGST',
+                    "$taxableValue",
+                    "$totalGST",
                   ],
                 },
                 2,
@@ -399,7 +402,7 @@ export const getExpenseLedgerReport = async (
     ]);
 
   // ==========================
-  // OTHER EXPENSES
+  // OTHER EXPENSES (GROUPED)
   // ==========================
   const otherExpenses =
     await Expense.aggregate([
@@ -411,46 +414,83 @@ export const getExpenseLedgerReport = async (
       {
         $lookup: {
           from:
-            'expenseheads',
+            "expenseheads",
           localField:
-            'head',
+            "head",
           foreignField:
-            '_id',
-          as: 'head',
+            "_id",
+          as: "head",
         },
       },
 
       {
         $unwind: {
-          path: '$head',
+          path: "$head",
           preserveNullAndEmptyArrays:
             true,
         },
       },
 
+      // ✅ Group by expense head
       {
-        $project: {
-          _id: 1,
-
-          date: 1,
+        $group: {
+          _id:
+            "$head.name",
 
           expenseHead:
-            '$head.name',
+            {
+              $first:
+                "$head.name",
+            },
 
-          amount: 1,
+          totalAmount:
+            {
+              $sum:
+                "$amount",
+            },
 
-          paymentMethod:
+          expenses:
+            {
+              $push: {
+                _id:
+                  "$_id",
+                date:
+                  "$date",
+                amount:
+                  "$amount",
+                paymentMethod:
+                  "$paymentMethod",
+                paidTo:
+                  "$paidTo",
+                notes:
+                  "$notes",
+              },
+            },
+        },
+      },
+
+      {
+        $project: {
+          _id: 0,
+          expenseHead:
             1,
 
-          paidTo: 1,
+          totalAmount:
+            {
+              $round: [
+                "$totalAmount",
+                2,
+              ],
+            },
 
-          notes: 1,
+          expenses: 1,
         },
       },
 
       {
         $sort: {
-          date: 1,
+          expenseHead:
+            1,
         },
       },
     ]);
@@ -514,7 +554,7 @@ export const getExpenseLedgerReport = async (
           item
         ) =>
           sum +
-          (item.amount ||
+          (item.totalAmount ||
             0),
         0
       ),
@@ -527,10 +567,11 @@ export const getExpenseLedgerReport = async (
   return {
     summary,
 
-    // purchase report
-    data: purchaseData,
+    // purchase expense
+    data:
+      purchaseData,
 
-    // separate section
+    // grouped other expenses
     otherExpenses,
   };
 };

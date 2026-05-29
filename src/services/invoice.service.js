@@ -52,13 +52,13 @@ export const createInvoice = async (data) => {
           throw new ApiError(404, `Product not found: ${item.name}`);
         }
 
-        if (store.settings?.stockManagement && product.currentStock < item.quantity) {
-          throw new ApiError(400, `Insufficient stock for ${product.name}`, {
-            source: 'body',
-            field: 'items',
-            message: `${product.name} stock is only ${product.currentStock}, but you are trying to sell ${item.quantity}`,
-          });
-        }
+        // if (store.settings?.stockManagement && product.currentStock < item.quantity) {
+        //   throw new ApiError(400, `Insufficient stock for ${product.name}`, {
+        //     source: 'body',
+        //     field: 'items',
+        //     message: `${product.name} stock is only ${product.currentStock}, but you are trying to sell ${item.quantity}`,
+        //   });
+        // }
       }
       invoiceItems.push({
         ...item,

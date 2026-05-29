@@ -507,7 +507,7 @@ export const queryPurchasesReport = async (
 
   const matchStage = {
     status: {
-      $ne: 'cancelled',
+      $ne: "cancelled",
     },
   };
 
@@ -528,13 +528,29 @@ export const queryPurchasesReport = async (
     startDate &&
     endDate
   ) {
+    const start =
+      new Date(startDate);
+
+    start.setHours(
+      0,
+      0,
+      0,
+      0
+    );
+
+    const end =
+      new Date(endDate);
+
+    end.setHours(
+      23,
+      59,
+      59,
+      999
+    );
+
     matchStage.date = {
-      $gte: new Date(
-        startDate
-      ),
-      $lte: new Date(
-        endDate
-      ),
+      $gte: start,
+      $lte: end,
     };
   }
 
@@ -558,12 +574,12 @@ export const queryPurchasesReport = async (
       // ==========================
       {
         $lookup: {
-          from: 'stores',
+          from: "stores",
           localField:
-            'store',
+            "store",
           foreignField:
-            '_id',
-          as: 'store',
+            "_id",
+          as: "store",
           pipeline: [
             {
               $project: {
@@ -585,7 +601,7 @@ export const queryPurchasesReport = async (
 
       {
         $unwind: {
-          path: '$store',
+          path: "$store",
           preserveNullAndEmptyArrays:
             true,
         },
@@ -597,144 +613,403 @@ export const queryPurchasesReport = async (
       {
         $lookup: {
           from:
-            'products',
+            "products",
           localField:
-            'items.product',
+            "items.product",
           foreignField:
-            '_id',
-          as: 'products',
+            "_id",
+          as: "products",
         },
       },
 
       // ==========================
-      // MERGE ITEM + PRODUCT
+      // ITEM CALCULATION
       // ==========================
       {
         $addFields: {
           items: {
             $map: {
               input:
-                '$items',
-              as: 'item',
+                "$items",
+              as: "item",
               in: {
-                _id:
-                  '$$item._id',
+                $let: {
+                  vars: {
+                    qty: {
+                      $toDouble: {
+                        $ifNull: [
+                          "$$item.quantity",
+                          0,
+                        ],
+                      },
+                    },
 
-                product:
-                  '$$item.product',
+                    rate: {
+                      $toDouble: {
+                        $ifNull: [
+                          "$$item.rate",
+                          0,
+                        ],
+                      },
+                    },
 
-                name:
-                  '$$item.name',
+                    gstRate: {
+                      $toDouble: {
+                        $ifNull: [
+                          "$$item.gstRate",
+                          0,
+                        ],
+                      },
+                    },
 
-                hsn:
-                  '$$item.hsn',
+                    discount: {
+                      $toDouble: {
+                        $ifNull: [
+                          "$$item.discount",
+                          0,
+                        ],
+                      },
+                    },
 
-                unit:
-                  '$$item.unit',
-
-                quantity:
-                  {
-                    $ifNull:
-                      [
-                        '$$item.quantity',
-                        0,
-                      ],
+                    isTaxInclusive:
+                      {
+                        $ifNull: [
+                          "$$item.isTaxInclusive",
+                          false,
+                        ],
+                      },
                   },
 
-                rate:
-                  {
-                    $ifNull:
-                      [
-                        '$$item.rate',
+                  in: {
+                    _id:
+                      "$$item._id",
+
+                    product:
+                      "$$item.product",
+
+                    name:
+                      "$$item.name",
+
+                    hsn:
+                      "$$item.hsn",
+
+                    unit:
+                      "$$item.unit",
+
+                    quantity:
+                      "$$qty",
+
+                    rate:
+                      "$$rate",
+
+                    gstRate:
+                      "$$gstRate",
+
+                    discount:
+                      "$$discount",
+
+                    isTaxInclusive:
+                      "$$isTaxInclusive",
+
+                    mrp: {
+                      $ifNull: [
+                        "$$item.mrp",
                         0,
                       ],
-                  },
+                    },
 
-                gstRate:
-                  {
-                    $ifNull:
-                      [
-                        '$$item.gstRate',
-                        0,
-                      ],
-                  },
+                    sellingPrice:
+                      {
+                        $ifNull: [
+                          "$$item.sellingPrice",
+                          0,
+                        ],
+                      },
 
-                isTaxInclusive:
-                  '$$item.isTaxInclusive',
+                    sellingDiscount:
+                      {
+                        $ifNull: [
+                          "$$item.sellingDiscount",
+                          0,
+                        ],
+                      },
 
-                mrp:
-                  {
-                    $ifNull:
-                      [
-                        '$$item.mrp',
-                        0,
-                      ],
-                  },
+                    // ==================
+                    // BASE AMOUNT
+                    // ==================
+                    baseAmount:
+                      {
+                        $round: [
+                          {
+                            $multiply:
+                              [
+                                "$$qty",
+                                "$$rate",
+                              ],
+                          },
+                          2,
+                        ],
+                      },
 
-                // ✅ FIXED DISCOUNT
-                discount:
-                  {
-                    $ifNull:
-                      [
-                        '$$item.discount',
-                        0,
-                      ],
-                  },
-
-                total:
-                  {
-                    $ifNull:
-                      [
-                        '$$item.total',
-                        0,
-                      ],
-                  },
-
-                sellingPrice:
-                  {
-                    $ifNull:
-                      [
-                        '$$item.sellingPrice',
-                        0,
-                      ],
-                  },
-
-                sellingDiscount:
-                  {
-                    $ifNull:
-                      [
-                        '$$item.sellingDiscount',
-                        0,
-                      ],
-                  },
-
-                // ==========================
-                // PRODUCT INFO
-                // ==========================
-                productDetails:
-                  {
-                    $arrayElemAt:
-                      [
-                        {
-                          $filter:
-                            {
-                              input:
-                                '$products',
-                              as:
-                                'product',
-                              cond:
+                    // ==================
+                    // TAXABLE VALUE
+                    // ==================
+                    taxableValue:
+                      {
+                        $round: [
+                          {
+                            $subtract:
+                              [
                                 {
-                                  $eq:
+                                  $multiply:
                                     [
-                                      '$$product._id',
-                                      '$$item.product',
+                                      "$$qty",
+                                      "$$rate",
                                     ],
                                 },
+                                "$$discount",
+                              ],
+                          },
+                          2,
+                        ],
+                      },
+
+                    // ==================
+                    // GST AMOUNT
+                    // ==================
+                    gstAmount:
+                      {
+                        $round: [
+                          {
+                            $cond: [
+                              "$$isTaxInclusive",
+
+                              {
+                                $subtract: [
+                                  {
+                                    $subtract: [
+                                      {
+                                        $multiply: [
+                                          "$$qty",
+                                          "$$rate",
+                                        ],
+                                      },
+                                      "$$discount",
+                                    ],
+                                  },
+                                  {
+                                    $divide: [
+                                      {
+                                        $multiply: [
+                                          {
+                                            $subtract: [
+                                              {
+                                                $multiply: [
+                                                  "$$qty",
+                                                  "$$rate",
+                                                ],
+                                              },
+                                              "$$discount",
+                                            ],
+                                          },
+                                          100,
+                                        ],
+                                      },
+                                      {
+                                        $add: [
+                                          100,
+                                          "$$gstRate",
+                                        ],
+                                      },
+                                    ],
+                                  },
+                                ],
+                              },
+
+                              {
+                                $divide: [
+                                  {
+                                    $multiply: [
+                                      {
+                                        $subtract: [
+                                          {
+                                            $multiply: [
+                                              "$$qty",
+                                              "$$rate",
+                                            ],
+                                          },
+                                          "$$discount",
+                                        ],
+                                      },
+                                      "$$gstRate",
+                                    ],
+                                  },
+                                  100,
+                                ],
+                              },
+                            ],
+                          },
+                          2,
+                        ],
+                      },
+
+                    // ==================
+                    // CGST / SGST
+                    // ==================
+                    cgst: {
+                      $round: [
+                        {
+                          $divide: [
+                            {
+                              $cond: [
+                                {
+                                  $gt: [
+                                    "$$gstRate",
+                                    0,
+                                  ],
+                                },
+                                {
+                                  $divide: [
+                                    {
+                                      $multiply: [
+                                        {
+                                          $subtract: [
+                                            {
+                                              $multiply: [
+                                                "$$qty",
+                                                "$$rate",
+                                              ],
+                                            },
+                                            "$$discount",
+                                          ],
+                                        },
+                                        "$$gstRate",
+                                      ],
+                                    },
+                                    100,
+                                  ],
+                                },
+                                0,
+                              ],
                             },
+                            2,
+                          ],
                         },
-                        0,
+                        2,
                       ],
+                    },
+
+                    sgst: {
+                      $round: [
+                        {
+                          $divide: [
+                            {
+                              $cond: [
+                                {
+                                  $gt: [
+                                    "$$gstRate",
+                                    0,
+                                  ],
+                                },
+                                {
+                                  $divide: [
+                                    {
+                                      $multiply: [
+                                        {
+                                          $subtract: [
+                                            {
+                                              $multiply: [
+                                                "$$qty",
+                                                "$$rate",
+                                              ],
+                                            },
+                                            "$$discount",
+                                          ],
+                                        },
+                                        "$$gstRate",
+                                      ],
+                                    },
+                                    100,
+                                  ],
+                                },
+                                0,
+                              ],
+                            },
+                            2,
+                          ],
+                        },
+                        2,
+                      ],
+                    },
+
+                    total: {
+                      $round: [
+                        {
+                          $add: [
+                            {
+                              $subtract: [
+                                {
+                                  $multiply: [
+                                    "$$qty",
+                                    "$$rate",
+                                  ],
+                                },
+                                "$$discount",
+                              ],
+                            },
+                            {
+                              $divide: [
+                                {
+                                  $multiply: [
+                                    {
+                                      $subtract: [
+                                        {
+                                          $multiply: [
+                                            "$$qty",
+                                            "$$rate",
+                                          ],
+                                        },
+                                        "$$discount",
+                                      ],
+                                    },
+                                    "$$gstRate",
+                                  ],
+                                },
+                                100,
+                              ],
+                            },
+                          ],
+                        },
+                        2,
+                      ],
+                    },
+
+                    productDetails:
+                      {
+                        $arrayElemAt:
+                          [
+                            {
+                              $filter:
+                                {
+                                  input:
+                                    "$products",
+                                  as:
+                                    "product",
+                                  cond:
+                                    {
+                                      $eq:
+                                        [
+                                          "$$product._id",
+                                          "$$item.product",
+                                        ],
+                                    },
+                                },
+                            },
+                            0,
+                          ],
+                      },
                   },
+                },
               },
             },
           },
@@ -742,25 +1017,124 @@ export const queryPurchasesReport = async (
       },
 
       // ==========================
-      // REMOVE TEMP FIELD
+      // INVOICE TOTALS
       // ==========================
       {
-        $project: {
-          products: 0,
+        $addFields: {
+          totalItemsQty: {
+            $sum:
+              "$items.quantity",
+          },
+
+          discountTotal: {
+            $round: [
+              {
+                $sum:
+                  "$items.discount",
+              },
+              2,
+            ],
+          },
+
+          taxableValue: {
+            $round: [
+              {
+                $sum:
+                  "$items.taxableValue",
+              },
+              2,
+            ],
+          },
+
+          cgstTotal: {
+            $round: [
+              {
+                $sum:
+                  "$items.cgst",
+              },
+              2,
+            ],
+          },
+
+          sgstTotal: {
+            $round: [
+              {
+                $sum:
+                  "$items.sgst",
+              },
+              2,
+            ],
+          },
+
+          gstTotal: {
+            $round: [
+              {
+                $sum:
+                  "$items.gstAmount",
+              },
+              2,
+            ],
+          },
+
+          exactGrandTotal:
+            {
+              $round: [
+                {
+                  $sum:
+                    "$items.total",
+                },
+                2,
+              ],
+            },
         },
       },
 
-      // ==========================
-      // SORT
-      // ==========================
+      {
+        $addFields: {
+          grandTotal: {
+            $round: [
+              "$exactGrandTotal",
+              0,
+            ],
+          },
+
+          roundOff: {
+            $round: [
+              {
+                $subtract:
+                  [
+                    {
+                      $round: [
+                        "$exactGrandTotal",
+                        0,
+                      ],
+                    },
+                    "$exactGrandTotal",
+                  ],
+              },
+              2,
+            ],
+          },
+        },
+      },
+
+      {
+        $project: {
+          products: 0,
+          exactGrandTotal: 0,
+        },
+      },
+
       {
         $sort: {
           date: -1,
-          createdAt:
-            -1,
+          createdAt: -1,
         },
       },
     ]);
 
   return result;
 };
+
+
+

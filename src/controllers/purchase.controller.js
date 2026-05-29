@@ -196,3 +196,5 @@ export const getPurchasesReport = expressAsyncHandler(async (req, res) => {
 
   return new ApiResponse(200, purchases, 'Purchase report fetched successfully').send(res);
 });
+
+

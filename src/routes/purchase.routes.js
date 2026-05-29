@@ -25,4 +25,5 @@ router.get('/transactions', purchaseController.getAllVendorPaymentsByStore);
 //router.put('/status/:id', validate(purchaseSchema.changePurchaseStatus), purchaseController.changePurchaseStatus);
 router.put('/status/:id', validate(purchaseSchema.changePurchaseStatus), purchaseController.changePurchaseStatus);
 router.get('/report', purchaseController.getPurchasesReport);
+
 export default router;

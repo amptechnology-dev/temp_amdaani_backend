@@ -1521,9 +1521,7 @@ const getFinancialYearDateRange = (financialYear) => {
   return { startDate, endDate };
 };
 
-export const getStockBalance = async (
-  filters = {}
-) => {
+export const getStockBalance = async (filters = {}) => {
   const {
     store,
     itemName,
@@ -1533,636 +1531,436 @@ export const getStockBalance = async (
     financialYear,
   } = filters;
 
-  const storeId =
-    new mongoose.Types.ObjectId(
-      String(store)
-    );
+  const storeId = new mongoose.Types.ObjectId(String(store));
 
-  const {
-    startDate: fyStartDate,
-    endDate: fyEndDate,
-  } = financialYear
-      ? getFinancialYearDateRange(
-        financialYear
-      )
-      : {
-        startDate: null,
-        endDate: null,
-      };
+  const { startDate: fyStartDate, endDate: fyEndDate } = financialYear
+    ? getFinancialYearDateRange(financialYear)
+    : { startDate: null, endDate: null };
 
   // ===================
   // PRODUCT FILTER
   // ===================
   const productMatch = {
     store: storeId,
-    status: {
-      $ne: "cancelled",
-    },
+    status: { $ne: "cancelled" },
   };
 
-  // SEARCH PRODUCT NAME
-  if (
-    itemName &&
-    itemName.trim()
-  ) {
+  if (itemName && itemName.trim()) {
     productMatch.name = {
-      $regex:
-        itemName.trim(),
+      $regex: itemName.trim(),
       $options: "i",
     };
   }
 
-  const data =
-    await Product.aggregate([
-      {
-        $match:
-          productMatch,
-      },
+  const data = await Product.aggregate([
+    { $match: productMatch },
 
-      // ===================
-      // OPENING STOCK
-      // ===================
-      {
-        $addFields: {
-          openingStock: {
-            $ifNull: [
-              {
-                $getField: {
-                  field: "stock",
-                  input: {
-                    $arrayElemAt: [
+    // ===================
+    // OPENING STOCK QTY & VALUE
+    // ===================
+    {
+      $addFields: {
+        _fyStock: {
+          $arrayElemAt: [
+            {
+              $filter: {
+                input: "$financialYearStocks",
+                as: "fy",
+                cond: { $eq: ["$$fy.financialYear", financialYear] },
+              },
+            },
+            0,
+          ],
+        },
+      },
+    },
+    {
+      $addFields: {
+        // Opening stock quantity for this FY
+        openingStock: { $ifNull: ["$_fyStock.stock", 0] },
+
+        // Opening stock value for this FY
+        openingStockValue: { $ifNull: ["$_fyStock.value", 0] },
+      },
+    },
+
+    // ===================
+    // PURCHASE TABLE
+    // ===================
+    {
+      $lookup: {
+        from: "purchases",
+        let: { productId: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              store: storeId,
+              status: { $ne: "cancelled" },
+              ...(fyStartDate && fyEndDate
+                ? { date: { $gte: fyStartDate, $lte: fyEndDate } }
+                : {}),
+            },
+          },
+          { $unwind: "$items" },
+          {
+            $match: {
+              $expr: { $eq: ["$items.product", "$$productId"] },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalQty: { $sum: "$items.quantity" },
+              totalValue: {
+                $sum: { $multiply: ["$items.quantity", "$items.rate"] },
+              },
+              // Last purchase rate — used for currentStockValue
+              lastPurchaseRate: { $last: "$items.rate" },
+            },
+          },
+        ],
+        as: "purchaseData",
+      },
+    },
+
+    // ===================
+    // SALES TABLE
+    // ===================
+    {
+      $lookup: {
+        from: "invoices",
+        let: { productId: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              store: storeId,
+              status: { $ne: "cancelled" },
+              ...(fyStartDate && fyEndDate
+                ? { invoiceDate: { $gte: fyStartDate, $lte: fyEndDate } }
+                : {}),
+            },
+          },
+          { $unwind: "$items" },
+          {
+            $match: {
+              $expr: { $eq: ["$items.product", "$$productId"] },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              qty: { $sum: "$items.quantity" },
+            },
+          },
+        ],
+        as: "salesData",
+      },
+    },
+
+    // ===================
+    // STOCK TRANSACTIONS
+    // ===================
+    {
+      $lookup: {
+        from: "stocktransactions",
+        let: { productId: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ["$product", "$$productId"] },
+                  { $eq: ["$store", storeId] },
+                  ...(fyStartDate && fyEndDate
+                    ? [
+                        { $gte: ["$date", fyStartDate] },
+                        { $lte: ["$date", fyEndDate] },
+                      ]
+                    : []),
+                ],
+              },
+            },
+          },
+        ],
+        as: "transactions",
+      },
+    },
+
+    // ===================
+    // CALCULATIONS
+    // ===================
+    {
+      $addFields: {
+        // ---------- Quantities from lookups ----------
+        purchaseQty: {
+          $ifNull: [{ $arrayElemAt: ["$purchaseData.totalQty", 0] }, 0],
+        },
+        purchaseTotalValue: {
+          $ifNull: [{ $arrayElemAt: ["$purchaseData.totalValue", 0] }, 0],
+        },
+        lastPurchaseRate: {
+          $ifNull: [{ $arrayElemAt: ["$purchaseData.lastPurchaseRate", 0] }, 0],
+        },
+        saleQty: {
+          $ifNull: [{ $arrayElemAt: ["$salesData.qty", 0] }, 0],
+        },
+
+        // ---------- Transaction-based quantities ----------
+        returnInQty: {
+          // SALE_RETURN → stock comes back IN
+          $sum: {
+            $map: {
+              input: "$transactions",
+              as: "tx",
+              in: {
+                $cond: [
+                  { $eq: ["$$tx.transactionType", "SALE_RETURN"] },
+                  "$$tx.quantity",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
+        returnOutQty: {
+          // PURCHASE_RETURN → stock goes OUT
+          $sum: {
+            $map: {
+              input: "$transactions",
+              as: "tx",
+              in: {
+                $cond: [
+                  { $eq: ["$$tx.transactionType", "PURCHASE_RETURN"] },
+                  "$$tx.quantity",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
+        damageQty: {
+          $sum: {
+            $map: {
+              input: "$transactions",
+              as: "tx",
+              in: {
+                $cond: [
+                  { $eq: ["$$tx.transactionType", "DAMAGE"] },
+                  "$$tx.quantity",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
+        expiredQty: {
+          $sum: {
+            $map: {
+              input: "$transactions",
+              as: "tx",
+              in: {
+                $cond: [
+                  { $eq: ["$$tx.transactionType", "EXPIRED"] },
+                  "$$tx.quantity",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+
+        // adjustmentQty = (IN adjustments) − (OUT adjustments)
+        // IN  types : NEW_PURCHASE, STOCK_CORRECTION (direction=IN), FREE_STOCK (direction=IN)
+        // OUT types : INTERNAL_USE, STOCK_REDUCE, STOCK_CORRECTION (direction=OUT), FREE_STOCK (direction=OUT)
+        adjustmentQty: {
+          $subtract: [
+            // IN side
+            {
+              $sum: {
+                $map: {
+                  input: "$transactions",
+                  as: "tx",
+                  in: {
+                    $cond: [
                       {
-                        $filter: {
-                          input:
-                            "$financialYearStocks",
-                          as: "fy",
-                          cond: {
-                            $eq: [
-                              "$$fy.financialYear",
-                              financialYear,
-                            ],
-                          },
-                        },
+                        $in: [
+                          "$$tx.transactionType",
+                          ["NEW_PURCHASE", "STOCK_CORRECTION", "FREE_STOCK"],
+                        ],
+                      },
+                      {
+                        $cond: [
+                          { $eq: ["$$tx.direction", "IN"] },
+                          "$$tx.quantity",
+                          { $multiply: ["$$tx.quantity", -1] },
+                        ],
                       },
                       0,
                     ],
                   },
                 },
               },
-              0,
-            ],
-          },
-        },
-      },
-
-      // ===================
-      // PURCHASE TABLE
-      // ===================
-      {
-        $lookup: {
-          from: "purchases",
-          let: {
-            productId: "$_id",
-          },
-          pipeline: [
-            {
-              $match: {
-                store:
-                  storeId,
-                status: {
-                  $ne:
-                    "cancelled",
-                },
-
-                ...(fyStartDate &&
-                  fyEndDate
-                  ? {
-                    date: {
-                      $gte:
-                        fyStartDate,
-                      $lte:
-                        fyEndDate,
-                    },
-                  }
-                  : {}),
-              },
             },
-
+            // OUT side
             {
-              $unwind:
-                "$items",
-            },
-
-            {
-              $match: {
-                $expr: {
-                  $eq: [
-                    "$items.product",
-                    "$$productId",
-                  ],
-                },
-              },
-            },
-
-            {
-              $group: {
-                _id: null,
-
-                totalQty: {
-                  $sum:
-                    "$items.quantity",
-                },
-
-                totalValue:
-                {
-                  $sum: {
-                    $multiply:
-                      [
-                        "$items.quantity",
-                        "$items.rate",
-                      ],
+              $sum: {
+                $map: {
+                  input: "$transactions",
+                  as: "tx",
+                  in: {
+                    $cond: [
+                      {
+                        $in: [
+                          "$$tx.transactionType",
+                          ["INTERNAL_USE", "STOCK_REDUCE"],
+                        ],
+                      },
+                      "$$tx.quantity",
+                      0,
+                    ],
                   },
-                },
-
-                lastPurchaseRate:
-                {
-                  $last:
-                    "$items.rate",
                 },
               },
             },
           ],
-          as:
-            "purchaseData",
         },
+
+        closingStock: "$currentStock",
       },
+    },
 
-      // ===================
-      // SALES TABLE
-      // ===================
-      {
-        $lookup: {
-          from: "invoices",
-          let: {
-            productId:
-              "$_id",
-          },
-          pipeline: [
-            {
-              $match: {
-                store:
-                  storeId,
-                status: {
-                  $ne:
-                    "cancelled",
-                },
-
-                ...(fyStartDate &&
-                  fyEndDate
-                  ? {
-                    invoiceDate:
-                    {
-                      $gte:
-                        fyStartDate,
-                      $lte:
-                        fyEndDate,
-                    },
-                  }
-                  : {}),
-              },
-            },
-
-            {
-              $unwind:
-                "$items",
-            },
-
-            {
-              $match: {
-                $expr: {
-                  $eq: [
-                    "$items.product",
-                    "$$productId",
-                  ],
-                },
-              },
-            },
-
-            {
-              $group: {
-                _id: null,
-                qty: {
-                  $sum:
-                    "$items.quantity",
-                },
-              },
-            },
+    // ===================
+    // RATE CALCULATIONS
+    // (done in a separate $addFields so we can reference fields set above)
+    // ===================
+    {
+      $addFields: {
+        // Opening stock rate = openingStockValue / openingStock  (0 if no opening stock)
+        openingStockRate: {
+          $cond: [
+            { $gt: ["$openingStock", 0] },
+            { $divide: ["$openingStockValue", "$openingStock"] },
+            0,
           ],
-          as:
-            "salesData",
         },
-      },
 
-      // ===================
-      // STOCK TRANSACTION
-      // ===================
-      {
-        $lookup: {
-          from:
-            "stocktransactions",
-
-          let: {
-            productId:
-              "$_id",
-          },
-
-          pipeline: [
+        // Average Purchase Rate
+        // = (openingStockValue + totalPurchaseValue) / (openingStock + purchaseQty)
+        avgRate: {
+          $cond: [
+            { $gt: [{ $add: ["$openingStock", "$purchaseQty"] }, 0] },
             {
-              $match: {
-                $expr: {
-                  $and: [
-                    {
-                      $eq: [
-                        "$product",
-                        "$$productId",
-                      ],
-                    },
-                    {
-                      $eq: [
-                        "$store",
-                        storeId,
-                      ],
-                    },
-
-                    ...(fyStartDate &&
-                      fyEndDate
-                      ? [
-                        {
-                          $gte: [
-                            "$date",
-                            fyStartDate,
-                          ],
-                        },
-                        {
-                          $lte: [
-                            "$date",
-                            fyEndDate,
-                          ],
-                        },
-                      ]
-                      : []),
-                  ],
-                },
-              },
+              $divide: [
+                { $add: ["$openingStockValue", "$purchaseTotalValue"] },
+                { $add: ["$openingStock", "$purchaseQty"] },
+              ],
             },
+            0,
           ],
-
-          as:
-            "transactions",
         },
       },
+    },
 
-      // ===================
-      // CALCULATIONS
-      // ===================
-      {
-        $addFields: {
-          purchaseQty: {
-            $ifNull: [
-              {
-                $arrayElemAt:
-                  [
-                    "$purchaseData.totalQty",
-                    0,
-                  ],
-              },
-              0,
-            ],
-          },
-
-          saleQty: {
-            $ifNull: [
-              {
-                $arrayElemAt:
-                  [
-                    "$salesData.qty",
-                    0,
-                  ],
-              },
-              0,
-            ],
-          },
-
-          returnInQty: {
-            $sum: {
-              $map: {
-                input:
-                  "$transactions",
-                as: "tx",
-                in: {
-                  $cond: [
-                    {
-                      $eq: [
-                        "$$tx.transactionType",
-                        "SALE_RETURN",
-                      ],
-                    },
-                    "$$tx.quantity",
-                    0,
-                  ],
-                },
-              },
-            },
-          },
-
-          returnOutQty: {
-            $sum: {
-              $map: {
-                input:
-                  "$transactions",
-                as: "tx",
-                in: {
-                  $cond: [
-                    {
-                      $eq: [
-                        "$$tx.transactionType",
-                        "PURCHASE_RETURN",
-                      ],
-                    },
-                    "$$tx.quantity",
-                    0,
-                  ],
-                },
-              },
-            },
-          },
-
-          damageQty: {
-            $sum: {
-              $map: {
-                input:
-                  "$transactions",
-                as: "tx",
-                in: {
-                  $cond: [
-                    {
-                      $eq: [
-                        "$$tx.transactionType",
-                        "DAMAGE",
-                      ],
-                    },
-                    "$$tx.quantity",
-                    0,
-                  ],
-                },
-              },
-            },
-          },
-
-          // ✅ EXPIRED LIKE DAMAGE
-          expiredQty: {
-            $sum: {
-              $map: {
-                input:
-                  "$transactions",
-                as: "tx",
-                in: {
-                  $cond: [
-                    {
-                      $eq: [
-                        "$$tx.transactionType",
-                        "EXPIRED",
-                      ],
-                    },
-                    "$$tx.quantity",
-                    0,
-                  ],
-                },
-              },
-            },
-          },
-
-          adjustmentQty: {
-            $subtract: [
-              {
-                $sum: {
-                  $map: {
-                    input: "$transactions",
-                    as: "tx",
-                    in: {
-                      $cond: [
-                        {
-                          $in: [
-                            "$$tx.transactionType",
-                            [
-                              "NEW_PURCHASE",
-                              "STOCK_CORRECTION",
-                              "FREE_STOCK",
-                            ],
-                          ],
-                        },
-                        {
-                          $cond: [
-                            {
-                              $eq: [
-                                "$$tx.direction",
-                                "IN",
-                              ],
-                            },
-                            "$$tx.quantity",
-                            {
-                              $multiply: [
-                                "$$tx.quantity",
-                                -1,
-                              ],
-                            },
-                          ],
-                        },
-                        0,
-                      ],
-                    },
-                  },
-                },
-              },
-
-              {
-                $sum: {
-                  $map: {
-                    input: "$transactions",
-                    as: "tx",
-                    in: {
-                      $cond: [
-                        {
-                          $in: [
-                            "$$tx.transactionType",
-                            [
-                              "INTERNAL_USE",
-                              "STOCK_REDUCE",
-                            ],
-                          ],
-                        },
-                        "$$tx.quantity",
-                        0,
-                      ],
-                    },
-                  },
-                },
-              },
-            ],
-          },
-
-          closingStock:
-            "$currentStock",
-
-          avgRate:
-            "$costPrice",
-        },
-      },
-
-      // ===================
-      // FILTERING
-      // ===================
-      ...(transactionType
-        ? [
+    // ===================
+    // TRANSACTION TYPE FILTER
+    // ===================
+    ...(transactionType
+      ? [
           {
-            $match:
-              (() => {
-                switch (
-                transactionType
-                ) {
-                  case "DAMAGE":
-                    return {
-                      damageQty:
-                      {
-                        $gt: 0,
-                      },
-                    };
-
-                  case "EXPIRED":
-                    return {
-                      expiredQty:
-                      {
-                        $gt: 0,
-                      },
-                    };
-
-                  case "PURCHASE":
-                    return {
-                      purchaseQty:
-                      {
-                        $gt: 0,
-                      },
-                    };
-
-                  case "SALE":
-                    return {
-                      saleQty:
-                      {
-                        $gt: 0,
-                      },
-                    };
-
-                  default:
-                    return {};
-                }
-              })(),
+            $match: (() => {
+              switch (transactionType) {
+                case "DAMAGE":
+                  return { damageQty: { $gt: 0 } };
+                case "EXPIRED":
+                  return { expiredQty: { $gt: 0 } };
+                case "PURCHASE":
+                  return { purchaseQty: { $gt: 0 } };
+                case "SALE":
+                  return { saleQty: { $gt: 0 } };
+                default:
+                  return {};
+              }
+            })(),
           },
         ]
-        : []),
+      : []),
 
-      // ===================
-      // STOCK FILTER
-      // ===================
-      ...(minStock ||
-        maxStock
-        ? [
+    // ===================
+    // STOCK RANGE FILTER
+    // ===================
+    ...(minStock || maxStock
+      ? [
           {
             $match: {
-              closingStock:
-              {
-                ...(minStock
-                  ? {
-                    $gte:
-                      Number(
-                        minStock
-                      ),
-                  }
-                  : {}),
-
-                ...(maxStock
-                  ? {
-                    $lte:
-                      Number(
-                        maxStock
-                      ),
-                  }
-                  : {}),
+              closingStock: {
+                ...(minStock ? { $gte: Number(minStock) } : {}),
+                ...(maxStock ? { $lte: Number(maxStock) } : {}),
               },
             },
           },
         ]
-        : []),
+      : []),
 
-      // ===================
-      // RESPONSE
-      // ===================
-      {
-        $project: {
-          _id: 0,
+    // ===================
+    // RESPONSE
+    // ===================
+    {
+      $project: {
+        _id: 0,
 
-          itemDescription:
-            "$name",
+        itemDescription: "$name",
 
-          openingStock:
-            1,
+        openingStock: 1,
 
-          purchaseQty:
-            1,
+        purchaseQty: 1,
 
-          saleQty:
-            1,
+        saleQty: 1,
 
-          returnInQty:
-            1,
+        returnInQty: 1,
 
-          returnOutQty:
-            1,
+        returnOutQty: 1,
 
-          damageQty:
-            1,
+        damageQty: 1,
 
-          // ✅ SHOW EXPIRED
-          expiredQty:
-            1,
+        expiredQty: 1,
 
-          adjustmentQty: 1,
+        adjustmentQty: 1,
 
-          closingStock:
-            1,
+        closingStock: 1,
 
-          avgRate:
-            1,
+        // Average Purchase Rate
+        // = (openingStockValue + totalPurchaseValue) / (openingStock + purchaseQty)
+        avgRate: { $ifNull: ["$avgRate", 0] },
 
-          currentStockValue:
-          {
-            $multiply: [
-              "$closingStock",
-              "$avgRate",
-            ],
-          },
+        // Average Stock Value = closingStock × avgRate
+        averageStockValue: {
+          $multiply: ["$closingStock", { $ifNull: ["$avgRate", 0] }],
+        },
+
+        // Current Stock Value = closingStock × lastPurchaseRate
+        // Fallback: if no purchase in this FY → use openingStockRate
+        currentStockValue: {
+          $multiply: [
+            "$closingStock",
+            {
+              $cond: [
+                { $gt: ["$lastPurchaseRate", 0] },
+                "$lastPurchaseRate",
+                "$openingStockRate",
+              ],
+            },
+          ],
         },
       },
+    },
 
-      {
-        $sort: {
-          itemDescription: 1,
-        },
-      },
-    ]);
+    { $sort: { itemDescription: 1 } },
+  ]);
 
-  return {
-    data,
-  };
+  return { data };
 };
 
 export const addPaymentToInvoice = async (invoiceId, paymentData) => {

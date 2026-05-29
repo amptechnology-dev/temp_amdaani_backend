@@ -613,9 +613,12 @@ export const reverseStockAfterSale = async (sale, session = null) => {
   const saleId = sale._id;
 
   // Find all stock transactions for this sale
-  const transactions = await StockTransaction.find({ saleId }).session(session);
-  if (!transactions.length) return;
+  // const transactions = await StockTransaction.find({ saleId }).session(session);
+  const transactions = await StockTransaction.find({
+    saleId, reversed: { $ne: true },
+  }).session(session);
 
+  if (!transactions.length) return;
   for (const txn of transactions) {
     const product = await Product.findById(txn.product).session(session);
     if (!product) continue;

@@ -714,6 +714,54 @@ export const queryPurchasesReport = async (
                     discount:
                       "$$discount",
 
+                    // ==================
+                    // DISCOUNT PERCENTAGE (per item)
+                    // ==================
+                    discountPercentage: {
+                      $concat: [
+                        {
+                          $toString: {
+                            $round: [
+                              {
+                                $cond: [
+                                  {
+                                    $gt: [
+                                      {
+                                        $multiply: [
+                                          "$$qty",
+                                          "$$rate",
+                                        ],
+                                      },
+                                      0,
+                                    ],
+                                  },
+                                  {
+                                    $multiply: [
+                                      {
+                                        $divide: [
+                                          "$$discount",
+                                          {
+                                            $multiply: [
+                                              "$$qty",
+                                              "$$rate",
+                                            ],
+                                          },
+                                        ],
+                                      },
+                                      100,
+                                    ],
+                                  },
+                                  0,
+                                ],
+                              },
+                              2,
+                            ],
+                          },
+                        },
+                        "%",
+                      ],
+                    },
+
                     isTaxInclusive:
                       "$$isTaxInclusive",
 
@@ -1032,13 +1080,60 @@ export const queryPurchasesReport = async (
               "$items.quantity",
           },
 
-          discountTotal: {
+          // ==========================
+          // TOTAL BASE AMOUNT (needed for % calculation)
+          // ==========================
+          totalBaseAmount: {
             $round: [
               {
                 $sum:
-                  "$items.discount",
+                  "$items.baseAmount",
               },
               2,
+            ],
+          },
+
+          discountTotal: {
+            $concat: [
+              {
+                $toString: {
+                  $round: [
+                    {
+                      $cond: [
+                        {
+                          $gt: [
+                            {
+                              $sum:
+                                "$items.baseAmount",
+                            },
+                            0,
+                          ],
+                        },
+                        {
+                          $multiply: [
+                            {
+                              $divide: [
+                                {
+                                  $sum:
+                                    "$items.discount",
+                                },
+                                {
+                                  $sum:
+                                    "$items.baseAmount",
+                                },
+                              ],
+                            },
+                            100,
+                          ],
+                        },
+                        0,
+                      ],
+                    },
+                    2,
+                  ],
+                },
+              },
+              "%",
             ],
           },
 

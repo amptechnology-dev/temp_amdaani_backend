@@ -501,23 +501,53 @@ export const adjustProductStock = async (data, session = null) => {
   });
 };
 
-export const getStockTransactionsByProduct = async (productId, filters = {}, options = {}) => {
-  const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;
-  const sort = { [sortBy]: order === 'desc' ? -1 : 1 };
+export const getStockTransactionsByProduct = async (
+  productId,
+  filters = {},
+  options = {}
+) => {
+  const {
+    page = 1,
+    limit = 20,
+    sortBy = 'createdAt',
+    order = 'desc',
+  } = options;
+
+  const sort = {
+    [sortBy]: order === 'desc' ? -1 : 1,
+  };
 
   const { startDate, endDate } = filters;
-  const start = new Date(startDate);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(endDate);
-  end.setHours(23, 59, 59, 999);
 
   const query = {
     store: filters.store,
     product: new mongoose.Types.ObjectId(productId),
-    date: { ...(startDate && { $gte: start }), ...(endDate && { $lte: end }) },
   };
-  // Execute aggregate query with pagination
-  const aggregate = StockTransaction.aggregate([{ $match: query }]);
+
+  // date filter only if exists
+  if (startDate || endDate) {
+    query.date = {};
+
+    if (startDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      query.date.$gte = start;
+    }
+
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      query.date.$lte = end;
+    }
+  }
+
+  console.log(query);
+
+  const aggregate = StockTransaction.aggregate([
+    {
+      $match: query,
+    },
+  ]);
 
   const paginationOptions = {
     page,
@@ -526,7 +556,11 @@ export const getStockTransactionsByProduct = async (productId, filters = {}, opt
     lean: true,
     leanWithId: false,
   };
-  return StockTransaction.aggregatePaginate(aggregate, paginationOptions);
+
+  return StockTransaction.aggregatePaginate(
+    aggregate,
+    paginationOptions
+  );
 };
 
 export const updateStockAfterPurchase = async (purchase, session = null) => {

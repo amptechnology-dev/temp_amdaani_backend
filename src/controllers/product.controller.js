@@ -28,55 +28,48 @@ export const getProductById = expressAsyncHandler(async (req, res) => {
   return new ApiResponse(200, product, 'Product fetched successfully!').send(res);
 });
 
-export const getAllProductsWithSales = expressAsyncHandler(
-  async (req, res) => {
-    const { range, startDate, endDate, search = "" } = req.query;
+export const getAllProductsWithSales = expressAsyncHandler(async (req, res) => {
+  const { range, startDate, endDate, search = '' } = req.query;
 
-    const now = new Date();
-    let start = null;
-    let end = null;
+  const now = new Date();
+  let start = null;
+  let end = null;
 
-    if (range) {
-      switch (range) {
-        case "today":
-          start = new Date(now.setHours(0, 0, 0, 0));
-          end = new Date(now.setHours(23, 59, 59, 999));
-          break;
-        case "thisMonth":
-          start = new Date(now.getFullYear(), now.getMonth(), 1);
-          end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-          break;
-        case "previousMonth":
-          start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-          end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-          break;
-        case "year":
-          start = new Date(now.getFullYear(), 0, 1);
-          end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-          break;
-        case "custom":
-          start = startDate ? new Date(startDate) : null;
-          end = endDate ? new Date(endDate) : null;
-          break;
-      }
-    } else {
-      start = startDate ? new Date(startDate) : null;
-      end = endDate ? new Date(endDate) : null;
+  if (range) {
+    switch (range) {
+      case 'today':
+        start = new Date(now.setHours(0, 0, 0, 0));
+        end = new Date(now.setHours(23, 59, 59, 999));
+        break;
+      case 'thisMonth':
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+        end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        break;
+      case 'previousMonth':
+        start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+        break;
+      case 'year':
+        start = new Date(now.getFullYear(), 0, 1);
+        end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+        break;
+      case 'custom':
+        start = startDate ? new Date(startDate) : null;
+        end = endDate ? new Date(endDate) : null;
+        break;
     }
-
-    if (start && isNaN(start.getTime())) start = null;
-    if (end && isNaN(end.getTime())) end = null;
-
-    const products = await productService.getAllProductsWithSales(
-      req.user.store,
-      start,
-      end,
-      search
-    );
-
-    return new ApiResponse(200, products, "Products fetched successfully!").send(res);
+  } else {
+    start = startDate ? new Date(startDate) : null;
+    end = endDate ? new Date(endDate) : null;
   }
-);
+
+  if (start && isNaN(start.getTime())) start = null;
+  if (end && isNaN(end.getTime())) end = null;
+
+  const products = await productService.getAllProductsWithSales(req.user.store, start, end, search);
+
+  return new ApiResponse(200, products, 'Products fetched successfully!').send(res);
+});
 
 export const adjustProductStock = expressAsyncHandler(async (req, res) => {
   const result = await productService.adjustProductStock(req.body);
@@ -87,48 +80,22 @@ export const getStockTransactionsByProduct = expressAsyncHandler(async (req, res
   const filters = pick(req.query, ['startDate', 'endDate']);
   filters.store = req.user.store;
   const result = await productService.getStockTransactionsByProduct(req.params.id, filters, options);
+  console.log('-->', result);
+
   return new ApiResponse(200, result, 'Stock transactions fetched successfully').send(res);
 });
 
-export const carryForwardStock = expressAsyncHandler(async (
-  req,
-  res
-) => {
-  const storeId =
-    req.user.store;
-  const result =
-    await productService.carryForwardStockToNextFinancialYear(
-      storeId
-    );
+export const carryForwardStock = expressAsyncHandler(async (req, res) => {
+  const storeId = req.user.store;
+  const result = await productService.carryForwardStockToNextFinancialYear(storeId);
 
-  return new ApiResponse(
-    200,
-    result,
-    'Financial year stock carried forward successfully'
-  ).send(res);
-}
-);
+  return new ApiResponse(200, result, 'Financial year stock carried forward successfully').send(res);
+});
 
-export const getProductSuggestions =
-  expressAsyncHandler(
-    async (
-      req,
-      res
-    ) => {
-      const {
-        search = "",
-      } = req.query;
+export const getProductSuggestions = expressAsyncHandler(async (req, res) => {
+  const { search = '' } = req.query;
 
-      const data =
-        await productService.getProductSuggestions(
-          req.user.store,
-          search
-        );
+  const data = await productService.getProductSuggestions(req.user.store, search);
 
-      return new ApiResponse(
-        200,
-        data,
-        "Product suggestions fetched successfully!"
-      ).send(res);
-    }
-  );
+  return new ApiResponse(200, data, 'Product suggestions fetched successfully!').send(res);
+});

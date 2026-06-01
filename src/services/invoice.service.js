@@ -5,7 +5,7 @@ import { ApiError } from '../utils/responseHandler.js';
 import mongoose from 'mongoose';
 import { handleDuplicateKeyError } from '../utils/dbErrorHandler.js';
 import { createTransaction, getTransactionsByInvoice } from './transaction.service.js';
-import { updateStockAfterSale, reverseStockAfterSale } from './product.service.js';
+import { updateStockAfterSale, reverseStockAfterSale, createupdateStockAfterSale } from './product.service.js';
 import { Product } from '../models/product.model.js';
 import { Purchase } from '../models/purchase.model.js';
 import { StockTransaction } from '../models/stockTransaction.model.js';
@@ -19,35 +19,23 @@ import { StockTransactionType } from '../config/constants.js';
 export const createInvoice = async (data) => {
   const { items = [] } = data;
   if (!items.length) {
-    throw new ApiError(
-      400,
-      'Invalid invoice items!',
-      {
-        source: 'body',
-        field: 'items',
-        message:
-          'Invoice must have at least one item',
-      }
-    );
+    throw new ApiError(400, 'Invalid invoice items!', {
+      source: 'body',
+      field: 'items',
+      message: 'Invoice must have at least one item',
+    });
   }
-  const store =
-    await Store.findById(data.store);
+  const store = await Store.findById(data.store);
 
   if (!store) {
-    throw new ApiError(
-      404,
-      'Store not found!',
-      {
-        source: 'body',
-        field: 'store',
-        message:
-          'Store data not found',
-      }
-    );
+    throw new ApiError(404, 'Store not found!', {
+      source: 'body',
+      field: 'store',
+      message: 'Store data not found',
+    });
   }
 
-  const session =
-    await mongoose.startSession();
+  const session = await mongoose.startSession();
 
   try {
     session.startTransaction();
@@ -55,84 +43,51 @@ export const createInvoice = async (data) => {
     const invoiceItems = [];
 
     for (const item of items) {
-      const productId =
-        await findOrCreateProduct(
-          data.store,
-          item,
-          session
-        );
+      const productId = await findOrCreateProduct(data.store, item, session);
 
       if (productId) {
-        const product =
-          await Product.findById(
-            productId
-          ).session(session);
+        const product = await Product.findById(productId).session(session);
 
         if (!product) {
-          throw new ApiError(
-            404,
-            `Product not found: ${item.name}`
-          );
+          throw new ApiError(404, `Product not found: ${item.name}`);
         }
 
-        // if (
-        //   store.settings
-        //     ?.stockManagement &&
-        //   product.currentStock <
-        //   item.quantity
-        // ) {
-        //   throw new ApiError(
-        //     400,
-        //     `Insufficient stock for ${product.name}`,
-        //     {
-        //       source: 'body',
-        //       field: 'items',
-        //       message: `${product.name} stock is only ${product.currentStock}, but you are trying to sell ${item.quantity}`,
-        //     }
-        //   );
+        // if (store.settings?.stockManagement && product.currentStock < item.quantity) {
+        //   throw new ApiError(400, `Insufficient stock for ${product.name}`, {
+        //     source: 'body',
+        //     field: 'items',
+        //     message: `${product.name} stock is only ${product.currentStock}, but you are trying to sell ${item.quantity}`,
+        //   });
         // }
-
       }
       invoiceItems.push({
         ...item,
 
         ...(productId
           ? {
-            product: productId,
-          }
+              product: productId,
+            }
           : {}),
       });
     }
 
-    console.log(
-      'Invoice Items:',
-      JSON.stringify(invoiceItems)
-    );
+    console.log('Invoice Items:', JSON.stringify(invoiceItems));
 
-    const customerId =
-      await findOrCreateCustomer(
-        data.store,
-        {
-          _id: data.customer,
-          name:
-            data.customerName,
-          mobile:
-            data.customerMobile,
-          address:
-            data.customerAddress,
-          city:
-            data.customerCity,
-          state:
-            data.customerState,
-          country:
-            data.customerCountry,
-          postalCode:
-            data.customerPostalCode,
-          gstNumber:
-            data.customerGstNumber,
-        },
-        session
-      );
+    const customerId = await findOrCreateCustomer(
+      data.store,
+      {
+        _id: data.customer,
+        name: data.customerName,
+        mobile: data.customerMobile,
+        address: data.customerAddress,
+        city: data.customerCity,
+        state: data.customerState,
+        country: data.customerCountry,
+        postalCode: data.customerPostalCode,
+        gstNumber: data.customerGstNumber,
+      },
+      session
+    );
 
     const invoiceDoc = {
       ...data,
@@ -141,123 +96,54 @@ export const createInvoice = async (data) => {
       userId: data.userId,
 
       name: store.name,
-      tagline:
-        store.tagline,
-      ownershipType:
-        store.ownershipType,
-      gstNumber:
-        store.gstNumber,
-      panNumber:
-        store.panNumber,
-      registrationNo:
-        store.registrationNo,
-      contactNo:
-        store.contactNo,
+      tagline: store.tagline,
+      ownershipType: store.ownershipType,
+      gstNumber: store.gstNumber,
+      panNumber: store.panNumber,
+      registrationNo: store.registrationNo,
+      contactNo: store.contactNo,
       email: store.email,
 
       address: {
-        street:
-          store.address
-            ?.street,
-        city:
-          store.address
-            ?.city,
-        state:
-          store.address
-            ?.state,
-        country:
-          store.address
-            ?.country ||
-          'IN',
-        postalCode:
-          store.address
-            ?.postalCode,
+        street: store.address?.street,
+        city: store.address?.city,
+        state: store.address?.state,
+        country: store.address?.country || 'IN',
+        postalCode: store.address?.postalCode,
       },
 
       bankDetails: {
-        bankName:
-          store
-            .bankDetails
-            ?.bankName,
-        accountNo:
-          store
-            .bankDetails
-            ?.accountNo,
-        holderName:
-          store
-            .bankDetails
-            ?.holderName,
-        ifsc:
-          store
-            .bankDetails
-            ?.ifsc,
-        branch:
-          store
-            .bankDetails
-            ?.branch,
-        upiId:
-          store
-            .bankDetails
-            ?.upiId,
+        bankName: store.bankDetails?.bankName,
+        accountNo: store.bankDetails?.accountNo,
+        holderName: store.bankDetails?.holderName,
+        ifsc: store.bankDetails?.ifsc,
+        branch: store.bankDetails?.branch,
+        upiId: store.bankDetails?.upiId,
       },
 
       settings: {
-        invoicePrefix:
-          data.settings
-            ?.invoicePrefix ||
-          store.settings
-            ?.invoicePrefix ||
-          'INV',
+        invoicePrefix: data.settings?.invoicePrefix || store.settings?.invoicePrefix || 'INV',
 
-        invoiceStartNumber:
-          data.settings
-            ?.invoiceStartNumber ||
-          store.settings
-            ?.invoiceStartNumber ||
-          1,
+        invoiceStartNumber: data.settings?.invoiceStartNumber || store.settings?.invoiceStartNumber || 1,
 
-        taxRates:
-          data.settings
-            ?.taxRates ||
-          store.settings
-            ?.taxRates ||
-          [],
+        taxRates: data.settings?.taxRates || store.settings?.taxRates || [],
 
-        invoiceTerms:
-          data.settings
-            ?.invoiceTerms ||
-          store.settings
-            ?.invoiceTerms,
+        invoiceTerms: data.settings?.invoiceTerms || store.settings?.invoiceTerms,
 
-        stockManagement:
-          data.settings
-            ?.stockManagement ??
-          store.settings
-            ?.stockManagement ??
-          false,
+        stockManagement: data.settings?.stockManagement ?? store.settings?.stockManagement ?? false,
 
         purchaseOrderManagement:
-          data.settings
-            ?.purchaseOrderManagement ??
-          store.settings
-            ?.purchaseOrderManagement ??
-          false,
+          data.settings?.purchaseOrderManagement ?? store.settings?.purchaseOrderManagement ?? false,
       },
 
-      logoUrl:
-        store.logoUrl,
+      logoUrl: store.logoUrl,
 
-      signatureUrl:
-        store.signatureUrl,
+      signatureUrl: store.signatureUrl,
 
-      isActive:
-        store.isActive,
+      isActive: store.isActive,
     };
 
-    const invoice =
-      new Invoice(
-        invoiceDoc
-      );
+    const invoice = new Invoice(invoiceDoc);
 
     await invoice.save({
       session,
@@ -265,24 +151,16 @@ export const createInvoice = async (data) => {
 
     await createTransaction(
       {
-        store:
-          invoice.store,
-        invoice:
-          invoice._id,
-        amount:
-          invoice.amountPaid,
-        paymentMethod:
-          invoice.paymentMethod,
-        note:
-          invoice.paymentNote,
+        store: invoice.store,
+        invoice: invoice._id,
+        amount: invoice.amountPaid,
+        paymentMethod: invoice.paymentMethod,
+        note: invoice.paymentNote,
       },
       session
     );
 
-    await updateStockAfterSale(
-      invoice,
-      session
-    );
+    await createupdateStockAfterSale(invoice, session);
 
     await session.commitTransaction();
 
@@ -290,11 +168,7 @@ export const createInvoice = async (data) => {
   } catch (error) {
     await session.abortTransaction();
 
-    throw (
-      handleDuplicateKeyError(
-        error
-      ) || error
-    );
+    throw handleDuplicateKeyError(error) || error;
   } finally {
     await session.endSession();
   }
@@ -315,19 +189,29 @@ export const updateInvoice = async (invoiceId, data) => {
   try {
     session.startTransaction();
 
-    // Find the existing invoice
     const invoice = await Invoice.findById(invoiceId).session(session);
     if (!invoice) throw new ApiError(404, 'Invoice not found');
 
-    // --- Step 1: Build invoice items ---
+    // --- Step 1: Build invoice items (with resolved productIds) ---
     const invoiceItems = [];
     for (const item of items) {
       const productId = await findOrCreateProduct(invoice.store, item, session);
+
+      if (!productId) {
+        console.warn(`[updateInvoice] No productId resolved for item: "${item.name}"`);
+      }
+
       invoiceItems.push({
         ...item,
-        ...(productId ? { product: productId } : {}),
+        // ✅ Always attach product field — resolved or fallback to existing
+        product: productId ?? item.product ?? null,
       });
     }
+
+    console.log(
+      '[updateInvoice] resolved items:',
+      JSON.stringify(invoiceItems.map((i) => ({ name: i.name, product: i.product })))
+    );
 
     // --- Step 2: Update or re-link customer ---
     const customerId = await findOrCreateCustomer(
@@ -350,7 +234,6 @@ export const updateInvoice = async (invoiceId, data) => {
     await reverseStockAfterSale(invoice, session);
 
     // --- Step 4: Reverse old transaction ---
-    // Delete the existing transaction tied to this invoice so we can recreate it fresh
     await Transaction.deleteMany({ invoice: invoice._id }, { session });
 
     // --- Step 5: Update invoice fields ---
@@ -363,7 +246,7 @@ export const updateInvoice = async (invoiceId, data) => {
 
     await invoice.save({ session });
 
-    // --- Step 6: Recreate transaction with updated payment data ---
+    // --- Step 6: Recreate transaction ---
     await createTransaction(
       {
         store: invoice.store,
@@ -376,7 +259,15 @@ export const updateInvoice = async (invoiceId, data) => {
     );
 
     // --- Step 7: Apply new stock ---
-    await updateStockAfterSale(invoice, session);
+    // ✅ Pass data from request.body BUT with productIds injected from Step 1
+    await updateStockAfterSale(
+      {
+        ...data, // all request.body fields (invoiceDate, storeSettings, etc.)
+        _id: invoice._id, // ✅ needed for saleId in stock transaction
+        items: invoiceItems, // ✅ items now have product field attached
+      },
+      session
+    );
 
     await session.commitTransaction();
     return invoice;
@@ -1509,7 +1400,7 @@ export const getItemStockReport = async (filters = {}) => {
 };
 
 const getFinancialYearDateRange = (financialYear) => {
-  const startYear = parseInt(financialYear.split("-")[0]);
+  const startYear = parseInt(financialYear.split('-')[0]);
   const endYear = startYear + 1;
 
   const startDate = new Date(startYear, 3, 1); // April 1
@@ -1522,14 +1413,7 @@ const getFinancialYearDateRange = (financialYear) => {
 };
 
 export const getStockBalance = async (filters = {}) => {
-  const {
-    store,
-    itemName,
-    transactionType,
-    minStock,
-    maxStock,
-    financialYear,
-  } = filters;
+  const { store, itemName, transactionType, minStock, maxStock, financialYear } = filters;
 
   const storeId = new mongoose.Types.ObjectId(String(store));
 
@@ -1542,13 +1426,13 @@ export const getStockBalance = async (filters = {}) => {
   // ===================
   const productMatch = {
     store: storeId,
-    status: { $ne: "cancelled" },
+    status: { $ne: 'cancelled' },
   };
 
   if (itemName && itemName.trim()) {
     productMatch.name = {
       $regex: itemName.trim(),
-      $options: "i",
+      $options: 'i',
     };
   }
 
@@ -1564,9 +1448,9 @@ export const getStockBalance = async (filters = {}) => {
           $arrayElemAt: [
             {
               $filter: {
-                input: "$financialYearStocks",
-                as: "fy",
-                cond: { $eq: ["$$fy.financialYear", financialYear] },
+                input: '$financialYearStocks',
+                as: 'fy',
+                cond: { $eq: ['$$fy.financialYear', financialYear] },
               },
             },
             0,
@@ -1577,10 +1461,10 @@ export const getStockBalance = async (filters = {}) => {
     {
       $addFields: {
         // Opening stock quantity for this FY
-        openingStock: { $ifNull: ["$_fyStock.stock", 0] },
+        openingStock: { $ifNull: ['$_fyStock.stock', 0] },
 
         // Opening stock value for this FY
-        openingStockValue: { $ifNull: ["$_fyStock.value", 0] },
+        openingStockValue: { $ifNull: ['$_fyStock.value', 0] },
       },
     },
 
@@ -1589,37 +1473,35 @@ export const getStockBalance = async (filters = {}) => {
     // ===================
     {
       $lookup: {
-        from: "purchases",
-        let: { productId: "$_id" },
+        from: 'purchases',
+        let: { productId: '$_id' },
         pipeline: [
           {
             $match: {
               store: storeId,
-              status: { $ne: "cancelled" },
-              ...(fyStartDate && fyEndDate
-                ? { date: { $gte: fyStartDate, $lte: fyEndDate } }
-                : {}),
+              status: { $ne: 'cancelled' },
+              ...(fyStartDate && fyEndDate ? { date: { $gte: fyStartDate, $lte: fyEndDate } } : {}),
             },
           },
-          { $unwind: "$items" },
+          { $unwind: '$items' },
           {
             $match: {
-              $expr: { $eq: ["$items.product", "$$productId"] },
+              $expr: { $eq: ['$items.product', '$$productId'] },
             },
           },
           {
             $group: {
               _id: null,
-              totalQty: { $sum: "$items.quantity" },
+              totalQty: { $sum: '$items.quantity' },
               totalValue: {
-                $sum: { $multiply: ["$items.quantity", "$items.rate"] },
+                $sum: { $multiply: ['$items.quantity', '$items.rate'] },
               },
               // Last purchase rate — used for currentStockValue
-              lastPurchaseRate: { $last: "$items.rate" },
+              lastPurchaseRate: { $last: '$items.rate' },
             },
           },
         ],
-        as: "purchaseData",
+        as: 'purchaseData',
       },
     },
 
@@ -1628,32 +1510,30 @@ export const getStockBalance = async (filters = {}) => {
     // ===================
     {
       $lookup: {
-        from: "invoices",
-        let: { productId: "$_id" },
+        from: 'invoices',
+        let: { productId: '$_id' },
         pipeline: [
           {
             $match: {
               store: storeId,
-              status: { $ne: "cancelled" },
-              ...(fyStartDate && fyEndDate
-                ? { invoiceDate: { $gte: fyStartDate, $lte: fyEndDate } }
-                : {}),
+              status: { $ne: 'cancelled' },
+              ...(fyStartDate && fyEndDate ? { invoiceDate: { $gte: fyStartDate, $lte: fyEndDate } } : {}),
             },
           },
-          { $unwind: "$items" },
+          { $unwind: '$items' },
           {
             $match: {
-              $expr: { $eq: ["$items.product", "$$productId"] },
+              $expr: { $eq: ['$items.product', '$$productId'] },
             },
           },
           {
             $group: {
               _id: null,
-              qty: { $sum: "$items.quantity" },
+              qty: { $sum: '$items.quantity' },
             },
           },
         ],
-        as: "salesData",
+        as: 'salesData',
       },
     },
 
@@ -1662,27 +1542,24 @@ export const getStockBalance = async (filters = {}) => {
     // ===================
     {
       $lookup: {
-        from: "stocktransactions",
-        let: { productId: "$_id" },
+        from: 'stocktransactions',
+        let: { productId: '$_id' },
         pipeline: [
           {
             $match: {
               $expr: {
                 $and: [
-                  { $eq: ["$product", "$$productId"] },
-                  { $eq: ["$store", storeId] },
+                  { $eq: ['$product', '$$productId'] },
+                  { $eq: ['$store', storeId] },
                   ...(fyStartDate && fyEndDate
-                    ? [
-                        { $gte: ["$date", fyStartDate] },
-                        { $lte: ["$date", fyEndDate] },
-                      ]
+                    ? [{ $gte: ['$date', fyStartDate] }, { $lte: ['$date', fyEndDate] }]
                     : []),
                 ],
               },
             },
           },
         ],
-        as: "transactions",
+        as: 'transactions',
       },
     },
 
@@ -1693,16 +1570,16 @@ export const getStockBalance = async (filters = {}) => {
       $addFields: {
         // ---------- Quantities from lookups ----------
         purchaseQty: {
-          $ifNull: [{ $arrayElemAt: ["$purchaseData.totalQty", 0] }, 0],
+          $ifNull: [{ $arrayElemAt: ['$purchaseData.totalQty', 0] }, 0],
         },
         purchaseTotalValue: {
-          $ifNull: [{ $arrayElemAt: ["$purchaseData.totalValue", 0] }, 0],
+          $ifNull: [{ $arrayElemAt: ['$purchaseData.totalValue', 0] }, 0],
         },
         lastPurchaseRate: {
-          $ifNull: [{ $arrayElemAt: ["$purchaseData.lastPurchaseRate", 0] }, 0],
+          $ifNull: [{ $arrayElemAt: ['$purchaseData.lastPurchaseRate', 0] }, 0],
         },
         saleQty: {
-          $ifNull: [{ $arrayElemAt: ["$salesData.qty", 0] }, 0],
+          $ifNull: [{ $arrayElemAt: ['$salesData.qty', 0] }, 0],
         },
 
         // ---------- Transaction-based quantities ----------
@@ -1710,14 +1587,10 @@ export const getStockBalance = async (filters = {}) => {
           // SALE_RETURN → stock comes back IN
           $sum: {
             $map: {
-              input: "$transactions",
-              as: "tx",
+              input: '$transactions',
+              as: 'tx',
               in: {
-                $cond: [
-                  { $eq: ["$$tx.transactionType", "SALE_RETURN"] },
-                  "$$tx.quantity",
-                  0,
-                ],
+                $cond: [{ $eq: ['$$tx.transactionType', 'SALE_RETURN'] }, '$$tx.quantity', 0],
               },
             },
           },
@@ -1727,14 +1600,10 @@ export const getStockBalance = async (filters = {}) => {
           // PURCHASE_RETURN → stock goes OUT
           $sum: {
             $map: {
-              input: "$transactions",
-              as: "tx",
+              input: '$transactions',
+              as: 'tx',
               in: {
-                $cond: [
-                  { $eq: ["$$tx.transactionType", "PURCHASE_RETURN"] },
-                  "$$tx.quantity",
-                  0,
-                ],
+                $cond: [{ $eq: ['$$tx.transactionType', 'PURCHASE_RETURN'] }, '$$tx.quantity', 0],
               },
             },
           },
@@ -1743,14 +1612,10 @@ export const getStockBalance = async (filters = {}) => {
         damageQty: {
           $sum: {
             $map: {
-              input: "$transactions",
-              as: "tx",
+              input: '$transactions',
+              as: 'tx',
               in: {
-                $cond: [
-                  { $eq: ["$$tx.transactionType", "DAMAGE"] },
-                  "$$tx.quantity",
-                  0,
-                ],
+                $cond: [{ $eq: ['$$tx.transactionType', 'DAMAGE'] }, '$$tx.quantity', 0],
               },
             },
           },
@@ -1759,14 +1624,10 @@ export const getStockBalance = async (filters = {}) => {
         expiredQty: {
           $sum: {
             $map: {
-              input: "$transactions",
-              as: "tx",
+              input: '$transactions',
+              as: 'tx',
               in: {
-                $cond: [
-                  { $eq: ["$$tx.transactionType", "EXPIRED"] },
-                  "$$tx.quantity",
-                  0,
-                ],
+                $cond: [{ $eq: ['$$tx.transactionType', 'EXPIRED'] }, '$$tx.quantity', 0],
               },
             },
           },
@@ -1781,21 +1642,18 @@ export const getStockBalance = async (filters = {}) => {
             {
               $sum: {
                 $map: {
-                  input: "$transactions",
-                  as: "tx",
+                  input: '$transactions',
+                  as: 'tx',
                   in: {
                     $cond: [
                       {
-                        $in: [
-                          "$$tx.transactionType",
-                          ["NEW_PURCHASE", "STOCK_CORRECTION", "FREE_STOCK"],
-                        ],
+                        $in: ['$$tx.transactionType', ['NEW_PURCHASE', 'STOCK_CORRECTION', 'FREE_STOCK']],
                       },
                       {
                         $cond: [
-                          { $eq: ["$$tx.direction", "IN"] },
-                          "$$tx.quantity",
-                          { $multiply: ["$$tx.quantity", -1] },
+                          { $eq: ['$$tx.direction', 'IN'] },
+                          '$$tx.quantity',
+                          { $multiply: ['$$tx.quantity', -1] },
                         ],
                       },
                       0,
@@ -1808,17 +1666,14 @@ export const getStockBalance = async (filters = {}) => {
             {
               $sum: {
                 $map: {
-                  input: "$transactions",
-                  as: "tx",
+                  input: '$transactions',
+                  as: 'tx',
                   in: {
                     $cond: [
                       {
-                        $in: [
-                          "$$tx.transactionType",
-                          ["INTERNAL_USE", "STOCK_REDUCE"],
-                        ],
+                        $in: ['$$tx.transactionType', ['INTERNAL_USE', 'STOCK_REDUCE']],
                       },
-                      "$$tx.quantity",
+                      '$$tx.quantity',
                       0,
                     ],
                   },
@@ -1828,7 +1683,7 @@ export const getStockBalance = async (filters = {}) => {
           ],
         },
 
-        closingStock: "$currentStock",
+        closingStock: '$currentStock',
       },
     },
 
@@ -1840,22 +1695,18 @@ export const getStockBalance = async (filters = {}) => {
       $addFields: {
         // Opening stock rate = openingStockValue / openingStock  (0 if no opening stock)
         openingStockRate: {
-          $cond: [
-            { $gt: ["$openingStock", 0] },
-            { $divide: ["$openingStockValue", "$openingStock"] },
-            0,
-          ],
+          $cond: [{ $gt: ['$openingStock', 0] }, { $divide: ['$openingStockValue', '$openingStock'] }, 0],
         },
 
         // Average Purchase Rate
         // = (openingStockValue + totalPurchaseValue) / (openingStock + purchaseQty)
         avgRate: {
           $cond: [
-            { $gt: [{ $add: ["$openingStock", "$purchaseQty"] }, 0] },
+            { $gt: [{ $add: ['$openingStock', '$purchaseQty'] }, 0] },
             {
               $divide: [
-                { $add: ["$openingStockValue", "$purchaseTotalValue"] },
-                { $add: ["$openingStock", "$purchaseQty"] },
+                { $add: ['$openingStockValue', '$purchaseTotalValue'] },
+                { $add: ['$openingStock', '$purchaseQty'] },
               ],
             },
             0,
@@ -1872,13 +1723,13 @@ export const getStockBalance = async (filters = {}) => {
           {
             $match: (() => {
               switch (transactionType) {
-                case "DAMAGE":
+                case 'DAMAGE':
                   return { damageQty: { $gt: 0 } };
-                case "EXPIRED":
+                case 'EXPIRED':
                   return { expiredQty: { $gt: 0 } };
-                case "PURCHASE":
+                case 'PURCHASE':
                   return { purchaseQty: { $gt: 0 } };
-                case "SALE":
+                case 'SALE':
                   return { saleQty: { $gt: 0 } };
                 default:
                   return {};
@@ -1911,7 +1762,7 @@ export const getStockBalance = async (filters = {}) => {
       $project: {
         _id: 0,
 
-        itemDescription: "$name",
+        itemDescription: '$name',
 
         openingStock: 1,
 
@@ -1933,24 +1784,20 @@ export const getStockBalance = async (filters = {}) => {
 
         // Average Purchase Rate
         // = (openingStockValue + totalPurchaseValue) / (openingStock + purchaseQty)
-        avgRate: { $ifNull: ["$avgRate", 0] },
+        avgRate: { $ifNull: ['$avgRate', 0] },
 
         // Average Stock Value = closingStock × avgRate
         averageStockValue: {
-          $multiply: ["$closingStock", { $ifNull: ["$avgRate", 0] }],
+          $multiply: ['$closingStock', { $ifNull: ['$avgRate', 0] }],
         },
 
         // Current Stock Value = closingStock × lastPurchaseRate
         // Fallback: if no purchase in this FY → use openingStockRate
         currentStockValue: {
           $multiply: [
-            "$closingStock",
+            '$closingStock',
             {
-              $cond: [
-                { $gt: ["$lastPurchaseRate", 0] },
-                "$lastPurchaseRate",
-                "$openingStockRate",
-              ],
+              $cond: [{ $gt: ['$lastPurchaseRate', 0] }, '$lastPurchaseRate', '$openingStockRate'],
             },
           ],
         },

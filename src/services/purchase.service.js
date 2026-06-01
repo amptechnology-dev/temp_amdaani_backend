@@ -179,19 +179,19 @@ export const updatePurchase = async (purchaseId, data) => {
       console.log('=> existingPurchase:', JSON.stringify(existingPurchase));
 
       // Comment out old logic because of bug fixing 
-      // await reverseStockAfterPurchase(data, session);
-      await reverseStockAfterPurchase(existingPurchase, session);
-
-      // Object.assign(existingPurchase, purchasePayload);
-      // await existingPurchase.save({ session });
-      // await updateStockAfterPurchase(data, session);
+      await reverseStockAfterPurchase(data, session);
+      // await reverseStockAfterPurchase(existingPurchase, session);
 
       Object.assign(existingPurchase, purchasePayload);
       await existingPurchase.save({ session });
-      await updateStockAfterPurchase(
-        existingPurchase,
-        session
-      );
+      await updateStockAfterPurchase(data, session);
+
+      // Object.assign(existingPurchase, purchasePayload);
+      // await existingPurchase.save({ session });
+      // await updateStockAfterPurchase(
+      //   existingPurchase,
+      //   session
+      // );
 
       // ✅ Handle partial payment update
 

@@ -1,81 +1,49 @@
 import { Product } from '../models/product.model.js';
 import { Store } from '../models/store.model.js';
-import { Invoice } from "../models/invoice.model.js";
+import { Invoice } from '../models/invoice.model.js';
 // import { ApiError } from '../utils/responseHandler.js';
 import { handleDuplicateKeyError } from '../utils/dbErrorHandler.js';
 import { StockTransactionType } from '../config/constants.js';
 import { StockTransaction } from '../models/stockTransaction.model.js';
 import mongoose from 'mongoose';
 
-export const createProduct = async (
-  data,
-  session = null
-) => {
+export const createProduct = async (data, session = null) => {
   try {
-    const {
-      openingStock = 0,
-      value = 0,
-      ...productData
-    } = data;
+    const { openingStock = 0, value = 0, ...productData } = data;
 
     // Find store
-    const store =
-      await Store.findById(
-        productData.store
-      ).session(session);
+    const store = await Store.findById(productData.store).session(session);
 
     if (!store) {
-      throw new Error(
-        'Store not found'
-      );
+      throw new Error('Store not found');
     }
 
-    const currentFY =
-      store.currentFinancialYear;
+    const currentFY = store.currentFinancialYear;
 
     if (!currentFY) {
-      throw new Error(
-        'Current financial year not found'
-      );
+      throw new Error('Current financial year not found');
     }
 
     // Always create FY stock entry
     productData.financialYearStocks = [
       {
-        financialYear:
-          currentFY,
-        stock:
-          Number(
-            openingStock
-          ) || 0,
+        financialYear: currentFY,
+        stock: Number(openingStock) || 0,
         value: Number(value) || 0,
       },
     ];
 
     // Set current stock
-    productData.currentStock =
-      Number(
-        openingStock
-      ) || 0;
+    productData.currentStock = Number(openingStock) || 0;
 
     // productData.costPrice = value && openingStock ? Number(value) / Number(openingStock) : 0;
 
     // Create product
-    const product =
-      new Product(
-        productData
-      );
+    const product = new Product(productData);
 
-    return await product.save(
-      session
-        ? { session }
-        : undefined
-    );
+    return await product.save(session ? { session } : undefined);
   } catch (error) {
-    handleDuplicateKeyError(
-      error,
-      Product
-    );
+    handleDuplicateKeyError(error, Product);
   }
 };
 
@@ -175,12 +143,7 @@ export const findOrCreateProduct = async (store, data, session = null) => {
   return null;
 };
 
-export const getAllProductsWithSales = async (
-  storeId,
-  startDate,
-  endDate,
-  search = ""
-) => {
+export const getAllProductsWithSales = async (storeId, startDate, endDate, search = '') => {
   const start = startDate instanceof Date ? startDate : null;
   const end = endDate instanceof Date ? endDate : null;
 
@@ -192,22 +155,22 @@ export const getAllProductsWithSales = async (
     {
       $match: {
         store: new mongoose.Types.ObjectId(storeId),
-        name: { $regex: search, $options: "i" },
+        name: { $regex: search, $options: 'i' },
       },
     },
 
     {
       $lookup: {
-        from: "invoices",
-        let: { productId: "$_id" },
+        from: 'invoices',
+        let: { productId: '$_id' },
 
         pipeline: [
-          { $unwind: "$items" },
+          { $unwind: '$items' },
 
           {
             $match: {
               $expr: {
-                $eq: ["$items.product", "$$productId"],
+                $eq: ['$items.product', '$$productId'],
               },
             },
           },
@@ -215,7 +178,7 @@ export const getAllProductsWithSales = async (
           {
             $match: {
               store: new mongoose.Types.ObjectId(storeId),
-              status: "active",
+              status: 'active',
               ...(start && end
                 ? { invoiceDate: { $gte: start, $lte: end } }
                 : start
@@ -229,17 +192,17 @@ export const getAllProductsWithSales = async (
           {
             $group: {
               _id: null,
-              totalQuantity: { $sum: "$items.quantity" },
+              totalQuantity: { $sum: '$items.quantity' },
               totalRevenue: {
                 $sum: {
-                  $multiply: ["$items.quantity", "$items.sellingPrice"],
+                  $multiply: ['$items.quantity', '$items.sellingPrice'],
                 },
               },
             },
           },
         ],
 
-        as: "salesData",
+        as: 'salesData',
       },
     },
 
@@ -251,10 +214,10 @@ export const getAllProductsWithSales = async (
         unit: 1,
         sellingPrice: 1,
         totalSold: {
-          $ifNull: [{ $arrayElemAt: ["$salesData.totalQuantity", 0] }, 0],
+          $ifNull: [{ $arrayElemAt: ['$salesData.totalQuantity', 0] }, 0],
         },
         totalRevenue: {
-          $ifNull: [{ $arrayElemAt: ["$salesData.totalRevenue", 0] }, 0],
+          $ifNull: [{ $arrayElemAt: ['$salesData.totalRevenue', 0] }, 0],
         },
       },
     },
@@ -278,30 +241,97 @@ const adjustProductStockForSale = async (data, session = null) => {
     productId,
     date = new Date(),
     transactionType = StockTransactionType.SALE,
-    quantity, // should be negative for OUT
-    rate,
+
+    quantity,
+    rate = 0,
+
     saleId = null,
+    purchaseId = null, // rarely needed on sale side, kept for consistency
+
+    salePrice,
+    purchasePrice,
+    sellingDiscount,
+    purchaseDiscount,
+
     remarks = '',
+
+    hsn,
+    isTaxInclusive = false,
+    isPurchaseTaxInclusive = false,
+    gstRate,
   } = data;
 
+  // ==========================
+  // FIND PRODUCT
+  // ==========================
   const product = await Product.findById(productId).session(session);
-  if (!product) return;
 
-  // ✅ Safe numeric guards
+  if (!product) {
+    throw new Error(`Product not found: ${productId}`);
+  }
+
+  // ==========================
+  // SAFE NUMERIC PARSING
+  // ==========================
   const safeRate = Number(rate ?? 0);
   const safeQuantity = Number(quantity ?? 0);
   const safeTotalAmount = Number((safeRate * Math.abs(safeQuantity)).toFixed(2));
 
   if (isNaN(safeQuantity) || isNaN(safeRate) || isNaN(safeTotalAmount)) {
-    console.error('❌ Invalid stock values for sale item:', data);
-    throw new Error(`Invalid numeric values in stock transaction for product ${productId}`);
+    throw new Error(`Invalid numeric values for product ${productId}`);
   }
 
-  // ✅ Update stock level only — no price fields touched
-  product.currentStock = product.currentStock + safeQuantity;
+  console.log('a', safeQuantity);
+
+  // ==========================
+  // UPDATE CURRENT STOCK
+  // ==========================
+  product.currentStock += safeQuantity; // negative quantity = OUT (deduct on sale)
+
+  // ==========================
+  // UPDATE PRODUCT INFO
+  // ==========================
+  if (salePrice !== undefined) {
+    product.sellingPrice = salePrice;
+  }
+
+  if (purchasePrice !== undefined) {
+    product.costPrice = purchasePrice;
+  }
+
+  if (sellingDiscount !== undefined) {
+    product.discountPrice = sellingDiscount;
+  }
+
+  if (purchaseDiscount !== undefined) {
+    product.purchaseDiscount = purchaseDiscount;
+  }
+
+  if (hsn) {
+    product.hsn = hsn;
+  }
+
+  if (isTaxInclusive !== undefined) {
+    product.isTaxInclusive = isTaxInclusive;
+  }
+
+  if (isPurchaseTaxInclusive !== undefined) {
+    product.isPurchaseTaxInclusive = isPurchaseTaxInclusive;
+  }
+
+  if (gstRate !== undefined) {
+    product.gstRate = gstRate;
+    product.purchaseGstRate = gstRate;
+  }
+
+  // ==========================
+  // SAVE PRODUCT
+  // ==========================
   await product.save({ session });
 
-  // ✅ Record stock transaction with rate + totalAmount
+  // ==========================
+  // CREATE STOCK TRANSACTION
+  // ==========================
   const stockTransaction = new StockTransaction({
     product: productId,
     store: product.store,
@@ -312,11 +342,17 @@ const adjustProductStockForSale = async (data, session = null) => {
     rate: safeRate,
     totalAmount: safeTotalAmount,
     saleId,
+    purchaseId,
     remarks,
   });
 
+  // ==========================
+  // SAVE TRANSACTION
+  // ==========================
   return stockTransaction.save({ session });
 };
+
+export { adjustProductStockForSale };
 
 export const reverseStockAfterPurchaseDelete = async (purchase, session = null) => {
   const { items = [], date, _id: purchaseId } = purchase;
@@ -347,10 +383,7 @@ export const reverseStockAfterPurchaseDelete = async (purchase, session = null) 
   }
 };
 
-export const adjustProductStock = async (
-  data,
-  session = null
-) => {
+export const adjustProductStock = async (data, session = null) => {
   const {
     productId,
     date = new Date(),
@@ -379,87 +412,52 @@ export const adjustProductStock = async (
   // ==========================
   // FIND PRODUCT
   // ==========================
-  const product =
-    await Product.findById(
-      productId
-    ).session(session);
+  const product = await Product.findById(productId).session(session);
 
   if (!product) {
-    throw new Error(
-      'Product not found'
-    );
+    throw new Error('Product not found');
   }
 
   // ==========================
   // UPDATE CURRENT STOCK
   // ==========================
-  product.currentStock +=
-    quantity;
+  product.currentStock += quantity;
 
   // ==========================
   // UPDATE PRODUCT INFO
   // ==========================
-  if (
-    purchasePrice !==
-    undefined
-  ) {
-    product.costPrice =
-      purchasePrice;
+  if (purchasePrice !== undefined) {
+    product.costPrice = purchasePrice;
   }
 
-  if (
-    salePrice !==
-    undefined
-  ) {
-    product.sellingPrice =
-      salePrice;
+  if (salePrice !== undefined) {
+    product.sellingPrice = salePrice;
   }
 
-  if (
-    sellingDiscount !==
-    undefined
-  ) {
-    product.discountPrice =
-      sellingDiscount;
+  if (sellingDiscount !== undefined) {
+    product.discountPrice = sellingDiscount;
   }
 
-  if (
-    purchaseDiscount !==
-    undefined
-  ) {
-    product.purchaseDiscount =
-      purchaseDiscount;
+  if (purchaseDiscount !== undefined) {
+    product.purchaseDiscount = purchaseDiscount;
   }
 
   if (hsn) {
     product.hsn = hsn;
   }
 
-  if (
-    isTaxInclusive !==
-    undefined
-  ) {
-    product.isTaxInclusive =
-      isTaxInclusive;
+  if (isTaxInclusive !== undefined) {
+    product.isTaxInclusive = isTaxInclusive;
   }
 
-  if (
-    isPurchaseTaxInclusive !==
-    undefined
-  ) {
-    product.isPurchaseTaxInclusive =
-      isPurchaseTaxInclusive;
+  if (isPurchaseTaxInclusive !== undefined) {
+    product.isPurchaseTaxInclusive = isPurchaseTaxInclusive;
   }
 
-  if (
-    gstRate !==
-    undefined
-  ) {
-    product.gstRate =
-      gstRate;
+  if (gstRate !== undefined) {
+    product.gstRate = gstRate;
 
-    product.purchaseGstRate =
-      gstRate;
+    product.purchaseGstRate = gstRate;
   }
 
   // ==========================
@@ -472,69 +470,41 @@ export const adjustProductStock = async (
   // ==========================
   // CREATE STOCK TRANSACTION
   // ==========================
-  const stockTransaction =
-    new StockTransaction({
-      product:
-        productId,
+  const stockTransaction = new StockTransaction({
+    product: productId,
 
-      store:
-        product.store,
+    store: product.store,
 
-      batch:
-        batchId,
+    batch: batchId,
 
-      date,
+    date,
 
+    transactionType: transactionType || 'MANUAL',
 
-      transactionType:
-        transactionType ||
-        'MANUAL',
+    quantity: Math.abs(quantity),
 
-      quantity:
-        Math.abs(
-          quantity
-        ),
+    direction: quantity >= 0 ? 'IN' : 'OUT',
 
-      direction:
-        quantity >= 0
-          ? 'IN'
-          : 'OUT',
+    rate,
 
-      rate,
+    purchaseId,
+    saleId,
 
-      purchaseId,
-      saleId,
+    totalAmount: rate * Math.abs(quantity),
 
-      totalAmount:
-        rate *
-        Math.abs(
-          quantity
-        ),
-
-      remarks,
-    });
+    remarks,
+  });
 
   // ==========================
   // SAVE TRANSACTION
   // ==========================
-  return await stockTransaction.save(
-    {
-      session,
-    }
-  );
+  return await stockTransaction.save({
+    session,
+  });
 };
 
-export const getStockTransactionsByProduct = async (
-  productId,
-  filters = {},
-  options = {}
-) => {
-  const {
-    page = 1,
-    limit = 20,
-    sortBy = 'createdAt',
-    order = 'desc',
-  } = options;
+export const getStockTransactionsByProduct = async (productId, filters = {}, options = {}) => {
+  const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;
 
   const sort = {
     [sortBy]: order === 'desc' ? -1 : 1,
@@ -580,10 +550,7 @@ export const getStockTransactionsByProduct = async (
     leanWithId: false,
   };
 
-  return StockTransaction.aggregatePaginate(
-    aggregate,
-    paginationOptions
-  );
+  return StockTransaction.aggregatePaginate(aggregate, paginationOptions);
 };
 
 export const updateStockAfterPurchase = async (purchase, session = null) => {
@@ -644,44 +611,34 @@ export const onlyupdateStockAfterPurchase = async (purchase, session = null) => 
 };
 
 export const reverseStockAfterSale = async (sale, session = null) => {
-  const saleId = sale._id;
+  const { items = [], date, _id: saleId } = sale;
+  if (!items.length) return;
 
-  // Find all stock transactions for this sale
-  // const transactions = await StockTransaction.find({ saleId }).session(session);
-  const transactions = await StockTransaction.find({
-    saleId, reversed: { $ne: true },
-  }).session(session);
+  console.log('reverse sale => ', items);
 
-  if (!transactions.length) return;
-  for (const txn of transactions) {
-    const product = await Product.findById(txn.product).session(session);
-    if (!product) continue;
-
-    // Reverse the stock: if original was OUT (negative), we add back; if IN, we subtract
-    const reversalQuantity = txn.direction === 'OUT' ? txn.quantity : -txn.quantity;
-    product.currentStock = product.currentStock + reversalQuantity;
-    await product.save({ session });
-
-    // Record a reversal transaction for audit trail
-    const reversalTxn = new StockTransaction({
-      product: txn.product,
-      store: txn.store,
-      date: new Date(),
-      transactionType: StockTransactionType.ADJUSTMENT,
-      quantity: txn.quantity,
-      direction: txn.direction === 'OUT' ? 'IN' : 'OUT', // flip direction
-      rate: txn.rate,
-      totalAmount: txn.totalAmount,
+  // ✅ Delete old stock transactions tied to this sale
+  await StockTransaction.deleteMany(
+    {
       saleId,
-      remarks: `Reversal of sale transaction for invoice edit`,
-    });
+      transactionType: StockTransactionType.SALE, // only delete SALE txns, not prior reversals
+    },
+    { session }
+  );
 
-    await reversalTxn.save({ session });
-
-    // Mark original transaction as reversed
-    txn.reversed = true;
-    txn.remarks = (txn.remarks || '') + ' [REVERSED]';
-    await txn.save({ session });
+  // ✅ Reverse each item by applying negative quantity
+  for (const item of items) {
+    await adjustProductStockForSale(
+      {
+        productId: item.product,
+        date: date || new Date(),
+        transactionType: StockTransactionType.SALE_REVERSE,
+        quantity: item.previousQuantity ?? item.quantity, // 👈 negative to add stock back
+        rate: item.rate ?? item.salePrice ?? 0,
+        saleId,
+        remarks: `Sale reversed for ${item.previousQuantity ?? item.quantity} units`,
+      },
+      session
+    );
   }
 };
 
@@ -712,29 +669,81 @@ export const reverseStockAfterSale = async (sale, session = null) => {
 //   }
 // };
 
+export const createupdateStockAfterSale = async (sale, session = null) => {
+  const { items = [], store } = sale;
+  if (!items.length) return;
+
+  const stockEnabled = sale.storeSettings?.stockManagement ?? true;
+  if (!stockEnabled) return;
+
+  console.log('update stock sale ===> ', JSON.stringify(items));
+
+  for (const item of items) {
+    // item.product may be a populated Mongoose document, extract _id safely
+    const productId = item.product?._id ?? item.product;
+    if (!productId) continue;
+
+    const quantity = Number(item.quantity ?? item.qty ?? 0);
+    if (!quantity) continue;
+
+    await adjustProductStockForSale(
+      {
+        productId,
+        date: sale.invoiceDate || new Date(),
+        transactionType: StockTransactionType.SALE,
+        quantity: -quantity, // 👈 negative = OUT (opposite of purchase)
+        rate: item.sellingPrice ?? item.rate ?? item.price ?? 0,
+        saleId: sale._id,
+        purchasePrice: item.costPrice ?? item.purchasePrice,
+        salePrice: item.sellingPrice ?? item.rate,
+        sellingDiscount: item.sellingDiscount,
+        purchaseDiscount: item.purchaseDiscount,
+        isTaxInclusive: item.isTaxInclusive,
+        isPurchaseTaxInclusive: item.isPurchaseTaxInclusive,
+        hsn: item.hsn,
+        gstRate: item.gstRate,
+        remarks: `Sale deducted for ${quantity} units`,
+      },
+      session
+    );
+  }
+};
+
 export const updateStockAfterSale = async (sale, session = null) => {
   const { items = [], store } = sale;
   if (!items.length) return;
 
-  const storeSettings = sale.settings || {};
-  if (!storeSettings.stockManagement) return;
+  const stockEnabled = sale.storeSettings?.stockManagement ?? true;
+  if (!stockEnabled) return;
+
+  console.log('update stock sale ===> ', JSON.stringify(items));
 
   for (const item of items) {
-    if (!item.product) continue;
+    // item.product may be a populated Mongoose document, extract _id safely
+    const productId = item.product?._id ?? item.product;
+    if (!productId) continue;
 
     const quantity = Number(item.quantity ?? item.qty ?? 0);
-    const rate = Number(item.sellingPrice ?? item.rate ?? item.price ?? 0);
+    if (!quantity) continue;
 
-    if (!quantity) continue; // skip zero-qty items
+    console.log('--->', quantity);
 
     await adjustProductStockForSale(
       {
-        productId: item.product,
+        productId,
         date: sale.invoiceDate || new Date(),
         transactionType: StockTransactionType.SALE,
-        quantity: -quantity, // ✅ negative = OUT
-        rate, // ✅ rate now passed
+        quantity: -quantity, // 👈 negative = OUT (opposite of purchase)
+        rate: item.sellingPrice ?? item.rate ?? item.price ?? 0,
         saleId: sale._id,
+        purchasePrice: item.costPrice ?? item.purchasePrice,
+        salePrice: item.sellingPrice ?? item.rate,
+        sellingDiscount: item.sellingDiscount,
+        purchaseDiscount: item.purchaseDiscount,
+        isTaxInclusive: item.isTaxInclusive,
+        isPurchaseTaxInclusive: item.isPurchaseTaxInclusive,
+        hsn: item.hsn,
+        gstRate: item.gstRate,
         remarks: `Sale deducted for ${quantity} units`,
       },
       session
@@ -743,118 +752,75 @@ export const updateStockAfterSale = async (sale, session = null) => {
 };
 
 export const carryForwardStockToNextFinancialYear = async (storeId) => {
-  const store =
-    await Store.findById(
-      storeId
-    );
+  const store = await Store.findById(storeId);
 
   if (!store) {
-    throw new ApiError(
-      404,
-      'Store not found'
-    );
+    throw new ApiError(404, 'Store not found');
   }
 
-  const currentFY =
-    store.currentFinancialYear;
+  const currentFY = store.currentFinancialYear;
 
   if (!currentFY) {
-    throw new ApiError(
-      400,
-      'Current financial year not found'
-    );
+    throw new ApiError(400, 'Current financial year not found');
   }
 
   // Generate next FY
-  const [
-    startYear,
-    endYear,
-  ] =
-    currentFY
-      .split('-')
-      .map(Number);
+  const [startYear, endYear] = currentFY.split('-').map(Number);
 
   const nextFY = `${startYear + 1}-${endYear + 1}`;
 
   // Get all products
-  const products =
-    await Product.find({
-      store: storeId,
-    });
+  const products = await Product.find({
+    store: storeId,
+  });
 
   for (const product of products) {
-    const alreadyExists =
-      product.financialYearStocks.some(
-        (item) =>
-          item.financialYear ===
-          nextFY
-      );
+    const alreadyExists = product.financialYearStocks.some((item) => item.financialYear === nextFY);
 
     // Skip if already exists
-    if (alreadyExists)
-      continue;
+    if (alreadyExists) continue;
 
     // Add next FY opening stock
-    product.financialYearStocks.push(
-      {
-        financialYear:
-          nextFY,
-        stock:
-          product.currentStock,
-        value: product.costPrice && product.currentStock ? Number(product.costPrice) * Number(product.currentStock) : 0,
-      }
-    );
+    product.financialYearStocks.push({
+      financialYear: nextFY,
+      stock: product.currentStock,
+      value: product.costPrice && product.currentStock ? Number(product.costPrice) * Number(product.currentStock) : 0,
+    });
 
     await product.save();
   }
 
   // Update store current FY
-  store.currentFinancialYear =
-    nextFY;
+  store.currentFinancialYear = nextFY;
 
   await store.save();
 
   return {
-    message:
-      'Stock carried forward successfully',
+    message: 'Stock carried forward successfully',
     currentFY,
     nextFY,
   };
 };
 
-export const getProductSuggestions =
-  async (
-    storeId,
-    search = ""
-  ) => {
-    if (
-      !search ||
-      !search.trim()
-    ) {
-      return [];
-    }
+export const getProductSuggestions = async (storeId, search = '') => {
+  if (!search || !search.trim()) {
+    return [];
+  }
 
-    return Product.find({
-      store:
-        new mongoose.Types.ObjectId(
-          storeId
-        ),
+  return Product.find({
+    store: new mongoose.Types.ObjectId(storeId),
 
-      status:
-        "active",
+    status: 'active',
 
-      name: {
-        $regex:
-          search.trim(),
-        $options: "i",
-      },
+    name: {
+      $regex: search.trim(),
+      $options: 'i',
+    },
+  })
+    .select('_id name sku currentStock sellingPrice')
+    .sort({
+      name: 1,
     })
-      .select(
-        "_id name sku currentStock sellingPrice"
-      )
-      .sort({
-        name: 1,
-      })
-      .limit(10)
-      .lean();
-  };
+    .limit(10)
+    .lean();
+};

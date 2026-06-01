@@ -643,3 +643,21 @@ export const removePaymentFromInvoice = expressAsyncHandler(async (req, res) => 
   const updatedInvoice = await invoiceService.modifyDueAmount(payment.invoice, amountPaid, amountDue);
   return new ApiResponse(200, updatedInvoice, 'Payment removed successfully').send(res);
 });
+
+
+export const getCustomerReport = expressAsyncHandler(
+  async (req, res) => {
+    const report =
+      await invoiceService.getCustomerReport({
+        store: req.user.store,
+        startDate: req.query.startDate,
+        endDate: req.query.endDate,
+      });
+
+    return new ApiResponse(
+      200,
+      report,
+      'Customer report fetched successfully'
+    ).send(res);
+  }
+);

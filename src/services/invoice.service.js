@@ -1913,3 +1913,104 @@ export const cancelAfterSaleStock = async (invoiceId) => {
     }
   }
 };
+
+export const getCustomerReport = async ({
+  store,
+  startDate,
+  endDate,
+}) => {
+  const match = {
+    store: new mongoose.Types.ObjectId(String(store)),
+  };
+
+  if (startDate && endDate) {
+    match.createdAt = {
+      $gte: new Date(startDate),
+      $lte: new Date(endDate),
+    };
+  }
+
+  return Invoice.aggregate([
+    {
+      $match: match,
+    },
+
+    {
+      $lookup: {
+        from: 'customers',
+        localField: 'customer',
+        foreignField: '_id',
+        as: 'customer',
+      },
+    },
+
+    {
+      $unwind: {
+        path: '$customer',
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+
+    {
+      $sort: {
+        createdAt: -1,
+      },
+    },
+
+    {
+      $group: {
+        _id: '$customer._id',
+
+        customerName: {
+          $first: '$customer.name',
+        },
+
+        invoices: {
+          $push: {
+            _id: '$_id',
+            invoiceNumber: '$invoiceNumber',
+            grandTotal: '$grandTotal',
+            amountPaid: '$amountPaid',
+            amountDue: '$amountDue',
+            status: '$status',
+            createdAt: '$createdAt',
+          },
+        },
+
+        totalInvoices: {
+          $sum: 1,
+        },
+
+        totalAmount: {
+          $sum: '$grandTotal',
+        },
+
+        totalPaid: {
+          $sum: '$amountPaid',
+        },
+
+        totalDue: {
+          $sum: '$amountDue',
+        },
+      },
+    },
+
+    {
+      $project: {
+        _id: 0,
+        customerName: 1,
+        totalInvoices: 1,
+        totalAmount: 1,
+        totalPaid: 1,
+        totalDue: 1,
+        invoices: 1,
+      },
+    },
+
+    {
+      $sort: {
+        customerName: 1,
+      },
+    },
+  ]);
+};

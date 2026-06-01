@@ -197,4 +197,31 @@ export const getPurchasesReport = expressAsyncHandler(async (req, res) => {
   return new ApiResponse(200, purchases, 'Purchase report fetched successfully').send(res);
 });
 
+export const getVendorWisePurchaseReport =
+  expressAsyncHandler(
+    async (req, res) => {
+      const filters = pick(
+        req.query,
+        [
+          'startDate',
+          'endDate',
+        ]
+      );
+
+      filters.store =
+        req.user.store;
+
+      const result =
+        await purchaseService.getVendorWisePurchaseReport(
+          filters
+        );
+
+      return new ApiResponse(
+        200,
+        result,
+        'Vendor wise purchase report fetched successfully'
+      ).send(res);
+    }
+  );
+
 

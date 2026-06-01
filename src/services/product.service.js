@@ -281,6 +281,8 @@ const adjustProductStockForSale = async (data, session = null) => {
     throw new Error(`Invalid numeric values for product ${productId}`);
   }
 
+  console.log('a', safeQuantity);
+
   // ==========================
   // UPDATE CURRENT STOCK
   // ==========================
@@ -501,17 +503,8 @@ export const adjustProductStock = async (data, session = null) => {
   });
 };
 
-export const getStockTransactionsByProduct = async (
-  productId,
-  filters = {},
-  options = {}
-) => {
-  const {
-    page = 1,
-    limit = 20,
-    sortBy = 'createdAt',
-    order = 'desc',
-  } = options;
+export const getStockTransactionsByProduct = async (productId, filters = {}, options = {}) => {
+  const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;
 
   const sort = {
     [sortBy]: order === 'desc' ? -1 : 1,
@@ -557,10 +550,7 @@ export const getStockTransactionsByProduct = async (
     leanWithId: false,
   };
 
-  return StockTransaction.aggregatePaginate(
-    aggregate,
-    paginationOptions
-  );
+  return StockTransaction.aggregatePaginate(aggregate, paginationOptions);
 };
 
 export const updateStockAfterPurchase = async (purchase, session = null) => {
@@ -642,7 +632,7 @@ export const reverseStockAfterSale = async (sale, session = null) => {
         productId: item.product,
         date: date || new Date(),
         transactionType: StockTransactionType.SALE_REVERSE,
-        quantity: -(item.previousQuantity ?? item.quantity), // 👈 negative to add stock back
+        quantity: item.previousQuantity ?? item.quantity, // 👈 negative to add stock back
         rate: item.rate ?? item.salePrice ?? 0,
         saleId,
         remarks: `Sale reversed for ${item.previousQuantity ?? item.quantity} units`,
@@ -736,12 +726,14 @@ export const updateStockAfterSale = async (sale, session = null) => {
     const quantity = Number(item.quantity ?? item.qty ?? 0);
     if (!quantity) continue;
 
+    console.log('--->', quantity);
+
     await adjustProductStockForSale(
       {
         productId,
         date: sale.invoiceDate || new Date(),
         transactionType: StockTransactionType.SALE,
-        quantity: quantity, // 👈 negative = OUT (opposite of purchase)
+        quantity: -quantity, // 👈 negative = OUT (opposite of purchase)
         rate: item.sellingPrice ?? item.rate ?? item.price ?? 0,
         saleId: sale._id,
         purchasePrice: item.costPrice ?? item.purchasePrice,

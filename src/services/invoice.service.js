@@ -177,8 +177,6 @@ export const createInvoice = async (data) => {
 export const updateInvoice = async (invoiceId, data) => {
   const { items = [] } = data;
 
-  console.log('Updating invoice with items:', JSON.stringify(items));
-
   if (!items.length) {
     throw new ApiError(400, 'Invalid invoice items!', {
       source: 'body',
@@ -191,21 +189,29 @@ export const updateInvoice = async (invoiceId, data) => {
   try {
     session.startTransaction();
 
-    // Find the existing invoice
     const invoice = await Invoice.findById(invoiceId).session(session);
     if (!invoice) throw new ApiError(404, 'Invoice not found');
 
-    console.log('Existing Invoice:', JSON.stringify(invoice));
-
-    // --- Step 1: Build invoice items ---
+    // --- Step 1: Build invoice items (with resolved productIds) ---
     const invoiceItems = [];
     for (const item of items) {
       const productId = await findOrCreateProduct(invoice.store, item, session);
+
+      if (!productId) {
+        console.warn(`[updateInvoice] No productId resolved for item: "${item.name}"`);
+      }
+
       invoiceItems.push({
         ...item,
-        ...(productId ? { product: productId } : {}),
+        // ✅ Always attach product field — resolved or fallback to existing
+        product: productId ?? item.product ?? null,
       });
     }
+
+    console.log(
+      '[updateInvoice] resolved items:',
+      JSON.stringify(invoiceItems.map((i) => ({ name: i.name, product: i.product })))
+    );
 
     // --- Step 2: Update or re-link customer ---
     const customerId = await findOrCreateCustomer(
@@ -228,7 +234,6 @@ export const updateInvoice = async (invoiceId, data) => {
     await reverseStockAfterSale(invoice, session);
 
     // --- Step 4: Reverse old transaction ---
-    // Delete the existing transaction tied to this invoice so we can recreate it fresh
     await Transaction.deleteMany({ invoice: invoice._id }, { session });
 
     // --- Step 5: Update invoice fields ---
@@ -241,7 +246,7 @@ export const updateInvoice = async (invoiceId, data) => {
 
     await invoice.save({ session });
 
-    // --- Step 6: Recreate transaction with updated payment data ---
+    // --- Step 6: Recreate transaction ---
     await createTransaction(
       {
         store: invoice.store,
@@ -254,7 +259,15 @@ export const updateInvoice = async (invoiceId, data) => {
     );
 
     // --- Step 7: Apply new stock ---
-    await updateStockAfterSale(data, session);
+    // ✅ Pass data from request.body BUT with productIds injected from Step 1
+    await updateStockAfterSale(
+      {
+        ...data, // all request.body fields (invoiceDate, storeSettings, etc.)
+        _id: invoice._id, // ✅ needed for saleId in stock transaction
+        items: invoiceItems, // ✅ items now have product field attached
+      },
+      session
+    );
 
     await session.commitTransaction();
     return invoice;

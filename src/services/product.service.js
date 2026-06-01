@@ -409,6 +409,8 @@ export const adjustProductStock = async (data, session = null) => {
     gstRate,
   } = data;
 
+  console.log('Adjusting stock for product', JSON.stringify(productId), 'with quantity', JSON.stringify(quantity));
+
   // ==========================
   // FIND PRODUCT
   // ==========================
@@ -732,7 +734,7 @@ export const updateStockAfterSale = async (sale, session = null) => {
       {
         productId,
         date: sale.invoiceDate || new Date(),
-        transactionType: StockTransactionType.SALE,
+        transactionType: StockTransactionType.SALE_REVERSE,
         quantity: -quantity, // 👈 negative = OUT (opposite of purchase)
         rate: item.sellingPrice ?? item.rate ?? item.price ?? 0,
         saleId: sale._id,

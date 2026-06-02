@@ -11,48 +11,25 @@ import mongoose from 'mongoose';
 import { Role } from '../models/role.model.js';
 import { roles } from '../config/roles.js';
 
-export const createInvoice =
-  expressAsyncHandler(
-    async (req, res) => {
-      req.body.store =
-        req.user.store;
+export const createInvoice = expressAsyncHandler(async (req, res) => {
+  req.body.store = req.user.store;
 
-      req.body.userId =
-        req.user.id;
+  req.body.userId = req.user.id;
 
-      console.log(
-        'Request to create invoice with data:',
-        JSON.stringify(
-          req.body
-        )
-      );
+  console.log('Request to create invoice with data:', JSON.stringify(req.body));
 
-      const invoice =
-        await invoiceService.createInvoice(
-          req.body
-        );
+  const invoice = await invoiceService.createInvoice(req.body);
 
-      if (
-        req.subscription
-      ) {
-        await updateUsage(
-          req.subscription
-            ._id,
-          {
-            $inc: {
-              invoicesUsed: 1,
-            },
-          }
-        );
-      }
+  if (req.subscription) {
+    await updateUsage(req.subscription._id, {
+      $inc: {
+        invoicesUsed: 1,
+      },
+    });
+  }
 
-      return new ApiResponse(
-        201,
-        invoice,
-        'Invoice created successfully'
-      ).send(res);
-    }
-  );
+  return new ApiResponse(201, invoice, 'Invoice created successfully').send(res);
+});
 
 export const updateInvoice = expressAsyncHandler(async (req, res) => {
   const invoice = await invoiceService.updateInvoice(req.params.id, req.body);
@@ -82,11 +59,11 @@ export const getInvoices = expressAsyncHandler(async (req, res) => {
 
   const isStaff = req.user?.role?.name === 'staff';
 
-  console.log("IS STAFF:", isStaff);
+  console.log('IS STAFF:', isStaff);
 
   if (isStaff) {
     filters.userId = new mongoose.Types.ObjectId(req.user._id);
-    console.log("STAFF FILTER APPLIED:", filters.userId);
+    console.log('STAFF FILTER APPLIED:', filters.userId);
   }
 
   const now = new Date();
@@ -117,14 +94,10 @@ export const getInvoices = expressAsyncHandler(async (req, res) => {
 
   const invoices = await invoiceService.queryInvoices(filters, options);
 
-  console.log("USER:", req.user);
-  console.log("IS STAFF FILTER APPLIED:", filters.userId);
+  console.log('USER:', req.user);
+  console.log('IS STAFF FILTER APPLIED:', filters.userId);
 
-  return new ApiResponse(
-    200,
-    invoices,
-    'Invoices fetched successfully'
-  ).send(res);
+  return new ApiResponse(200, invoices, 'Invoices fetched successfully').send(res);
 });
 
 export const getLastInvoice = expressAsyncHandler(async (req, res) => {
@@ -590,11 +563,7 @@ export const getItemStockReport = expressAsyncHandler(async (req, res) => {
     financialYear,
   });
 
-  return new ApiResponse(
-    200,
-    report,
-    "Item stock report fetched successfully"
-  ).send(res);
+  return new ApiResponse(200, report, 'Item stock report fetched successfully').send(res);
 });
 
 export const addPayment = expressAsyncHandler(async (req, res) => {
@@ -644,20 +613,12 @@ export const removePaymentFromInvoice = expressAsyncHandler(async (req, res) => 
   return new ApiResponse(200, updatedInvoice, 'Payment removed successfully').send(res);
 });
 
+export const getCustomerReport = expressAsyncHandler(async (req, res) => {
+  const report = await invoiceService.getCustomerReport({
+    store: req.user.store,
+    startDate: req.query.startDate,
+    endDate: req.query.endDate,
+  });
 
-export const getCustomerReport = expressAsyncHandler(
-  async (req, res) => {
-    const report =
-      await invoiceService.getCustomerReport({
-        store: req.user.store,
-        startDate: req.query.startDate,
-        endDate: req.query.endDate,
-      });
-
-    return new ApiResponse(
-      200,
-      report,
-      'Customer report fetched successfully'
-    ).send(res);
-  }
-);
+  return new ApiResponse(200, report, 'Customer report fetched successfully').send(res);
+});

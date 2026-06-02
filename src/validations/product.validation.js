@@ -49,7 +49,10 @@ export const createProductSchema = {
       .min(0, 'GST rate cannot be negative')
       .max(28, 'GST rate cannot be more than 100'),
     mrp: yup.number().typeError('GST rate must be a number').min(0, 'GST rate cannot be negative'),
-    openingStock: yup.number().typeError('Opening stock must be a number').min(0, 'Opening stock cannot be negative')
+    openingStock: yup
+      .number()
+      .typeError('Opening stock must be a number')
+      .min(0, 'Opening stock cannot be negative')
       .default(0),
     purchaseGstRate: yup
       .number()
@@ -76,6 +79,7 @@ export const updateProductSchema = {
       sku: yup.string().trim().max(100),
       hsn: yup.string().trim().max(50),
       unit: yup.string().trim().max(50),
+      openingStock: yup.number().typeError('Opening stock must be a number').min(0, 'Opening stock cannot be negative'),
       costPrice: yup.number().typeError('Cost price must be a number').min(0, 'Cost price cannot be negative'),
       sellingPrice: yup.number().typeError('Selling price must be a number').min(0, 'Selling price cannot be negative'),
       isTaxInclusive: yup.boolean(),
@@ -121,57 +125,23 @@ export const adjustStockSchema = {
   body: yup.object().shape({
     productId: yup
       .string()
-      .test(
-        'isObjectId',
-        'Invalid product ID',
-        (v) =>
-          isValidObjectId(v)
-      )
-      .required(
-        'Product ID is required'
-      ),
+      .test('isObjectId', 'Invalid product ID', (v) => isValidObjectId(v))
+      .required('Product ID is required'),
 
-    date: yup
-      .date()
-      .required(
-        'Date is required'
-      ),
+    date: yup.date().required('Date is required'),
 
-    transactionType: yup
-      .string()
-      .trim()
-      .required(
-        'Transaction type is required'
-      ),
+    transactionType: yup.string().trim().required('Transaction type is required'),
 
     quantity: yup
       .number()
-      .typeError(
-        'Quantity must be a number'
-      )
-      .notOneOf(
-        [0],
-        'Quantity cannot be zero'
-      )
-      .required(
-        'Quantity is required'
-      ),
+      .typeError('Quantity must be a number')
+      .notOneOf([0], 'Quantity cannot be zero')
+      .required('Quantity is required'),
 
-    rate: yup
-      .number()
-      .typeError(
-        'Rate must be a number'
-      )
-      .required(
-        'Rate is required'
-      ),
+    rate: yup.number().typeError('Rate must be a number').required('Rate is required'),
 
-    batchId:
-      yup.string(),
+    batchId: yup.string(),
 
-    remarks: yup
-      .string()
-      .trim()
-      .max(500),
+    remarks: yup.string().trim().max(500),
   }),
 };

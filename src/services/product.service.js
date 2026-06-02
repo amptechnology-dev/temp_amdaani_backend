@@ -114,12 +114,89 @@ export const queryProduct = async (filters = {}, options = {}) => {
 };
 
 export const getProductById = async (id) => {
-  return Product.findById(id);
+  const product = await Product.findById(id).lean();
+
+  if (!product) {
+    return null;
+  }
+
+  const store = await Store.findById(product.store)
+    .select('currentFinancialYear')
+    .lean();
+
+  const currentFY = store?.currentFinancialYear;
+
+  const financialYearStock =
+    product.financialYearStocks?.find(
+      (fy) => fy.financialYear === currentFY
+    ) || {
+      financialYear: currentFY,
+      stock: 0,
+      value: 0,
+    };
+
+  delete product.financialYearStocks;
+
+  return {
+    ...product,
+    financialYearStock,
+  };
 };
 
 export const updateProductById = async (id, data, session = null) => {
   try {
-    return Product.findByIdAndUpdate(id, data, { session, new: true, runValidators: true });
+    const { openingStock, value, ...updateData } = data;
+    const product = await Product.findById(id).session(session);
+    if (!product) {
+      return null;
+    }
+
+    // ==========================
+    // UPDATE CURRENT FY OPENING STOCK
+    // ==========================
+    if (openingStock !== undefined || value !== undefined) {
+      const store = await Store.findById(product.store).session(session);
+
+      if (!store) {
+        throw new Error('Store not found');
+      }
+
+      const currentFY = store.currentFinancialYear;
+
+      if (!currentFY) {
+        throw new Error('Current financial year not found');
+      }
+
+      const fyIndex = product.financialYearStocks.findIndex((fy) => fy.financialYear === currentFY);
+
+      if (fyIndex > -1) {
+        if (openingStock !== undefined) {
+          product.financialYearStocks[fyIndex].stock = Number(openingStock) || 0;
+        }
+
+        if (value !== undefined) {
+          product.financialYearStocks[fyIndex].value = Number(value) || 0;
+        }
+      } else {
+        product.financialYearStocks.push({
+          financialYear: currentFY,
+          stock: Number(openingStock) || 0,
+          value: Number(value) || 0,
+        });
+      }
+
+      // current stock sync with opening stock
+      if (openingStock !== undefined) {
+        product.currentStock = Number(openingStock) || 0;
+      }
+    }
+
+    // ==========================
+    // UPDATE OTHER FIELDS
+    // ==========================
+    Object.assign(product, updateData);
+
+    return await product.save({ session });
   } catch (error) {
     handleDuplicateKeyError(error, Product);
   }

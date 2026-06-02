@@ -1724,13 +1724,35 @@ export const getStockBalance = async (filters = {}) => {
             $match: (() => {
               switch (transactionType) {
                 case 'DAMAGE':
-                  return { damageQty: { $gt: 0 } };
+                  return {
+                    damageQty: { $gt: 0 },
+                  };
+
                 case 'EXPIRED':
-                  return { expiredQty: { $gt: 0 } };
+                  return {
+                    expiredQty: { $gt: 0 },
+                  };
+
                 case 'PURCHASE':
-                  return { purchaseQty: { $gt: 0 } };
+                  return {
+                    purchaseQty: { $gt: 0 },
+                  };
+
                 case 'SALE':
-                  return { saleQty: { $gt: 0 } };
+                  return {
+                    saleQty: { $gt: 0 },
+                  };
+
+                case 'PURCHASE_RETURN':
+                  return {
+                    returnOutQty: { $gt: 0 },
+                  };
+
+                case 'SALE_RETURN':
+                  return {
+                    returnInQty: { $gt: 0 },
+                  };
+
                 default:
                   return {};
               }
@@ -1914,11 +1936,7 @@ export const cancelAfterSaleStock = async (invoiceId) => {
   }
 };
 
-export const getCustomerReport = async ({
-  store,
-  startDate,
-  endDate,
-}) => {
+export const getCustomerReport = async ({ store, startDate, endDate }) => {
   const match = {
     store: new mongoose.Types.ObjectId(String(store)),
   };

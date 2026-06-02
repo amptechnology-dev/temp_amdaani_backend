@@ -160,7 +160,7 @@ export const createInvoice = async (data) => {
       session
     );
 
-    await updateStockAfterSale(invoice, session);
+    await createupdateStockAfterSale(invoice, session);
 
     await session.commitTransaction();
 

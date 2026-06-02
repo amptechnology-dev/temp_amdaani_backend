@@ -120,20 +120,15 @@ export const getProductById = async (id) => {
     return null;
   }
 
-  const store = await Store.findById(product.store)
-    .select('currentFinancialYear')
-    .lean();
+  const store = await Store.findById(product.store).select('currentFinancialYear').lean();
 
   const currentFY = store?.currentFinancialYear;
 
-  const financialYearStock =
-    product.financialYearStocks?.find(
-      (fy) => fy.financialYear === currentFY
-    ) || {
-      financialYear: currentFY,
-      stock: 0,
-      value: 0,
-    };
+  const financialYearStock = product.financialYearStocks?.find((fy) => fy.financialYear === currentFY) || {
+    financialYear: currentFY,
+    stock: 0,
+    value: 0,
+  };
 
   delete product.financialYearStocks;
 
@@ -806,6 +801,8 @@ export const updateStockAfterSale = async (sale, session = null) => {
     if (!quantity) continue;
 
     console.log('--->', quantity);
+
+    console.log('productId', productId);
 
     await adjustProductStockForSale(
       {

@@ -1914,7 +1914,11 @@ export const cancelAfterSaleStock = async (invoiceId) => {
   }
 };
 
-export const getCustomerReport = async ({ store, startDate, endDate }) => {
+export const getCustomerReport = async ({
+  store,
+  startDate,
+  endDate,
+}) => {
   const match = {
     store: new mongoose.Types.ObjectId(String(store)),
   };

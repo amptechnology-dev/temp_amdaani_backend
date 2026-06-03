@@ -200,6 +200,10 @@ export const getPurchasesReport = expressAsyncHandler(async (req, res) => {
 export const getVendorWisePurchaseReport = expressAsyncHandler(async (req, res) => {
   const filters = pick(req.query, ['startDate', 'endDate']);
 
+  const { range } = req.query;
+
+  console.log('reage ', req.query);
+
   filters.store = req.user.store;
 
   const now = new Date();
@@ -207,13 +211,12 @@ export const getVendorWisePurchaseReport = expressAsyncHandler(async (req, res) 
   let startDate;
   let endDate;
 
-  // ✅ First priority: custom date range
+  // ✅ First priority: custom date range (accepts timestamp OR ISO string)
   if (req.query.startDate && req.query.endDate) {
     const rawStart = req.query.startDate;
     const rawEnd = req.query.endDate;
 
     startDate = new Date(/^\d+$/.test(rawStart) ? Number(rawStart) : rawStart);
-
     endDate = new Date(/^\d+$/.test(rawEnd) ? Number(rawEnd) : rawEnd);
 
     if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
@@ -222,6 +225,24 @@ export const getVendorWisePurchaseReport = expressAsyncHandler(async (req, res) 
         message: 'Invalid date format.',
       });
     }
+  }
+
+  // ✅ this month
+  else if (range === 'thisMonth') {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  }
+
+  // ✅ previous month
+  else if (range === 'previousMonth') {
+    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+  }
+
+  // ✅ current year
+  else if (range === 'year') {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
   }
 
   // ✅ apply date filter

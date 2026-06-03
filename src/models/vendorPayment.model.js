@@ -7,7 +7,7 @@ const vendorPaymentSchema = new mongoose.Schema(
       ref: 'Store',
       required: true,
     },
-    userId:{
+    userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
     },
@@ -23,7 +23,7 @@ const vendorPaymentSchema = new mongoose.Schema(
     paymentDate: { type: Date, default: Date.now },
     paymentMethod: {
       type: String,
-      enum: ['cash', 'card', 'upi', 'bank-transfer', 'cheque'],
+      enum: ['cash', 'card', 'upi', 'bank_transfer', 'cheque'],
       default: 'cash',
     },
     referenceNumber: String,

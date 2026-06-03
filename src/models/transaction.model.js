@@ -9,7 +9,7 @@ const transactionSchema = new mongoose.Schema(
     },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
+      ref: 'User',
     },
     invoice: {
       type: mongoose.Schema.Types.ObjectId,
@@ -22,7 +22,7 @@ const transactionSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['cash', 'card', 'upi', 'bank-transfer', 'cheque'],
+      enum: ['cash', 'card', 'upi', 'bank_transfer', 'cheque'],
       default: 'cash',
     },
     note: String,

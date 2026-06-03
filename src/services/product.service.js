@@ -41,7 +41,31 @@ export const createProduct = async (data, session = null) => {
     // Create product
     const product = new Product(productData);
 
-    return await product.save(session ? { session } : undefined);
+    // console.log('product data', JSON.stringify(product));
+
+    // const stockTransaction = new StockTransaction({
+    //   product: product._id,
+    //   store: product.store,
+    //   data: product.
+    // })
+
+    const saveData = await product.save(session ? { session } : undefined);
+
+    const safeTotalAmount = Number((Number(value) || 0 * Math.abs(Number(openingStock) || 0)).toFixed(2));
+
+    const stockTransaction = new StockTransaction({
+      product: saveData._id,
+      store: product.store,
+      date: product.createdAt,
+      transactionType: StockTransactionType.OPENINGSTOCK,
+      quantity: Number(openingStock) || 0,
+      direction: 'IN',
+      rate: Number(value) || 0,
+      totalAmount: safeTotalAmount,
+    });
+    console.log('product data', JSON.stringify(saveData));
+    await stockTransaction.save({ session });
+    return saveData;
   } catch (error) {
     handleDuplicateKeyError(error, Product);
   }
@@ -191,7 +215,34 @@ export const updateProductById = async (id, data, session = null) => {
     // ==========================
     Object.assign(product, updateData);
 
-    return await product.save({ session });
+    const saveData = await product.save({ session });
+
+    await StockTransaction.deleteMany(
+      {
+        product: saveData._id,
+        transactionType: StockTransactionType.OPENINGSTOCK, // only delete SALE txns, not prior reversals
+      },
+      { session }
+    );
+
+    const safeTotalAmount = Number((Number(value) || 0 * Math.abs(Number(openingStock) || 0)).toFixed(2));
+
+    const stockTransaction = new StockTransaction({
+      product: saveData._id,
+      store: product.store,
+      date: product.createdAt,
+      transactionType: StockTransactionType.OPENINGSTOCK,
+      quantity: Number(openingStock) || 0,
+      direction: 'IN',
+      rate: Number(value) || 0,
+      totalAmount: safeTotalAmount,
+    });
+
+    await stockTransaction.save({ session });
+
+    console.log('tras', stockTransaction);
+
+    return saveData;
   } catch (error) {
     handleDuplicateKeyError(error, Product);
   }

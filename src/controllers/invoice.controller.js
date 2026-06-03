@@ -614,16 +614,25 @@ export const removePaymentFromInvoice = expressAsyncHandler(async (req, res) => 
 });
 
 export const getCustomerReport = expressAsyncHandler(async (req, res) => {
+  const filters = pick(req.query, ['startDate', 'endDate']);
+
+  const { range } = req.query;
+
+  console.log('reage ', req.query);
+
+  filters.store = req.user.store;
+
+  const now = new Date();
+
   let startDate;
   let endDate;
 
-  // ✅ Custom date range
+  // ✅ First priority: custom date range (accepts timestamp OR ISO string)
   if (req.query.startDate && req.query.endDate) {
     const rawStart = req.query.startDate;
     const rawEnd = req.query.endDate;
 
     startDate = new Date(/^\d+$/.test(rawStart) ? Number(rawStart) : rawStart);
-
     endDate = new Date(/^\d+$/.test(rawEnd) ? Number(rawEnd) : rawEnd);
 
     if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
@@ -634,14 +643,34 @@ export const getCustomerReport = expressAsyncHandler(async (req, res) => {
     }
   }
 
+  // ✅ this month
+  else if (range === 'thisMonth') {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  }
+
+  // ✅ previous month
+  else if (range === 'previousMonth') {
+    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+  }
+
+  // ✅ current year
+  else if (range === 'year') {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+  }
+
+  // ✅ apply date filter
+  if (startDate && endDate) {
+    filters.startDate = startDate;
+    filters.endDate = endDate;
+  }
+
   console.log('start date', startDate);
   console.log('endDate', endDate);
 
-  const report = await invoiceService.getCustomerReport({
-    store: req.user.store,
-    startDate,
-    endDate,
-  });
+  const report = await invoiceService.getCustomerReport(filters);
 
   return new ApiResponse(200, report, 'Customer report fetched successfully').send(res);
 });

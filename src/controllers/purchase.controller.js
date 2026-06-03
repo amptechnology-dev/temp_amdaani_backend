@@ -197,31 +197,43 @@ export const getPurchasesReport = expressAsyncHandler(async (req, res) => {
   return new ApiResponse(200, purchases, 'Purchase report fetched successfully').send(res);
 });
 
-export const getVendorWisePurchaseReport =
-  expressAsyncHandler(
-    async (req, res) => {
-      const filters = pick(
-        req.query,
-        [
-          'startDate',
-          'endDate',
-        ]
-      );
+export const getVendorWisePurchaseReport = expressAsyncHandler(async (req, res) => {
+  const filters = pick(req.query, ['startDate', 'endDate']);
 
-      filters.store =
-        req.user.store;
+  filters.store = req.user.store;
 
-      const result =
-        await purchaseService.getVendorWisePurchaseReport(
-          filters
-        );
+  const now = new Date();
 
-      return new ApiResponse(
-        200,
-        result,
-        'Vendor wise purchase report fetched successfully'
-      ).send(res);
+  let startDate;
+  let endDate;
+
+  // ✅ First priority: custom date range
+  if (req.query.startDate && req.query.endDate) {
+    const rawStart = req.query.startDate;
+    const rawEnd = req.query.endDate;
+
+    startDate = new Date(/^\d+$/.test(rawStart) ? Number(rawStart) : rawStart);
+
+    endDate = new Date(/^\d+$/.test(rawEnd) ? Number(rawEnd) : rawEnd);
+
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid date format.',
+      });
     }
-  );
+  }
 
+  // ✅ apply date filter
+  if (startDate && endDate) {
+    filters.startDate = startDate;
+    filters.endDate = endDate;
+  }
 
+  console.log('start date', startDate);
+  console.log('endDate', endDate);
+
+  const result = await purchaseService.getVendorWisePurchaseReport(filters);
+
+  return new ApiResponse(200, result, 'Vendor wise purchase report fetched successfully').send(res);
+});

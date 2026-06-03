@@ -614,10 +614,33 @@ export const removePaymentFromInvoice = expressAsyncHandler(async (req, res) => 
 });
 
 export const getCustomerReport = expressAsyncHandler(async (req, res) => {
+  let startDate;
+  let endDate;
+
+  // ✅ Custom date range
+  if (req.query.startDate && req.query.endDate) {
+    const rawStart = req.query.startDate;
+    const rawEnd = req.query.endDate;
+
+    startDate = new Date(/^\d+$/.test(rawStart) ? Number(rawStart) : rawStart);
+
+    endDate = new Date(/^\d+$/.test(rawEnd) ? Number(rawEnd) : rawEnd);
+
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid date format.',
+      });
+    }
+  }
+
+  console.log('start date', startDate);
+  console.log('endDate', endDate);
+
   const report = await invoiceService.getCustomerReport({
     store: req.user.store,
-    startDate: req.query.startDate,
-    endDate: req.query.endDate,
+    startDate,
+    endDate,
   });
 
   return new ApiResponse(200, report, 'Customer report fetched successfully').send(res);

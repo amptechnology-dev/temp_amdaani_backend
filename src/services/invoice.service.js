@@ -1939,6 +1939,16 @@ export const cancelAfterSaleStock = async (invoiceId) => {
 export const getCustomerReport = async ({ store, startDate, endDate }) => {
   const match = {
     store: new mongoose.Types.ObjectId(String(store)),
+
+    // ✅ Fully paid invoices বাদ যাবে
+    paymentStatus: {
+      $ne: 'paid',
+    },
+
+    // Optional:
+    status: {
+      $ne: 'cancelled',
+    },
   };
 
   if (startDate && endDate) {
@@ -1990,6 +2000,7 @@ export const getCustomerReport = async ({ store, startDate, endDate }) => {
             grandTotal: '$grandTotal',
             amountPaid: '$amountPaid',
             amountDue: '$amountDue',
+            paymentStatus: '$paymentStatus',
             status: '$status',
             createdAt: '$createdAt',
           },

@@ -1096,6 +1096,10 @@ export const getVendorWisePurchaseReport = async (filters = {}) => {
     status: {
       $ne: 'cancelled',
     },
+
+    paymentStatus: {
+      $in: ['partial', 'unpaid'],
+    },
   };
 
   if (store) {

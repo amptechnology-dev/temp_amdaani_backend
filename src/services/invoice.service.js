@@ -427,7 +427,7 @@ export const queryInvoices = async (filter = {}, options = {}) => {
   const aggregate = Invoice.aggregate([
     { $match: filter },
  
-    // 🔥 STORE LOOKUP
+    // ── STORE LOOKUP ──────────────────────────────────────────────────────
     {
       $lookup: {
         from: 'stores',
@@ -459,34 +459,14 @@ export const queryInvoices = async (filter = {}, options = {}) => {
       },
     },
  
-    // 🔥 MAIN CALCULATION BLOCK
+    // ── MAIN CALCULATION ──────────────────────────────────────────────────
     {
       $addFields: {
  
-        // ─────────────────────────────────────────────────
-        // Per-item base amount (qty × sellingPrice)
-        // ─────────────────────────────────────────────────
-        itemBase: {
-          $map: {
-            input: '$items',
-            as: 'it',
-            in: {
-              $max: [
-                0,
-                {
-                  $multiply: [
-                    { $ifNull: ['$$it.sellingPrice', 0] },
-                    { $ifNull: ['$$it.quantity', 0] },
-                  ],
-                },
-              ],
-            },
-          },
-        },
- 
-        // ─────────────────────────────────────────────────
-        // Discount total across all items
-        // ─────────────────────────────────────────────────
+        // ── discountTotal ────────────────────────────────────────────────
+        // Exclusive : sum of raw discount values
+        // Inclusive : discount is GST-inclusive → back-calculate to excl.
+        //   discountExcl = discount / (1 + gstRate/100)
         discountTotal: {
           $round: [
             {
@@ -494,7 +474,26 @@ export const queryInvoices = async (filter = {}, options = {}) => {
                 $map: {
                   input: '$items',
                   as: 'it',
-                  in: { $ifNull: ['$$it.discount', 0] },
+                  in: {
+                    $cond: [
+                      // isTaxInclusive = true
+                      { $eq: ['$$it.isTaxInclusive', true] },
+                      {
+                        // discountExcl = discount / (1 + gstRate/100)
+                        $divide: [
+                          { $ifNull: ['$$it.discount', 0] },
+                          {
+                            $add: [
+                              1,
+                              { $divide: [{ $ifNull: ['$$it.gstRate', 0] }, 100] },
+                            ],
+                          },
+                        ],
+                      },
+                      // isTaxInclusive = false → discount as-is
+                      { $ifNull: ['$$it.discount', 0] },
+                    ],
+                  },
                 },
               },
             },
@@ -502,9 +501,9 @@ export const queryInvoices = async (filter = {}, options = {}) => {
           ],
         },
  
-        // ─────────────────────────────────────────────────
-        // Taxable value = sum of (base - discount) per item
-        // ─────────────────────────────────────────────────
+        // ── taxableValue ─────────────────────────────────────────────────
+        // Exclusive : (sellingPrice × qty) − discount
+        // Inclusive : (sellingPrice × qty) / (1 + gstRate/100) − discountExcl
         taxableValue: {
           $round: [
             {
@@ -513,17 +512,56 @@ export const queryInvoices = async (filter = {}, options = {}) => {
                   input: '$items',
                   as: 'it',
                   in: {
-                    $max: [
-                      0,
+                    $cond: [
+                      { $eq: ['$$it.isTaxInclusive', true] },
+                      // ── inclusive path ──────────────────────────────
                       {
-                        $subtract: [
-                          {
-                            $multiply: [
-                              { $ifNull: ['$$it.sellingPrice', 0] },
-                              { $ifNull: ['$$it.quantity', 0] },
+                        $let: {
+                          vars: {
+                            divisor: {
+                              $add: [
+                                1,
+                                { $divide: [{ $ifNull: ['$$it.gstRate', 0] }, 100] },
+                              ],
+                            },
+                            baseAmt: {
+                              $multiply: [
+                                { $ifNull: ['$$it.sellingPrice', 0] },
+                                { $ifNull: ['$$it.quantity', 0] },
+                              ],
+                            },
+                            disc: { $ifNull: ['$$it.discount', 0] },
+                          },
+                          in: {
+                            $max: [
+                              0,
+                              {
+                                $subtract: [
+                                  // baseAmt / divisor  →  excl. base
+                                  { $divide: ['$$baseAmt', '$$divisor'] },
+                                  // discountExcl = discount / divisor
+                                  { $divide: ['$$disc', '$$divisor'] },
+                                ],
+                              },
                             ],
                           },
-                          { $ifNull: ['$$it.discount', 0] },
+                        },
+                      },
+                      // ── exclusive path ──────────────────────────────
+                      {
+                        $max: [
+                          0,
+                          {
+                            $subtract: [
+                              {
+                                $multiply: [
+                                  { $ifNull: ['$$it.sellingPrice', 0] },
+                                  { $ifNull: ['$$it.quantity', 0] },
+                                ],
+                              },
+                              { $ifNull: ['$$it.discount', 0] },
+                            ],
+                          },
                         ],
                       },
                     ],
@@ -535,13 +573,9 @@ export const queryInvoices = async (filter = {}, options = {}) => {
           ],
         },
  
-        // ─────────────────────────────────────────────────
-        // GST total = sum of (taxable × gstRate/100) per item
-        // Each item can have a DIFFERENT gstRate → calculate per-item
-        // e.g. Item A: ₹9500 × 5% = ₹475
-        //      Item B: ₹5000 × 18% = ₹900
-        //      gstTotal = ₹1375
-        // ─────────────────────────────────────────────────
+        // ── gstTotal ─────────────────────────────────────────────────────
+        // Both paths: gstAmt = taxableValue_per_item × (gstRate / 100)
+        // (taxableValue is already excl. in both cases, so formula is same)
         gstTotal: {
           $round: [
             {
@@ -552,67 +586,44 @@ export const queryInvoices = async (filter = {}, options = {}) => {
                   in: {
                     $let: {
                       vars: {
-                        itemTaxable: {
-                          $max: [
-                            0,
-                            {
-                              $subtract: [
-                                {
-                                  $multiply: [
-                                    { $ifNull: ['$$it.sellingPrice', 0] },
-                                    { $ifNull: ['$$it.quantity', 0] },
-                                  ],
-                                },
-                                { $ifNull: ['$$it.discount', 0] },
-                              ],
-                            },
+                        divisor: {
+                          $add: [
+                            1,
+                            { $divide: [{ $ifNull: ['$$it.gstRate', 0] }, 100] },
                           ],
                         },
+                        baseAmt: {
+                          $multiply: [
+                            { $ifNull: ['$$it.sellingPrice', 0] },
+                            { $ifNull: ['$$it.quantity', 0] },
+                          ],
+                        },
+                        disc: { $ifNull: ['$$it.discount', 0] },
                       },
-                      in: {
-                        $multiply: [
-                          '$$itemTaxable',
-                          { $divide: [{ $ifNull: ['$$it.gstRate', 0] }, 100] },
-                        ],
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            2,
-          ],
-        },
- 
-        // ─────────────────────────────────────────────────
-        // IGST total (when isIgst = true, full GST goes to IGST)
-        // Same calculation as gstTotal but only used when isIgst flag is set
-        // ─────────────────────────────────────────────────
-        igstTotal: {
-          $cond: [
-            { $eq: ['$isIgst', true] },
-            {
-              $round: [
-                {
-                  $sum: {
-                    $map: {
-                      input: '$items',
-                      as: 'it',
                       in: {
                         $let: {
                           vars: {
+                            // taxable per item (excl.) for both modes
                             itemTaxable: {
                               $max: [
                                 0,
                                 {
-                                  $subtract: [
+                                  $cond: [
+                                    { $eq: ['$$it.isTaxInclusive', true] },
+                                    // inclusive → strip GST from price & discount
                                     {
-                                      $multiply: [
-                                        { $ifNull: ['$$it.sellingPrice', 0] },
-                                        { $ifNull: ['$$it.quantity', 0] },
+                                      $subtract: [
+                                        { $divide: ['$$baseAmt', '$$divisor'] },
+                                        { $divide: ['$$disc', '$$divisor'] },
                                       ],
                                     },
-                                    { $ifNull: ['$$it.discount', 0] },
+                                    // exclusive → price − discount
+                                    {
+                                      $subtract: [
+                                        '$$baseAmt',
+                                        '$$disc',
+                                      ],
+                                    },
                                   ],
                                 },
                               ],
@@ -629,20 +640,15 @@ export const queryInvoices = async (filter = {}, options = {}) => {
                     },
                   },
                 },
-                2,
-              ],
+              },
             },
-            0,
+            2,
           ],
         },
       },
     },
  
-    // ─────────────────────────────────────────────────────
-    // CGST / SGST split (only when isIgst = false)
-    // Each = gstTotal / 2
-    // e.g. gstTotal ₹1375 → cgst ₹687.50, sgst ₹687.50
-    // ─────────────────────────────────────────────────────
+    // ── CGST / SGST / IGST split ─────────────────────────────────────────
     {
       $addFields: {
         cgstTotal: {
@@ -669,11 +675,20 @@ export const queryInvoices = async (filter = {}, options = {}) => {
             2,
           ],
         },
+        igstTotal: {
+          $round: [
+            {
+              $cond: [
+                { $eq: ['$isIgst', true] },
+                '$gstTotal',
+                0,
+              ],
+            },
+            2,
+          ],
+        },
  
-        // ─────────────────────────────────────────────────
-        // Grand total = taxableValue + gstTotal
-        // e.g. ₹9500 + ₹475 = ₹9975
-        // ─────────────────────────────────────────────────
+        // ── Grand total = taxableValue + gstTotal ─────────────────────────
         totalAmount: {
           $round: [
             { $add: ['$taxableValue', '$gstTotal'] },
@@ -683,7 +698,7 @@ export const queryInvoices = async (filter = {}, options = {}) => {
       },
     },
  
-    // Hide raw items array from response
+    // Hide raw items array from API response
     {
       $project: {
         items: 0,

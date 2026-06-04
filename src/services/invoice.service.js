@@ -413,9 +413,13 @@ export const getInvoiceById = async (id) => {
 };
 
 export const queryInvoices = async (filter = {}, options = {}) => {
-  const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;
+  const {
+    page = 1,
+    limit = 20,
+    sortBy = 'createdAt',
+    order = 'desc',
+  } = options;
 
-  // 🧠 FIX: convert userId properly
   if (filter.userId) {
     filter.userId = new mongoose.Types.ObjectId(String(filter.userId));
   }
@@ -423,6 +427,7 @@ export const queryInvoices = async (filter = {}, options = {}) => {
   const aggregate = Invoice.aggregate([
     { $match: filter },
 
+    // 🔥 STORE
     {
       $lookup: {
         from: 'stores',
@@ -455,6 +460,157 @@ export const queryInvoices = async (filter = {}, options = {}) => {
       },
     },
 
+    // 🔥 MAIN CALCULATION BLOCK
+    {
+      $addFields: {
+        // 💰 BASE AMOUNT PER ITEM (qty * price)
+        itemBase: {
+          $map: {
+            input: '$items',
+            as: 'it',
+            in: {
+              $max: [
+                0,
+                {
+                  $multiply: [
+                    { $ifNull: ['$$it.sellingPrice', 0] },
+                    { $ifNull: ['$$it.quantity', 0] },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+
+        // 💰 TAXABLE VALUE (after discount)
+        taxableValue: {
+          $round: [
+            {
+              $sum: {
+                $map: {
+                  input: '$items',
+                  as: 'it',
+                  in: {
+                    $max: [
+                      0,
+                      {
+                        $subtract: [
+                          {
+                            $multiply: [
+                              { $ifNull: ['$$it.sellingPrice', 0] },
+                              { $ifNull: ['$$it.quantity', 0] },
+                            ],
+                          },
+                          { $ifNull: ['$$it.discount', 0] },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            2,
+          ],
+        },
+
+        // 💸 DISCOUNT TOTAL
+        discountTotal: {
+          $round: [
+            {
+              $sum: {
+                $map: {
+                  input: '$items',
+                  as: 'it',
+                  in: { $ifNull: ['$$it.discount', 0] },
+                },
+              },
+            },
+            2,
+          ],
+        },
+
+        // 🧾 GST TOTAL (accurate rate-based)
+        gstTotal: {
+          $round: [
+            {
+              $sum: {
+                $map: {
+                  input: '$items',
+                  as: 'it',
+                  in: {
+                    $let: {
+                      vars: {
+                        base: {
+                          $max: [
+                            0,
+                            {
+                              $subtract: [
+                                {
+                                  $multiply: [
+                                    { $ifNull: ['$$it.sellingPrice', 0] },
+                                    { $ifNull: ['$$it.quantity', 0] },
+                                  ],
+                                },
+                                { $ifNull: ['$$it.discount', 0] },
+                              ],
+                            },
+                          ],
+                        },
+                      },
+                      in: {
+                        $multiply: [
+                          '$$base',
+                          {
+                            $divide: [
+                              { $ifNull: ['$$it.gstRate', 0] },
+                              100,
+                            ],
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            2,
+          ],
+        },
+      },
+    },
+
+    // 🔥 CGST / SGST SPLIT SAFE
+    {
+      $addFields: {
+        cgstTotal: {
+          $round: [
+            {
+              $cond: [
+                { $eq: ['$isIgst', true] },
+                0,
+                { $divide: ['$gstTotal', 2] },
+              ],
+            },
+            2,
+          ],
+        },
+
+        sgstTotal: {
+          $round: [
+            {
+              $cond: [
+                { $eq: ['$isIgst', true] },
+                0,
+                { $divide: ['$gstTotal', 2] },
+              ],
+            },
+            2,
+          ],
+        },
+      },
+    },
+
+    // ❌ optional: hide items
     {
       $project: {
         items: 0,

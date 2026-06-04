@@ -219,6 +219,7 @@ export const exportGstSalesReportExcel = expressAsyncHandler(async (req, res) =>
   const report = await invoiceService.getGstSalesReport({
     startDate,
     endDate,
+    store: req.user.store, 
   });
 
   const workbook = new ExcelJS.Workbook();

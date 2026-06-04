@@ -505,9 +505,7 @@ export const queryPurchasesReport = async (filters = {}) => {
   const { store, startDate, endDate, status } = filters;
 
   const matchStage = {
-    status: {
-      $ne: 'cancelled',
-    },
+    status: { $ne: 'cancelled' },
   };
 
   // ==========================
@@ -522,11 +520,9 @@ export const queryPurchasesReport = async (filters = {}) => {
   // ==========================
   if (startDate && endDate) {
     const start = new Date(startDate);
-
     start.setHours(0, 0, 0, 0);
 
     const end = new Date(endDate);
-
     end.setHours(23, 59, 59, 999);
 
     matchStage.date = {
@@ -543,9 +539,7 @@ export const queryPurchasesReport = async (filters = {}) => {
   }
 
   const result = await Purchase.aggregate([
-    {
-      $match: matchStage,
-    },
+    { $match: matchStage },
 
     // ==========================
     // STORE DETAILS
@@ -574,7 +568,6 @@ export const queryPurchasesReport = async (filters = {}) => {
         ],
       },
     },
-
     {
       $unwind: {
         path: '$store',
@@ -583,7 +576,7 @@ export const queryPurchasesReport = async (filters = {}) => {
     },
 
     // ==========================
-    // PRODUCT DETAILS
+    // PRODUCT LOOKUP
     // ==========================
     {
       $lookup: {
@@ -595,7 +588,7 @@ export const queryPurchasesReport = async (filters = {}) => {
     },
 
     // ==========================
-    // ITEM CALCULATION
+    // ITEM LEVEL CALCULATION (CLEAN FIX)
     // ==========================
     {
       $addFields: {
@@ -606,200 +599,60 @@ export const queryPurchasesReport = async (filters = {}) => {
             in: {
               $let: {
                 vars: {
-                  qty: {
-                    $toDouble: {
-                      $ifNull: ['$$item.quantity', 0],
-                    },
-                  },
+                  qty: { $toDouble: { $ifNull: ['$$item.quantity', 0] } },
+                  rate: { $toDouble: { $ifNull: ['$$item.rate', 0] } },
+                  gstRate: { $toDouble: { $ifNull: ['$$item.gstRate', 0] } },
+                  discount: { $toDouble: { $ifNull: ['$$item.discount', 0] } },
 
-                  rate: {
-                    $toDouble: {
-                      $ifNull: ['$$item.rate', 0],
-                    },
-                  },
-
-                  gstRate: {
-                    $toDouble: {
-                      $ifNull: ['$$item.gstRate', 0],
-                    },
-                  },
-
-                  discount: {
-                    $toDouble: {
-                      $ifNull: ['$$item.discount', 0],
-                    },
-                  },
-
-                  isTaxInclusive: {
-                    $ifNull: ['$$item.isTaxInclusive', false],
+                  // ✅ SINGLE SOURCE OF TRUTH
+                  taxableValue: {
+                    $max: [
+                      0,
+                      {
+                        $subtract: [
+                          {
+                            $multiply: [{ $ifNull: ['$$item.quantity', 0] }, { $ifNull: ['$$item.rate', 0] }],
+                          },
+                          { $ifNull: ['$$item.discount', 0] },
+                        ],
+                      },
+                    ],
                   },
                 },
 
                 in: {
                   _id: '$$item._id',
-
                   product: '$$item.product',
-
                   name: '$$item.name',
-
                   hsn: '$$item.hsn',
-
                   unit: '$$item.unit',
 
                   quantity: '$$qty',
-
                   rate: '$$rate',
-
                   gstRate: '$$gstRate',
-
                   discount: '$$discount',
 
                   // ==================
-                  // DISCOUNT PERCENTAGE (per item)
-                  // ==================
-                  discountPercentage: {
-                    $concat: [
-                      {
-                        $toString: {
-                          $round: [
-                            {
-                              $cond: [
-                                {
-                                  $gt: [
-                                    {
-                                      $multiply: ['$$qty', '$$rate'],
-                                    },
-                                    0,
-                                  ],
-                                },
-                                {
-                                  $multiply: [
-                                    {
-                                      $divide: [
-                                        '$$discount',
-                                        {
-                                          $multiply: ['$$qty', '$$rate'],
-                                        },
-                                      ],
-                                    },
-                                    100,
-                                  ],
-                                },
-                                0,
-                              ],
-                            },
-                            2,
-                          ],
-                        },
-                      },
-                      '%',
-                    ],
-                  },
-
-                  isTaxInclusive: '$$isTaxInclusive',
-
-                  mrp: {
-                    $ifNull: ['$$item.mrp', 0],
-                  },
-
-                  sellingPrice: {
-                    $ifNull: ['$$item.sellingPrice', 0],
-                  },
-
-                  sellingDiscount: {
-                    $ifNull: ['$$item.sellingDiscount', 0],
-                  },
-
-                  // ==================
-                  // BASE AMOUNT
+                  // BASE
                   // ==================
                   baseAmount: {
-                    $round: [
-                      {
-                        $multiply: ['$$qty', '$$rate'],
-                      },
-                      2,
-                    ],
+                    $round: [{ $multiply: ['$$qty', '$$rate'] }, 2],
                   },
 
                   // ==================
-                  // TAXABLE VALUE
+                  // TAXABLE VALUE (FINAL SOURCE)
                   // ==================
                   taxableValue: {
-                    $round: [
-                      {
-                        $subtract: [
-                          {
-                            $multiply: ['$$qty', '$$rate'],
-                          },
-                          '$$discount',
-                        ],
-                      },
-                      2,
-                    ],
+                    $round: ['$$taxableValue', 2],
                   },
 
                   // ==================
-                  // GST AMOUNT
+                  // GST AMOUNT (FIXED)
                   // ==================
                   gstAmount: {
                     $round: [
                       {
-                        $cond: [
-                          '$$isTaxInclusive',
-
-                          {
-                            $subtract: [
-                              {
-                                $subtract: [
-                                  {
-                                    $multiply: ['$$qty', '$$rate'],
-                                  },
-                                  '$$discount',
-                                ],
-                              },
-                              {
-                                $divide: [
-                                  {
-                                    $multiply: [
-                                      {
-                                        $subtract: [
-                                          {
-                                            $multiply: ['$$qty', '$$rate'],
-                                          },
-                                          '$$discount',
-                                        ],
-                                      },
-                                      100,
-                                    ],
-                                  },
-                                  {
-                                    $add: [100, '$$gstRate'],
-                                  },
-                                ],
-                              },
-                            ],
-                          },
-
-                          {
-                            $divide: [
-                              {
-                                $multiply: [
-                                  {
-                                    $subtract: [
-                                      {
-                                        $multiply: ['$$qty', '$$rate'],
-                                      },
-                                      '$$discount',
-                                    ],
-                                  },
-                                  '$$gstRate',
-                                ],
-                              },
-                              100,
-                            ],
-                          },
-                        ],
+                        $multiply: ['$$taxableValue', { $divide: ['$$gstRate', 100] }],
                       },
                       2,
                     ],
@@ -813,30 +666,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                       {
                         $divide: [
                           {
-                            $cond: [
-                              {
-                                $gt: ['$$gstRate', 0],
-                              },
-                              {
-                                $divide: [
-                                  {
-                                    $multiply: [
-                                      {
-                                        $subtract: [
-                                          {
-                                            $multiply: ['$$qty', '$$rate'],
-                                          },
-                                          '$$discount',
-                                        ],
-                                      },
-                                      '$$gstRate',
-                                    ],
-                                  },
-                                  100,
-                                ],
-                              },
-                              0,
-                            ],
+                            $multiply: ['$$taxableValue', { $divide: ['$$gstRate', 100] }],
                           },
                           2,
                         ],
@@ -850,30 +680,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                       {
                         $divide: [
                           {
-                            $cond: [
-                              {
-                                $gt: ['$$gstRate', 0],
-                              },
-                              {
-                                $divide: [
-                                  {
-                                    $multiply: [
-                                      {
-                                        $subtract: [
-                                          {
-                                            $multiply: ['$$qty', '$$rate'],
-                                          },
-                                          '$$discount',
-                                        ],
-                                      },
-                                      '$$gstRate',
-                                    ],
-                                  },
-                                  100,
-                                ],
-                              },
-                              0,
-                            ],
+                            $multiply: ['$$taxableValue', { $divide: ['$$gstRate', 100] }],
                           },
                           2,
                         ],
@@ -882,54 +689,20 @@ export const queryPurchasesReport = async (filters = {}) => {
                     ],
                   },
 
+                  // ==================
+                  // TOTAL (CLEAN FIX)
+                  // ==================
                   total: {
                     $round: [
                       {
                         $add: [
+                          '$$taxableValue',
                           {
-                            $subtract: [
-                              {
-                                $multiply: ['$$qty', '$$rate'],
-                              },
-                              '$$discount',
-                            ],
-                          },
-                          {
-                            $divide: [
-                              {
-                                $multiply: [
-                                  {
-                                    $subtract: [
-                                      {
-                                        $multiply: ['$$qty', '$$rate'],
-                                      },
-                                      '$$discount',
-                                    ],
-                                  },
-                                  '$$gstRate',
-                                ],
-                              },
-                              100,
-                            ],
+                            $multiply: ['$$taxableValue', { $divide: ['$$gstRate', 100] }],
                           },
                         ],
                       },
                       2,
-                    ],
-                  },
-
-                  productDetails: {
-                    $arrayElemAt: [
-                      {
-                        $filter: {
-                          input: '$products',
-                          as: 'product',
-                          cond: {
-                            $eq: ['$$product._id', '$$item.product'],
-                          },
-                        },
-                      },
-                      0,
                     ],
                   },
                 },
@@ -941,143 +714,41 @@ export const queryPurchasesReport = async (filters = {}) => {
     },
 
     // ==========================
-    // INVOICE TOTALS
+    // INVOICE LEVEL TOTALS
     // ==========================
     {
       $addFields: {
-        totalItemsQty: {
-          $sum: '$items.quantity',
-        },
-
-        // ==========================
-        // TOTAL BASE AMOUNT (needed for % calculation)
-        // ==========================
-        totalBaseAmount: {
-          $round: [
-            {
-              $sum: '$items.baseAmount',
-            },
-            2,
-          ],
-        },
+        totalItemsQty: { $sum: '$items.quantity' },
 
         discountTotal: {
-          $concat: [
-            {
-              $toString: {
-                $round: [
-                  {
-                    $cond: [
-                      {
-                        $gt: [
-                          {
-                            $sum: '$items.baseAmount',
-                          },
-                          0,
-                        ],
-                      },
-                      {
-                        $multiply: [
-                          {
-                            $divide: [
-                              {
-                                $sum: '$items.discount',
-                              },
-                              {
-                                $sum: '$items.baseAmount',
-                              },
-                            ],
-                          },
-                          100,
-                        ],
-                      },
-                      0,
-                    ],
-                  },
-                  2,
-                ],
-              },
-            },
-            '%',
-          ],
+          $round: [{ $sum: '$items.discount' }, 2],
         },
 
         taxableValue: {
-          $round: [
-            {
-              $sum: '$items.taxableValue',
-            },
-            2,
-          ],
-        },
-
-        cgstTotal: {
-          $round: [
-            {
-              $sum: '$items.cgst',
-            },
-            2,
-          ],
-        },
-
-        sgstTotal: {
-          $round: [
-            {
-              $sum: '$items.sgst',
-            },
-            2,
-          ],
+          $round: [{ $sum: '$items.taxableValue' }, 2],
         },
 
         gstTotal: {
-          $round: [
-            {
-              $sum: '$items.gstAmount',
-            },
-            2,
-          ],
+          $round: [{ $sum: '$items.gstAmount' }, 2],
         },
 
-        exactGrandTotal: {
-          $round: [
-            {
-              $sum: '$items.total',
-            },
-            2,
-          ],
+        cgstTotal: {
+          $round: [{ $divide: [{ $sum: '$items.gstAmount' }, 2] }, 2],
         },
-      },
-    },
 
-    {
-      $addFields: {
+        sgstTotal: {
+          $round: [{ $divide: [{ $sum: '$items.gstAmount' }, 2] }, 2],
+        },
+
         grandTotal: {
-          $round: ['$exactGrandTotal', 0],
-        },
-
-        roundOff: {
-          $round: [
-            {
-              $subtract: [
-                {
-                  $round: ['$exactGrandTotal', 0],
-                },
-                '$exactGrandTotal',
-              ],
-            },
-            2,
-          ],
+          $round: [{ $sum: '$items.total' }, 2],
         },
       },
     },
 
-    {
-      $project: {
-        products: 0,
-        exactGrandTotal: 0,
-      },
-    },
-
+    // ==========================
+    // SORT
+    // ==========================
     {
       $sort: {
         date: -1,

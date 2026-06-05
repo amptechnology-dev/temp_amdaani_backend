@@ -165,74 +165,64 @@ export const getProductById = async (id) => {
 export const updateProductById = async (id, data, session = null) => {
   try {
     const { openingStock, value, ...updateData } = data;
+
     const product = await Product.findById(id).session(session);
-    if (!product) {
-      return null;
+    if (!product) return null;
+
+    const store = await Store.findById(product.store).session(session);
+    if (!store) throw new Error('Store not found');
+
+    const currentFY = store.currentFinancialYear;
+    if (!currentFY) throw new Error('Current financial year not found');
+
+    const fyIndex = product.financialYearStocks.findIndex((fy) => fy.financialYear === currentFY);
+
+    const previousOpeningStock = fyIndex > -1 ? Number(product.financialYearStocks[fyIndex].stock) || 0 : 0;
+
+    const newOpeningStock = Number(openingStock) || 0;
+
+    if (openingStock !== undefined) {
+      const diff = newOpeningStock - previousOpeningStock;
+
+      product.currentStock = (Number(product.currentStock) || 0) + diff;
     }
 
-    // ==========================
-    // UPDATE CURRENT FY OPENING STOCK
-    // ==========================
-    if (openingStock !== undefined || value !== undefined) {
-      const store = await Store.findById(product.store).session(session);
-
-      if (!store) {
-        throw new Error('Store not found');
-      }
-
-      const currentFY = store.currentFinancialYear;
-
-      if (!currentFY) {
-        throw new Error('Current financial year not found');
-      }
-
-      const fyIndex = product.financialYearStocks.findIndex((fy) => fy.financialYear === currentFY);
-
-      if (fyIndex > -1) {
-        if (openingStock !== undefined) {
-          product.financialYearStocks[fyIndex].stock = Number(openingStock) || 0;
-        }
-
-        if (value !== undefined) {
-          product.financialYearStocks[fyIndex].value = Number(value) || 0;
-        }
-      } else {
-        product.financialYearStocks.push({
-          financialYear: currentFY,
-          stock: Number(openingStock) || 0,
-          value: Number(value) || 0,
-        });
-      }
-
-      // current stock sync with opening stock
+    if (fyIndex > -1) {
       if (openingStock !== undefined) {
-        product.currentStock = Number(openingStock) || 0;
+        product.financialYearStocks[fyIndex].stock = newOpeningStock;
       }
+
+      if (value !== undefined) {
+        product.financialYearStocks[fyIndex].value = Number(value) || 0;
+      }
+    } else {
+      product.financialYearStocks.push({
+        financialYear: currentFY,
+        stock: newOpeningStock,
+        value: Number(value) || 0,
+      });
     }
 
-    // ==========================
-    // UPDATE OTHER FIELDS
-    // ==========================
     Object.assign(product, updateData);
 
-    const saveData = await product.save({ session });
+    const saved = await product.save({ session });
 
     await StockTransaction.deleteMany(
       {
-        product: saveData._id,
-        transactionType: StockTransactionType.OPENINGSTOCK, // only delete SALE txns, not prior reversals
+        product: saved._id,
+        transactionType: StockTransactionType.OPENINGSTOCK,
       },
       { session }
     );
 
-    const safeTotalAmount = Number((Number(value) || 0 * Math.abs(Number(openingStock) || 0)).toFixed(2));
+    const safeTotalAmount = Number((Number(value || 0) * Math.abs(newOpeningStock || 0)).toFixed(2));
 
     const stockTransaction = new StockTransaction({
-      product: saveData._id,
+      product: saved._id,
       store: product.store,
       date: product.createdAt,
       transactionType: StockTransactionType.OPENINGSTOCK,
-      quantity: Number(openingStock) || 0,
+      quantity: newOpeningStock,
       direction: 'IN',
       rate: Number(value) || 0,
       totalAmount: safeTotalAmount,
@@ -240,16 +230,13 @@ export const updateProductById = async (id, data, session = null) => {
 
     await stockTransaction.save({ session });
 
-    console.log('tras', stockTransaction);
-
-    return saveData;
+    return saved;
   } catch (error) {
     handleDuplicateKeyError(error, Product);
   }
 };
 
 export const deleteProductById = async (id) => {
-  //TODO: Can not delete product if it has transactions
   return Product.findByIdAndDelete(id);
 };
 

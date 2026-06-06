@@ -501,249 +501,282 @@ export const cancelAfterPurchaseStock = async (purchaseId) => {
   }
 };
 
-export const queryPurchasesReport = async (filters = {}) => {
-  const { store, startDate, endDate, status } = filters;
- 
-  const matchStage = {
-    status: { $ne: 'cancelled' },
-  };
- 
-  if (store) {
-    matchStage.store = new mongoose.Types.ObjectId(String(store));
+export const queryPurchasesReport = async (filter = {}, options = {}) => {
+  const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;
+
+  if (filter.userId) {
+    filter.userId = new mongoose.Types.ObjectId(String(filter.userId));
   }
- 
-  if (startDate && endDate) {
-    const start = new Date(startDate);
-    start.setHours(0, 0, 0, 0);
- 
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
- 
-    matchStage.date = { $gte: start, $lte: end };
-  }
- 
-  if (status) {
-    matchStage.status = status;
-  }
- 
-  const result = await Purchase.aggregate([
-    { $match: matchStage },
- 
-    // ── STORE LOOKUP ──────────────────────────────────────────────────────
+
+  const aggregate = Purchase.aggregate([
+    { $match: filter },
+
+    // ─────────────────────────────────────────────
+    // STORE LOOKUP (optional if needed)
+    // ─────────────────────────────────────────────
     {
       $lookup: {
         from: 'stores',
         localField: 'store',
         foreignField: '_id',
         as: 'store',
+        pipeline: [
+          {
+            $project: {
+              name: 1,
+              type: 1,
+              gstNumber: 1,
+              address: 1,
+            },
+          },
+        ],
       },
     },
-    { $unwind: '$store' },
- 
-    // ── STEP 1: compute per-item fields into a new array ──────────────────
-    // Use a NEW field name "calcItems" to avoid any conflict with stored "items"
+    {
+      $unwind: {
+        path: '$store',
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+
+    // ─────────────────────────────────────────────
+    // GST + TAXABLE CALCULATION (FIXED LOGIC)
+    // ─────────────────────────────────────────────
     {
       $addFields: {
-        calcItems: {
-          $map: {
-            input: '$items',
-            as: 'it',
-            in: {
-              $let: {
-                vars: {
-                  qty:     { $toDouble: { $ifNull: ['$$it.quantity',       0] } },
-                  rate:    { $toDouble: { $ifNull: ['$$it.rate',           0] } },
-                  disc:    { $toDouble: { $ifNull: ['$$it.discount',       0] } },
-                  gstRate: { $toDouble: { $ifNull: ['$$it.gstRate',        0] } },
-                  isIncl:  { $ifNull:   ['$$it.isTaxInclusive', false] },
-                },
-                in: {
-                  $let: {
-                    vars: {
-                      baseAmt:   { $multiply: ['$$rate', '$$qty'] },
-                      totalDisc: { $multiply: ['$$disc', '$$qty'] },
-                      divisor:   { $add: [1, { $divide: ['$$gstRate', 100] }] },
-                    },
-                    in: {
-                      $let: {
-                        vars: {
-                          // netAmt = baseAmt − totalDisc  (for gstRate=0 items)
-                          netAmt: {
-                            $max: [0, { $subtract: ['$$baseAmt', '$$totalDisc'] }],
-                          },
- 
-                          // itemTaxable:
-                          //   gstRate=0 → 0  (hard zero, not taxable)
-                          //   exclusive → baseAmt − totalDisc
-                          //   inclusive → (baseAmt − totalDisc) / divisor
-                          itemTaxable: {
-                            $cond: [
-                              { $eq: ['$$gstRate', 0] },
-                              0,
-                              {
-                                $max: [
-                                  0,
-                                  {
-                                    $cond: [
-                                      '$$isIncl',
-                                      {
-                                        $divide: [
-                                          { $subtract: ['$$baseAmt', '$$totalDisc'] },
-                                          '$$divisor',
-                                        ],
-                                      },
-                                      { $subtract: ['$$baseAmt', '$$totalDisc'] },
-                                    ],
-                                  },
-                                ],
+        discountTotal: {
+          $round: [
+            {
+              $sum: {
+                $map: {
+                  input: '$items',
+                  as: 'it',
+                  in: {
+                    $let: {
+                      vars: {
+                        qty: { $ifNull: ['$$it.quantity', 0] },
+                        disc: { $ifNull: ['$$it.discount', 0] },
+                        gstRate: { $ifNull: ['$$it.gstRate', 0] },
+                        isIncl: { $ifNull: ['$$it.isTaxInclusive', false] },
+                      },
+                      in: {
+                        $cond: [
+                          { $eq: ['$$gstRate', 0] },
+                          0,
+                          {
+                            $let: {
+                              vars: {
+                                totalDisc: { $multiply: ['$$disc', '$$qty'] },
+                                divisor: { $add: [1, { $divide: ['$$gstRate', 100] }] },
                               },
-                            ],
-                          },
-                        },
-                        in: {
-                          qty:      '$$qty',
-                          gstRate:  '$$gstRate',
-                          isIncl:   '$$isIncl',
- 
-                          // discount display:
-                          //   gstRate=0 or exclusive → raw totalDisc
-                          //   inclusive              → totalDisc / divisor
-                          discDisplay: {
-                            $cond: [
-                              {
-                                $and: [
-                                  { $eq:  ['$$isIncl', true] },
-                                  { $gt:  ['$$gstRate', 0]   },
-                                ],
-                              },
-                              { $divide: ['$$totalDisc', '$$divisor'] },
-                              '$$totalDisc',
-                            ],
-                          },
- 
-                          // taxableValue → 0 when gstRate=0
-                          taxableValue: { $round: ['$$itemTaxable', 2] },
- 
-                          // gstAmount → 0 when gstRate=0
-                          gstAmount: {
-                            $round: [
-                              { $multiply: ['$$itemTaxable', { $divide: ['$$gstRate', 100] }] },
-                              2,
-                            ],
-                          },
- 
-                          // itemTotal:
-                          //   gstRate=0 → netAmt  (real money, no tax)
-                          //   gstRate>0 → taxable + gst
-                          itemTotal: {
-                            $round: [
-                              {
+                              in: {
                                 $cond: [
-                                  { $eq: ['$$gstRate', 0] },
-                                  '$$netAmt',
-                                  {
-                                    $add: [
-                                      '$$itemTaxable',
-                                      {
-                                        $multiply: [
-                                          '$$itemTaxable',
-                                          { $divide: ['$$gstRate', 100] },
-                                        ],
-                                      },
-                                    ],
-                                  },
+                                  '$$isIncl',
+                                  { $divide: ['$$totalDisc', '$$divisor'] },
+                                  '$$totalDisc',
                                 ],
                               },
-                              2,
-                            ],
+                            },
                           },
-                        },
+                        ],
                       },
                     },
                   },
                 },
               },
             },
-          },
+            2,
+          ],
         },
-      },
-    },
- 
-    // ── STEP 2: sum calcItems into invoice-level fields ───────────────────
-    {
-      $addFields: {
-        totalItemsQty: { $sum: '$calcItems.qty' },
- 
-        // discountTotal: sum of discDisplay across all items
-        discountTotal: {
-          $round: [{ $sum: '$calcItems.discDisplay' }, 2],
-        },
- 
-        // taxableValue: sum of itemTaxable (0 for gstRate=0 items)
+
+        // ✅ TAXABLE VALUE (IMPORTANT FIX)
         taxableValue: {
-          $round: [{ $sum: '$calcItems.taxableValue' }, 2],
+          $round: [
+            {
+              $sum: {
+                $map: {
+                  input: '$items',
+                  as: 'it',
+                  in: {
+                    $let: {
+                      vars: {
+                        qty: { $ifNull: ['$$it.quantity', 0] },
+                        price: { $ifNull: ['$$it.rate', 0] }, // purchase rate
+                        disc: { $ifNull: ['$$it.discount', 0] },
+                        gstRate: { $ifNull: ['$$it.gstRate', 0] },
+                        isIncl: { $ifNull: ['$$it.isTaxInclusive', false] },
+
+                        baseAmt: {
+                          $multiply: [
+                            { $ifNull: ['$$it.rate', 0] },
+                            { $ifNull: ['$$it.quantity', 0] },
+                          ],
+                        },
+
+                        totalDisc: {
+                          $multiply: [
+                            { $ifNull: ['$$it.discount', 0] },
+                            { $ifNull: ['$$it.quantity', 0] },
+                          ],
+                        },
+
+                        divisor: {
+                          $add: [1, { $divide: ['$$it.gstRate', 100] }],
+                        },
+                      },
+
+                      in: {
+                        $cond: [
+                          // 🔥 IMPORTANT RULE:
+                          // IF GST NOT APPLIED → taxable = 0
+                          {
+                            $or: [
+                              { $eq: ['$$gstRate', 0] },
+                              { $eq: ['$$isIncl', false] },
+                            ],
+                          },
+                          0,
+
+                          // GST EXISTS
+                          {
+                            $max: [
+                              0,
+                              {
+                                $cond: [
+                                  '$$isIncl',
+                                  {
+                                    $divide: [
+                                      { $subtract: ['$$baseAmt', '$$totalDisc'] },
+                                      '$$divisor',
+                                    ],
+                                  },
+                                  { $subtract: ['$$baseAmt', '$$totalDisc'] },
+                                ],
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            2,
+          ],
         },
- 
-        // gstTotal: sum of gstAmount (0 for gstRate=0 items)
+
+        // ─────────────────────────────────────────────
+        // GST TOTAL
+        // ─────────────────────────────────────────────
         gstTotal: {
-          $round: [{ $sum: '$calcItems.gstAmount' }, 2],
-        },
- 
-        // netAmount: sum of ALL itemTotals (GST + non-GST)
-        // gstRate=0 items contribute their real net amount here
-        netAmount: {
-          $round: [{ $sum: '$calcItems.itemTotal' }, 2],
+          $round: [
+            {
+              $sum: {
+                $map: {
+                  input: '$items',
+                  as: 'it',
+                  in: {
+                    $let: {
+                      vars: {
+                        qty: { $ifNull: ['$$it.quantity', 0] },
+                        price: { $ifNull: ['$$it.rate', 0] },
+                        disc: { $ifNull: ['$$it.discount', 0] },
+                        gstRate: { $ifNull: ['$$it.gstRate', 0] },
+                        isIncl: { $ifNull: ['$$it.isTaxInclusive', false] },
+
+                        baseAmt: {
+                          $multiply: ['$$it.rate', '$$it.quantity'],
+                        },
+
+                        totalDisc: {
+                          $multiply: ['$$it.discount', '$$it.quantity'],
+                        },
+
+                        divisor: {
+                          $add: [1, { $divide: ['$$it.gstRate', 100] }],
+                        },
+                      },
+
+                      in: {
+                        $cond: [
+                          { $eq: ['$$gstRate', 0] },
+                          0,
+                          {
+                            $let: {
+                              vars: {
+                                itemTaxable: {
+                                  $max: [
+                                    0,
+                                    {
+                                      $cond: [
+                                        '$$isIncl',
+                                        {
+                                          $divide: [
+                                            { $subtract: ['$$baseAmt', '$$totalDisc'] },
+                                            '$$divisor',
+                                          ],
+                                        },
+                                        { $subtract: ['$$baseAmt', '$$totalDisc'] },
+                                      ],
+                                    },
+                                  ],
+                                },
+                              },
+                              in: {
+                                $multiply: [
+                                  '$$itemTaxable',
+                                  { $divide: ['$$gstRate', 100] },
+                                ],
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            2,
+          ],
         },
       },
     },
- 
-    // ── STEP 3: CGST / SGST / IGST ───────────────────────────────────────
+
+    // ─────────────────────────────────────────────
+    // FINAL TOTALS
+    // ─────────────────────────────────────────────
     {
       $addFields: {
-        cgstTotal: {
-          $round: [
-            {
-              $cond: [
-                { $eq: ['$isIgst', true] },
-                0,
-                { $divide: ['$gstTotal', 2] },
-              ],
-            },
-            2,
-          ],
-        },
-        sgstTotal: {
-          $round: [
-            {
-              $cond: [
-                { $eq: ['$isIgst', true] },
-                0,
-                { $divide: ['$gstTotal', 2] },
-              ],
-            },
-            2,
-          ],
-        },
-        igstTotal: {
-          $round: [
-            {
-              $cond: [{ $eq: ['$isIgst', true] }, '$gstTotal', 0],
-            },
-            2,
-          ],
+        totalAmount: {
+          $round: [{ $add: ['$taxableValue', '$gstTotal'] }, 2],
         },
       },
     },
- 
-    // ── STEP 4: remove helper array from response ─────────────────────────
+
+    // ─────────────────────────────────────────────
+    // CLEAN OUTPUT
+    // ─────────────────────────────────────────────
     {
-      $project: { calcItems: 0 },
+      $project: {
+        items: 0,
+      },
     },
- 
-    { $sort: { date: -1, createdAt: -1 } },
+
+    {
+      $sort: {
+        [sortBy]: order === 'desc' ? -1 : 1,
+      },
+    },
   ]);
- 
-  return result;
+
+  return Purchase.aggregatePaginate(aggregate, {
+    page: Number(page),
+    limit: Number(limit),
+    lean: true,
+    leanWithId: false,
+  });
 };
 
 export const getVendorWisePurchaseReport = async (filters = {}) => {

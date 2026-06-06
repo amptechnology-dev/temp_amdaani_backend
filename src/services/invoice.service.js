@@ -411,17 +411,19 @@ export const getInvoiceById = async (id) => {
   return result[0] || null;
 };
 
-export const queryInvoices = async (filter = {}, options = {}) => {
+export const queryPurchasesReport = async (filter = {}, options = {}) => {
   const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;
 
   if (filter.userId) {
     filter.userId = new mongoose.Types.ObjectId(String(filter.userId));
   }
 
-  const aggregate = Invoice.aggregate([
+  const aggregate = Purchase.aggregate([
     { $match: filter },
 
-    // ── STORE LOOKUP ──────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // STORE LOOKUP (optional if needed)
+    // ─────────────────────────────────────────────
     {
       $lookup: {
         from: 'stores',
@@ -434,13 +436,7 @@ export const queryInvoices = async (filter = {}, options = {}) => {
               name: 1,
               type: 1,
               gstNumber: 1,
-              contactNo: 1,
-              email: 1,
               address: 1,
-              logoUrl: 1,
-              signatureUrl: 1,
-              bankDetails: 1,
-              settings: 1,
             },
           },
         ],
@@ -453,7 +449,9 @@ export const queryInvoices = async (filter = {}, options = {}) => {
       },
     },
 
-    // ── MAIN CALCULATION ──────────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // GST + TAXABLE CALCULATION (FIXED LOGIC)
+    // ─────────────────────────────────────────────
     {
       $addFields: {
         discountTotal: {
@@ -472,25 +470,25 @@ export const queryInvoices = async (filter = {}, options = {}) => {
                         isIncl: { $ifNull: ['$$it.isTaxInclusive', false] },
                       },
                       in: {
-                        $let: {
-                          vars: {
-                            totalDisc: { $multiply: ['$$disc', '$$qty'] },
-                            divisor: {
-                              $add: [1, { $divide: ['$$gstRate', 100] }],
+                        $cond: [
+                          { $eq: ['$$gstRate', 0] },
+                          0,
+                          {
+                            $let: {
+                              vars: {
+                                totalDisc: { $multiply: ['$$disc', '$$qty'] },
+                                divisor: { $add: [1, { $divide: ['$$gstRate', 100] }] },
+                              },
+                              in: {
+                                $cond: [
+                                  '$$isIncl',
+                                  { $divide: ['$$totalDisc', '$$divisor'] },
+                                  '$$totalDisc',
+                                ],
+                              },
                             },
                           },
-                          in: {
-                            $cond: [
-                              // inclusive AND gstRate > 0 → back-calc
-                              {
-                                $and: [{ $eq: ['$$isIncl', true] }, { $gt: ['$$gstRate', 0] }],
-                              },
-                              { $divide: ['$$totalDisc', '$$divisor'] },
-                              // all other cases → raw
-                              '$$totalDisc',
-                            ],
-                          },
-                        },
+                        ],
                       },
                     },
                   },
@@ -501,6 +499,7 @@ export const queryInvoices = async (filter = {}, options = {}) => {
           ],
         },
 
+        // ✅ TAXABLE VALUE (IMPORTANT FIX)
         taxableValue: {
           $round: [
             {
@@ -512,44 +511,61 @@ export const queryInvoices = async (filter = {}, options = {}) => {
                     $let: {
                       vars: {
                         qty: { $ifNull: ['$$it.quantity', 0] },
-                        price: { $ifNull: ['$$it.sellingPrice', 0] },
+                        price: { $ifNull: ['$$it.rate', 0] }, // purchase rate
                         disc: { $ifNull: ['$$it.discount', 0] },
                         gstRate: { $ifNull: ['$$it.gstRate', 0] },
                         isIncl: { $ifNull: ['$$it.isTaxInclusive', false] },
+
+                        baseAmt: {
+                          $multiply: [
+                            { $ifNull: ['$$it.rate', 0] },
+                            { $ifNull: ['$$it.quantity', 0] },
+                          ],
+                        },
+
+                        totalDisc: {
+                          $multiply: [
+                            { $ifNull: ['$$it.discount', 0] },
+                            { $ifNull: ['$$it.quantity', 0] },
+                          ],
+                        },
+
+                        divisor: {
+                          $add: [1, { $divide: ['$$it.gstRate', 100] }],
+                        },
                       },
+
                       in: {
-                        $let: {
-                          vars: {
-                            baseAmt: { $multiply: ['$$price', '$$qty'] },
-                            totalDisc: { $multiply: ['$$disc', '$$qty'] },
-                            divisor: {
-                              $add: [1, { $divide: ['$$gstRate', 100] }],
-                            },
-                          },
-                          in: {
-                            $cond: [
-                              // gstRate = 0 → taxableValue = 0
+                        $cond: [
+                          // 🔥 IMPORTANT RULE:
+                          // IF GST NOT APPLIED → taxable = 0
+                          {
+                            $or: [
                               { $eq: ['$$gstRate', 0] },
+                              { $eq: ['$$isIncl', false] },
+                            ],
+                          },
+                          0,
+
+                          // GST EXISTS
+                          {
+                            $max: [
                               0,
                               {
-                                $max: [
-                                  0,
+                                $cond: [
+                                  '$$isIncl',
                                   {
-                                    $cond: [
-                                      '$$isIncl',
-                                      // inclusive: strip GST from net amount
-                                      {
-                                        $divide: [{ $subtract: ['$$baseAmt', '$$totalDisc'] }, '$$divisor'],
-                                      },
-                                      // exclusive: plain subtraction
+                                    $divide: [
                                       { $subtract: ['$$baseAmt', '$$totalDisc'] },
+                                      '$$divisor',
                                     ],
                                   },
+                                  { $subtract: ['$$baseAmt', '$$totalDisc'] },
                                 ],
                               },
                             ],
                           },
-                        },
+                        ],
                       },
                     },
                   },
@@ -560,6 +576,9 @@ export const queryInvoices = async (filter = {}, options = {}) => {
           ],
         },
 
+        // ─────────────────────────────────────────────
+        // GST TOTAL
+        // ─────────────────────────────────────────────
         gstTotal: {
           $round: [
             {
@@ -571,47 +590,54 @@ export const queryInvoices = async (filter = {}, options = {}) => {
                     $let: {
                       vars: {
                         qty: { $ifNull: ['$$it.quantity', 0] },
-                        price: { $ifNull: ['$$it.sellingPrice', 0] },
+                        price: { $ifNull: ['$$it.rate', 0] },
                         disc: { $ifNull: ['$$it.discount', 0] },
                         gstRate: { $ifNull: ['$$it.gstRate', 0] },
                         isIncl: { $ifNull: ['$$it.isTaxInclusive', false] },
+
+                        baseAmt: {
+                          $multiply: ['$$it.rate', '$$it.quantity'],
+                        },
+
+                        totalDisc: {
+                          $multiply: ['$$it.discount', '$$it.quantity'],
+                        },
+
+                        divisor: {
+                          $add: [1, { $divide: ['$$it.gstRate', 100] }],
+                        },
                       },
+
                       in: {
                         $cond: [
-                          // gstRate = 0 → no GST
                           { $eq: ['$$gstRate', 0] },
                           0,
                           {
                             $let: {
                               vars: {
-                                baseAmt: { $multiply: ['$$price', '$$qty'] },
-                                totalDisc: { $multiply: ['$$disc', '$$qty'] },
-                                divisor: {
-                                  $add: [1, { $divide: ['$$gstRate', 100] }],
+                                itemTaxable: {
+                                  $max: [
+                                    0,
+                                    {
+                                      $cond: [
+                                        '$$isIncl',
+                                        {
+                                          $divide: [
+                                            { $subtract: ['$$baseAmt', '$$totalDisc'] },
+                                            '$$divisor',
+                                          ],
+                                        },
+                                        { $subtract: ['$$baseAmt', '$$totalDisc'] },
+                                      ],
+                                    },
+                                  ],
                                 },
                               },
                               in: {
-                                $let: {
-                                  vars: {
-                                    itemTaxable: {
-                                      $max: [
-                                        0,
-                                        {
-                                          $cond: [
-                                            '$$isIncl',
-                                            {
-                                              $divide: [{ $subtract: ['$$baseAmt', '$$totalDisc'] }, '$$divisor'],
-                                            },
-                                            { $subtract: ['$$baseAmt', '$$totalDisc'] },
-                                          ],
-                                        },
-                                      ],
-                                    },
-                                  },
-                                  in: {
-                                    $multiply: ['$$itemTaxable', { $divide: ['$$gstRate', 100] }],
-                                  },
-                                },
+                                $multiply: [
+                                  '$$itemTaxable',
+                                  { $divide: ['$$gstRate', 100] },
+                                ],
                               },
                             },
                           },
@@ -628,45 +654,24 @@ export const queryInvoices = async (filter = {}, options = {}) => {
       },
     },
 
-    // ── CGST / SGST / IGST + totalAmount ─────────────────────────────────
+    // ─────────────────────────────────────────────
+    // FINAL TOTALS
+    // ─────────────────────────────────────────────
     {
       $addFields: {
-        cgstTotal: {
-          $round: [
-            {
-              $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }],
-            },
-            2,
-          ],
-        },
-        sgstTotal: {
-          $round: [
-            {
-              $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }],
-            },
-            2,
-          ],
-        },
-        igstTotal: {
-          $round: [
-            {
-              $cond: [{ $eq: ['$isIgst', true] }, '$gstTotal', 0],
-            },
-            2,
-          ],
-        },
-
-        // totalAmount = taxableValue + gstTotal
-        // (only GST items contribute to both fields)
         totalAmount: {
           $round: [{ $add: ['$taxableValue', '$gstTotal'] }, 2],
         },
       },
     },
 
-    // Hide raw items from response
+    // ─────────────────────────────────────────────
+    // CLEAN OUTPUT
+    // ─────────────────────────────────────────────
     {
-      $project: { items: 0 },
+      $project: {
+        items: 0,
+      },
     },
 
     {
@@ -676,7 +681,7 @@ export const queryInvoices = async (filter = {}, options = {}) => {
     },
   ]);
 
-  return Invoice.aggregatePaginate(aggregate, {
+  return Purchase.aggregatePaginate(aggregate, {
     page: Number(page),
     limit: Number(limit),
     lean: true,

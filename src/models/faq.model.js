@@ -14,6 +14,10 @@ const faqSchema = new mongoose.Schema(
       trim: true,
       maxlength: 2000,
     },
+    isWeb:{
+      type: Boolean,
+      default: false,
+    }
   },
   {
     timestamps: true,

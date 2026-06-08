@@ -540,7 +540,7 @@ export const queryPurchasesReport = async (filters = {}) => {
     },
     { $unwind: { path: '$store', preserveNullAndEmptyArrays: true } },
  
-    // ── STEP 1: calcItems — fresh calculation, no DB field conflict ────────
+    // ── STEP 1: calcItems ─────────────────────────────────────────────────
     {
       $addFields: {
         calcItems: {
@@ -566,16 +566,15 @@ export const queryPurchasesReport = async (filters = {}) => {
                     in: {
                       $let: {
                         vars: {
-                          // netAmt = baseAmt − totalDisc
-                          // used as itemTotal when gstRate = 0
+                          // netAmt = baseAmt − totalDisc (real money for gstRate=0 items)
                           netAmt: {
                             $max: [0, { $subtract: ['$$baseAmt', '$$totalDisc'] }],
                           },
- 
+
                           // ── itemTaxable ──────────────────────────────────
-                          // gstRate = 0 → HARD 0  (no GST = not taxable)
-                          // exclusive  → baseAmt − totalDisc
-                          // inclusive  → (baseAmt − totalDisc) / divisor
+                          // gstRate = 0  → 0          (not taxable)
+                          // exclusive   → baseAmt     (NO discount deduction)
+                          // inclusive   → baseAmt / divisor (strip GST from gross)
                           itemTaxable: {
                             $cond: [
                               { $eq: ['$$gstRate', 0] },
@@ -586,13 +585,8 @@ export const queryPurchasesReport = async (filters = {}) => {
                                   {
                                     $cond: [
                                       '$$isIncl',
-                                      {
-                                        $divide: [
-                                          { $subtract: ['$$baseAmt', '$$totalDisc'] },
-                                          '$$divisor',
-                                        ],
-                                      },
-                                      { $subtract: ['$$baseAmt', '$$totalDisc'] },
+                                      { $divide: ['$$baseAmt', '$$divisor'] },
+                                      '$$baseAmt',
                                     ],
                                   },
                                 ],
@@ -603,7 +597,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                         in: {
                           qty:     '$$qty',
                           gstRate: '$$gstRate',
- 
+
                           // discDisplay: inclusive → back-calc, else raw
                           discDisplay: {
                             $cond: [
@@ -617,20 +611,21 @@ export const queryPurchasesReport = async (filters = {}) => {
                               '$$totalDisc',
                             ],
                           },
- 
-                          // taxableValue = 0 when gstRate = 0
+
+                          // taxableValue = baseAmt (discount minus হবে না)
+                          // gstRate = 0 → 0
                           taxableValue: { $round: ['$$itemTaxable', 2] },
- 
-                          // gstAmount = 0 when gstRate = 0
+
+                          // gstAmount on taxableValue
                           gstAmount: {
                             $round: [
                               { $multiply: ['$$itemTaxable', { $divide: ['$$gstRate', 100] }] },
                               2,
                             ],
                           },
- 
+
                           // itemTotal:
-                          //   gstRate = 0 → netAmt  (real money, counted in netAmount)
+                          //   gstRate = 0 → netAmt  (baseAmt − totalDisc)
                           //   gstRate > 0 → taxable + gst
                           itemTotal: {
                             $round: [
@@ -670,21 +665,21 @@ export const queryPurchasesReport = async (filters = {}) => {
     {
       $addFields: {
         totalItemsQty: { $sum: '$calcItems.qty' },
- 
+
         discountTotal: {
           $round: [{ $sum: '$calcItems.discDisplay' }, 2],
         },
- 
-        // taxableValue: only gstRate > 0 items (gstRate=0 → 0)
+
+        // taxableValue: baseAmt (discount minus হয়নি, শুধু GST বাদ inclusive তে)
         taxableValue: {
           $round: [{ $sum: '$calcItems.taxableValue' }, 2],
         },
- 
+
         // gstTotal: only gstRate > 0 items
         gstTotal: {
           $round: [{ $sum: '$calcItems.gstAmount' }, 2],
         },
- 
+
         // netAmount: ALL items real money (GST + non-GST)
         netAmount: {
           $round: [{ $sum: '$calcItems.itemTotal' }, 2],
@@ -730,7 +725,7 @@ export const queryPurchasesReport = async (filters = {}) => {
       },
     },
  
-    // ── STEP 4: remove helper array, keep items hidden ────────────────────
+    // ── STEP 4: remove helper array ───────────────────────────────────────
     {
       $project: {
         calcItems: 0,

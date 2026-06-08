@@ -5,6 +5,8 @@ import { authenticate, authorizeRoles } from "../middlewares/auth.middleware.js"
 const router = Router();
 
 router.get("/", faqController.getAllFaqs);
+router.get("/web", faqController.getAllWebFaqs);
+router.get("/admin", faqController.getAllAdminFaqs);
 router.use(authenticate);
 router.use(authorizeRoles("super-admin"));
 router.post("/", faqController.createFaq);

@@ -5,8 +5,16 @@ export const createFaq = async (data) => {
 };
 
 export const getAllFaqs = async () => {
-  return FAQ.find().sort({ createdAt: -1 });
+  return FAQ.find({ isWeb: { $ne: true } }).sort({ createdAt: -1 });
 };
+
+export const getAdminFaqs = async () => {
+  return FAQ.find().sort({ createdAt: -1 });
+}
+
+export const getWebFaqs = async () => {
+  return FAQ.find({ isWeb: true }).sort({ createdAt: -1 });
+}
 
 export const getFaqById = async (id) => {
   return FAQ.findById(id);

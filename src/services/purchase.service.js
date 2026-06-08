@@ -242,7 +242,7 @@ export const reverseStockAfterPurchase = async (purchase, session = null) => {
   console.log('reves => ', items);
 
   // ✅ Delete old stock transactions tied to this purchase
-  await StockTransaction.deleteMany({ purchaseId }, { session });
+  await StockTransaction.deleteMany({ purchaseId, transactionType: StockTransactionType.PURCHASE }, { session });
 
   // ✅ Reverse each item by applying negative quantity
   for (const item of items) {
@@ -566,23 +566,23 @@ export const queryPurchasesReport = async (filters = {}) => {
             in: {
               $let: {
                 vars: {
-                  qty:     { $toDouble: { $ifNull: ['$$it.quantity',      0] } },
-                  rate:    { $toDouble: { $ifNull: ['$$it.rate',          0] } },
-                  disc:    { $toDouble: { $ifNull: ['$$it.discount',      0] } },
-                  gstRate: { $toDouble: { $ifNull: ['$$it.gstRate',       0] } },
-                  isIncl:  { $ifNull:   ['$$it.isTaxInclusive', false] },
+                  qty: { $toDouble: { $ifNull: ['$$it.quantity', 0] } },
+                  rate: { $toDouble: { $ifNull: ['$$it.rate', 0] } },
+                  disc: { $toDouble: { $ifNull: ['$$it.discount', 0] } },
+                  gstRate: { $toDouble: { $ifNull: ['$$it.gstRate', 0] } },
+                  isIncl: { $ifNull: ['$$it.isTaxInclusive', false] },
                 },
                 in: {
                   $let: {
                     vars: {
                       // baseAmt  = qty × rate  (before discount)
-                      baseAmt:   { $multiply: ['$$qty', '$$rate'] },
+                      baseAmt: { $multiply: ['$$qty', '$$rate'] },
 
                       // totalDisc = per-unit discount × qty
                       totalDisc: { $multiply: ['$$disc', '$$qty'] },
 
                       // divisor for inclusive GST stripping
-                      divisor:   { $add: [1, { $divide: ['$$gstRate', 100] }] },
+                      divisor: { $add: [1, { $divide: ['$$gstRate', 100] }] },
                     },
                     in: {
                       $let: {
@@ -607,11 +607,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                                     $max: [
                                       0,
                                       {
-                                        $cond: [
-                                          '$$isIncl',
-                                          { $divide: ['$$netAmt', '$$divisor'] },
-                                          '$$netAmt',
-                                        ],
+                                        $cond: ['$$isIncl', { $divide: ['$$netAmt', '$$divisor'] }, '$$netAmt'],
                                       },
                                     ],
                                   },
@@ -619,7 +615,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                               },
                             },
                             in: {
-                              qty:     '$$qty',
+                              qty: '$$qty',
                               gstRate: '$$gstRate',
                               baseAmt: '$$baseAmt',
 
@@ -627,10 +623,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                               discDisplay: {
                                 $cond: [
                                   {
-                                    $and: [
-                                      { $eq: ['$$isIncl', true] },
-                                      { $gt: ['$$gstRate', 0] },
-                                    ],
+                                    $and: [{ $eq: ['$$isIncl', true] }, { $gt: ['$$gstRate', 0] }],
                                   },
                                   { $divide: ['$$totalDisc', '$$divisor'] },
                                   '$$totalDisc',
@@ -644,10 +637,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                               gstAmount: {
                                 $round: [
                                   {
-                                    $multiply: [
-                                      '$$taxableValue',
-                                      { $divide: ['$$gstRate', 100] },
-                                    ],
+                                    $multiply: ['$$taxableValue', { $divide: ['$$gstRate', 100] }],
                                   },
                                   2,
                                 ],
@@ -671,10 +661,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                                             $add: [
                                               '$$taxableValue',
                                               {
-                                                $multiply: [
-                                                  '$$taxableValue',
-                                                  { $divide: ['$$gstRate', 100] },
-                                                ],
+                                                $multiply: ['$$taxableValue', { $divide: ['$$gstRate', 100] }],
                                               },
                                             ],
                                           },
@@ -723,10 +710,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                       {
                         $multiply: [
                           {
-                            $divide: [
-                              { $sum: '$calcItems.discDisplay' },
-                              { $sum: '$calcItems.baseAmt' },
-                            ],
+                            $divide: [{ $sum: '$calcItems.discDisplay' }, { $sum: '$calcItems.baseAmt' }],
                           },
                           100,
                         ],
@@ -766,11 +750,7 @@ export const queryPurchasesReport = async (filters = {}) => {
         cgstTotal: {
           $round: [
             {
-              $cond: [
-                { $eq: ['$isIgst', true] },
-                0,
-                { $divide: ['$gstTotal', 2] },
-              ],
+              $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }],
             },
             2,
           ],
@@ -778,11 +758,7 @@ export const queryPurchasesReport = async (filters = {}) => {
         sgstTotal: {
           $round: [
             {
-              $cond: [
-                { $eq: ['$isIgst', true] },
-                0,
-                { $divide: ['$gstTotal', 2] },
-              ],
+              $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }],
             },
             2,
           ],

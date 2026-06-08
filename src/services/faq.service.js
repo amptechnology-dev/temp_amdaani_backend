@@ -13,7 +13,7 @@ export const getAdminFaqs = async () => {
 }
 
 export const getWebFaqs = async () => {
-  return FAQ.find({ isWeb: true }).sort({ createdAt: -1 });
+  return FAQ.find({ isMobile: { $ne: true } }).sort({ createdAt: -1 });
 }
 
 export const getFaqById = async (id) => {

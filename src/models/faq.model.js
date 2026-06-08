@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+import mongoose from 'mongoose';
 
 const faqSchema = new mongoose.Schema(
   {
@@ -14,7 +14,11 @@ const faqSchema = new mongoose.Schema(
       trim: true,
       maxlength: 2000,
     },
-    isWeb:{
+    isWeb: {
+      type: Boolean,
+      default: false,
+    },
+    isMobile: {
       type: Boolean,
       default: false,
     }
@@ -24,4 +28,4 @@ const faqSchema = new mongoose.Schema(
   }
 );
 
-export const FAQ = mongoose.model("FAQ", faqSchema);
+export const FAQ = mongoose.model('FAQ', faqSchema);

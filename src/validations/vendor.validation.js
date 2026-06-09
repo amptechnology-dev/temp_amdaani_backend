@@ -4,11 +4,16 @@ import { isValidObjectId } from 'mongoose';
 export const createVendorSchema = {
   body: yup.object().shape({
     name: yup.string().trim().max(255, 'Category name must be at most 255 characters'),
-    mobile: yup
-      .string()
+    mobile: Yup.string()
       .trim()
-      .required('Mobile number is required')
-      .matches(/^[6-9]\d{9}$/, 'Invalid mobile number'),
+      .required('Contact number is required')
+      .test('mobile-or-landline', 'Enter a valid Indian mobile or landline number', (value) => {
+        if (!value) return false;
+        const digits = value.replace(/\D/g, '');
+        const mobileRegex = /^[6-9]\d{9}$/; // 10-digit mobile
+        const landlineRegex = /^0\d{7,11}$/; // STD code (0) + 7–11 digits
+        return mobileRegex.test(digits) || landlineRegex.test(digits);
+      }),
     address: yup.string().trim().max(150),
     city: yup.string().trim().max(50),
     state: yup.string().trim().max(100),
@@ -28,10 +33,16 @@ export const updateVendorSchema = {
     .object()
     .shape({
       name: yup.string().trim().max(255, 'Category name must be at most 255 characters'),
-      mobile: yup
-        .string()
+      mobile: Yup.string()
         .trim()
-        .matches(/^[6-9]\d{9}$/, 'Invalid mobile number'),
+        .required('Contact number is required')
+        .test('mobile-or-landline', 'Enter a valid Indian mobile or landline number', (value) => {
+          if (!value) return false;
+          const digits = value.replace(/\D/g, '');
+          const mobileRegex = /^[6-9]\d{9}$/; // 10-digit mobile
+          const landlineRegex = /^0\d{7,11}$/; // STD code (0) + 7–11 digits
+          return mobileRegex.test(digits) || landlineRegex.test(digits);
+        }),
       address: yup.string().trim().max(150),
       city: yup.string().trim().max(50),
       state: yup.string().trim().max(100),

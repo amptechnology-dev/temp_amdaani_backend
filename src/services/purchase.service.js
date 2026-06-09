@@ -505,17 +505,13 @@ export const queryPurchasesReport = async (filters = {}) => {
   const { store, startDate, endDate, status } = filters;
  
   // ── match stage ───────────────────────────────────────────────────────────
- 
-  // ── match stage ───────────────────────────────────────────────────────────
   const matchStage = {
     status: { $ne: 'cancelled' },
   };
  
- 
   if (store) {
     matchStage.store = new mongoose.Types.ObjectId(String(store));
   }
- 
  
   if (startDate && endDate) {
     const start = new Date(startDate);
@@ -525,16 +521,12 @@ export const queryPurchasesReport = async (filters = {}) => {
     matchStage.date = { $gte: start, $lte: end };
   }
  
- 
   if (status && status !== 'cancelled') {
     matchStage.status = status;
   }
  
- 
   const result = await Purchase.aggregate([
     { $match: matchStage },
- 
-    // ── store lookup ──────────────────────────────────────────────────────
  
     // ── store lookup ──────────────────────────────────────────────────────
     {
@@ -543,15 +535,8 @@ export const queryPurchasesReport = async (filters = {}) => {
         localField: 'store',
         foreignField: '_id',
         as: 'storeInfo',
-        as: 'storeInfo',
       },
     },
-    { $unwind: { path: '$storeInfo', preserveNullAndEmptyArrays: true } },
- 
-    // ── STEP 1: per-item calculations ─────────────────────────────────────
-    //
-    //  Mirrors generatePurchaseHTML item loop exactly.
-    //  Key rule: discount is a FLAT ₹ per-unit value — no GST stripping.
     { $unwind: { path: '$storeInfo', preserveNullAndEmptyArrays: true } },
  
     // ── STEP 1: per-item calculations ─────────────────────────────────────
@@ -573,11 +558,6 @@ export const queryPurchasesReport = async (filters = {}) => {
                   disc:    { $toDouble: { $ifNull: ['$$it.discount', 0] } }, // flat ₹ per unit
                   gstRate: { $toDouble: { $ifNull: ['$$it.gstRate',  0] } },
                   isIncl:  { $ifNull:   ['$$it.isTaxInclusive', false] },
-                  qty:     { $toDouble: { $ifNull: ['$$it.quantity', 0] } },
-                  rate:    { $toDouble: { $ifNull: ['$$it.rate',     0] } },
-                  disc:    { $toDouble: { $ifNull: ['$$it.discount', 0] } }, // flat ₹ per unit
-                  gstRate: { $toDouble: { $ifNull: ['$$it.gstRate',  0] } },
-                  isIncl:  { $ifNull:   ['$$it.isTaxInclusive', false] },
                 },
                 in: {
                   $let: {
@@ -586,11 +566,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                       baseAmt:   { $multiply: ['$$qty', '$$rate'] },
  
                       // totalDisc = flat per-unit discount × qty  (NO GST adjustment — matches frontend)
-                      baseAmt:   { $multiply: ['$$qty', '$$rate'] },
- 
-                      // totalDisc = flat per-unit discount × qty  (NO GST adjustment — matches frontend)
                       totalDisc: { $multiply: ['$$disc', '$$qty'] },
- 
  
                       // divisor for inclusive GST stripping
                       divisor:   { $add: [1, { $divide: ['$$gstRate', 100] }] },
@@ -607,10 +583,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                           $let: {
                             vars: {
                               // ── taxableValue ────────────────────────────
-                              // ── taxableValue ────────────────────────────
                               // gstRate = 0  →  0
-                              // exclusive    →  netAmt
-                              // inclusive    →  netAmt / divisor
                               // exclusive    →  netAmt
                               // inclusive    →  netAmt / divisor
                               taxableValue: {
@@ -635,8 +608,6 @@ export const queryPurchasesReport = async (filters = {}) => {
                             in: {
                               // ── fields carried forward ──────────────────
                               qty:     '$$qty',
-                              // ── fields carried forward ──────────────────
-                              qty:     '$$qty',
                               gstRate: '$$gstRate',
                               baseAmt: '$$baseAmt',
  
@@ -644,13 +615,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                               totalDisc: '$$totalDisc',
  
                               // taxableValue (rounded to 2dp)
- 
-                              // totalDisc — raw ₹ (no GST adjustment, mirrors frontend)
-                              totalDisc: '$$totalDisc',
- 
-                              // taxableValue (rounded to 2dp)
                               taxableValue: { $round: ['$$taxableValue', 2] },
- 
  
                               // gstAmount = taxableValue × gstRate%
                               gstAmount: {
@@ -664,11 +629,6 @@ export const queryPurchasesReport = async (filters = {}) => {
                                   2,
                                 ],
                               },
- 
-                              // ── itemTotal ───────────────────────────────
-                              // gstRate = 0  →  netAmt
-                              // exclusive    →  taxableValue + gstAmount  (= netAmt + GST on top)
-                              // inclusive    →  netAmt                    (GST already baked in)
  
                               // ── itemTotal ───────────────────────────────
                               // gstRate = 0  →  netAmt
@@ -716,12 +676,7 @@ export const queryPurchasesReport = async (filters = {}) => {
       },
     },
  
- 
     // ── STEP 2: invoice-level totals ──────────────────────────────────────
-    //
-    //  discountTotal  →  ₹ rupee sum (NOT a percentage string)
-    //                    matches: totalDiscount in generatePurchaseHTML forEach loop
-    //
     //
     //  discountTotal  →  ₹ rupee sum (NOT a percentage string)
     //                    matches: totalDiscount in generatePurchaseHTML forEach loop
@@ -729,19 +684,11 @@ export const queryPurchasesReport = async (filters = {}) => {
     {
       $addFields: {
         // Total quantity across all items
-        // Total quantity across all items
         totalItemsQty: { $sum: '$calcItems.qty' },
  
         // discountTotal: Σ (flat per-unit discount × qty)  →  ₹ rupee value
         // Frontend: totalDiscount += perUnitDiscount * qty
- 
-        // discountTotal: Σ (flat per-unit discount × qty)  →  ₹ rupee value
-        // Frontend: totalDiscount += perUnitDiscount * qty
         discountTotal: {
-          $round: [{ $sum: '$calcItems.totalDisc' }, 2],
-        },
- 
-        // taxableValue: Σ item taxable values  (gstRate=0 items contribute 0)
           $round: [{ $sum: '$calcItems.totalDisc' }, 2],
         },
  
@@ -752,15 +699,9 @@ export const queryPurchasesReport = async (filters = {}) => {
  
         // gstTotal: Σ item GST amounts
         // Frontend: totalGST += gstAmount
- 
-        // gstTotal: Σ item GST amounts
-        // Frontend: totalGST += gstAmount
         gstTotal: {
           $round: [{ $sum: '$calcItems.gstAmount' }, 2],
         },
- 
-        // netAmount: Σ itemTotal  (= grand total before roundOff & extra discount)
-        // Frontend: totalAmount += item.total
  
         // netAmount: Σ itemTotal  (= grand total before roundOff & extra discount)
         // Frontend: totalAmount += item.total
@@ -769,8 +710,6 @@ export const queryPurchasesReport = async (filters = {}) => {
         },
       },
     },
- 
-    // ── STEP 3: CGST / SGST / IGST split ─────────────────────────────────
  
     // ── STEP 3: CGST / SGST / IGST split ─────────────────────────────────
     {
@@ -811,16 +750,12 @@ export const queryPurchasesReport = async (filters = {}) => {
     },
  
     // ── STEP 4: clean up helper arrays ────────────────────────────────────
- 
-    // ── STEP 4: clean up helper arrays ────────────────────────────────────
     {
       $project: {
         calcItems: 0,
         items:     0,
-        items:     0,
       },
     },
- 
  
     { $sort: { date: -1 } },
   ]);

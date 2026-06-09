@@ -4,7 +4,7 @@ import { isValidObjectId } from 'mongoose';
 export const createVendorSchema = {
   body: yup.object().shape({
     name: yup.string().trim().max(255, 'Category name must be at most 255 characters'),
-    mobile: Yup.string()
+    mobile: yup.string()
       .trim()
       .required('Contact number is required')
       .test('mobile-or-landline', 'Enter a valid Indian mobile or landline number', (value) => {
@@ -33,7 +33,7 @@ export const updateVendorSchema = {
     .object()
     .shape({
       name: yup.string().trim().max(255, 'Category name must be at most 255 characters'),
-      mobile: Yup.string()
+      mobile: yup.string()
         .trim()
         .required('Contact number is required')
         .test('mobile-or-landline', 'Enter a valid Indian mobile or landline number', (value) => {

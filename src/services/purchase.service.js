@@ -630,8 +630,10 @@ export const queryPurchasesReport = async (filters = {}) => {
                               qty:     '$$qty',
                               gstRate: '$$gstRate',
  
-                              // discAmt: GST-stripped discount in ₹  (for discountTotal sum)
-                              discAmt: { $multiply: ['$$discExcl', '$$qty'] },
+                              // rawDiscAmt: RAW per-unit discount × qty  (no GST strip)
+                              // Used for discountTotal — mirrors generatePurchaseHTML:
+                              //   totalDiscount += perUnitDiscount * qty  (no GST adjustment)
+                              rawDiscAmt: { $multiply: ['$$rawDisc', '$$qty'] },
  
                               // taxableValue rounded
                               taxableValue: { $round: ['$$taxableValue', 2] },
@@ -701,9 +703,11 @@ export const queryPurchasesReport = async (filters = {}) => {
         // Σ qty
         totalItemsQty: { $sum: '$calcItems.qty' },
  
-        // discountTotal = Σ discExcl*qty  (GST-stripped ₹)
+        // discountTotal = Σ rawDisc*qty  (RAW ₹ — no GST strip)
+        // generatePurchaseHTML: totalDiscount += perUnitDiscount * qty  (no adjustment)
+        // Image: Butter ₹30 + Pintol ₹40 = ₹70  ✅
         discountTotal: {
-          $round: [{ $sum: '$calcItems.discAmt' }, 2],
+          $round: [{ $sum: '$calcItems.rawDiscAmt' }, 2],
         },
  
         // taxableValue = Σ item.taxableValue

@@ -132,7 +132,10 @@ export const addPayment = {
   body: yup.object().shape({
     amount: yup.number().required('Amount is required').positive('Amount must be positive').round(),
     paymentDate: yup.date().default(() => new Date()),
-    paymentMethod: yup.string().oneOf(['cash', 'card', 'upi', 'bank-transfer', 'cheque']).default('cash'),
+    paymentMethod: yup
+      .string()
+      .oneOf(['cash', 'card', 'upi', 'bank_transfer', 'cheque']) // ✅ underscore
+      .default('cash'),
     referenceNumber: yup.string(),
     note: yup.string(),
     status: yup.string().oneOf(['pending', 'completed', 'failed', 'refunded']),

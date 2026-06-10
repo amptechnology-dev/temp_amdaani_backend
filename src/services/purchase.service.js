@@ -540,10 +540,6 @@ export const queryPurchasesReport = async (filters = {}) => {
     { $unwind: { path: '$storeInfo', preserveNullAndEmptyArrays: true } },
  
     // ── STEP 1: per-item calculations ─────────────────────────────────────
-    //
-    //  Mirrors generatePurchaseHTML item loop exactly.
-    //  Key rule: discount is a FLAT ₹ per-unit value — no GST stripping.
-    //
     {
       $addFields: {
         calcItems: {
@@ -553,30 +549,67 @@ export const queryPurchasesReport = async (filters = {}) => {
             in: {
               $let: {
                 vars: {
-                  qty:     { $toDouble: { $ifNull: ['$$it.quantity', 0] } },
-                  rate:    { $toDouble: { $ifNull: ['$$it.rate',     0] } },
-                  disc:    { $toDouble: { $ifNull: ['$$it.discount', 0] } }, // flat ₹ per unit
-                  gstRate: { $toDouble: { $ifNull: ['$$it.gstRate',  0] } },
+                  qty:     { $toDouble: { $ifNull: ['$$it.quantity',      0] } },
+                  rawRate: { $toDouble: { $ifNull: ['$$it.rate',          0] } },
+                  rawDisc: { $toDouble: { $ifNull: ['$$it.discount',      0] } },
+                  gstRate: { $toDouble: { $ifNull: ['$$it.gstRate',       0] } },
                   isIncl:  { $ifNull:   ['$$it.isTaxInclusive', false] },
                 },
                 in: {
                   $let: {
                     vars: {
-                      // baseAmt  = qty × rate  (before discount)
-                      baseAmt:   { $multiply: ['$$qty', '$$rate'] },
- 
-                      // totalDisc = flat per-unit discount × qty  (NO GST adjustment — matches frontend)
-                      totalDisc: { $multiply: ['$$disc', '$$qty'] },
- 
-                      // divisor for inclusive GST stripping
-                      divisor:   { $add: [1, { $divide: ['$$gstRate', 100] }] },
+                      // divisor = 1 + gstRate/100  (used for inclusive GST stripping)
+                      divisor: { $add: [1, { $divide: ['$$gstRate', 100] }] },
                     },
                     in: {
                       $let: {
                         vars: {
-                          // netAmt = baseAmt − totalDisc  (floored at 0)
+                          // ── baseRate ────────────────────────────────────
+                          // exclusive  →  rawRate
+                          // inclusive  →  rawRate / divisor   (GST stripped)
+                          baseRate: {
+                            $cond: [
+                              '$$isIncl',
+                              {
+                                $cond: [
+                                  { $gt: ['$$gstRate', 0] },
+                                  { $divide: ['$$rawRate', '$$divisor'] },
+                                  '$$rawRate',
+                                ],
+                              },
+                              '$$rawRate',
+                            ],
+                          },
+ 
+                          // ── discExcl (GST-exclusive per-unit discount) ──
+                          // exclusive  →  rawDisc
+                          // inclusive  →  rawDisc / divisor   (GST stripped)
+                          discExcl: {
+                            $cond: [
+                              '$$isIncl',
+                              {
+                                $cond: [
+                                  { $gt: ['$$gstRate', 0] },
+                                  { $divide: ['$$rawDisc', '$$divisor'] },
+                                  '$$rawDisc',
+                                ],
+                              },
+                              '$$rawDisc',
+                            ],
+                          },
+ 
+                          // ── netAmt = rawRate*qty − rawDisc*qty ──────────
+                          // used for inclusive itemTotal
                           netAmt: {
-                            $max: [0, { $subtract: ['$$baseAmt', '$$totalDisc'] }],
+                            $max: [
+                              0,
+                              {
+                                $subtract: [
+                                  { $multiply: ['$$rawRate', '$$qty'] },
+                                  { $multiply: ['$$rawDisc', '$$qty'] },
+                                ],
+                              },
+                            ],
                           },
                         },
                         in: {
@@ -584,8 +617,8 @@ export const queryPurchasesReport = async (filters = {}) => {
                             vars: {
                               // ── taxableValue ────────────────────────────
                               // gstRate = 0  →  0
-                              // exclusive    →  netAmt
-                              // inclusive    →  netAmt / divisor
+                              // exclusive    →  baseRate*qty − discExcl*qty   (= baseRate*qty − rawDisc*qty)
+                              // inclusive    →  baseRate*qty − discExcl*qty   (= netAmt / divisor)
                               taxableValue: {
                                 $cond: [
                                   { $eq: ['$$gstRate', 0] },
@@ -594,10 +627,9 @@ export const queryPurchasesReport = async (filters = {}) => {
                                     $max: [
                                       0,
                                       {
-                                        $cond: [
-                                          '$$isIncl',
-                                          { $divide: ['$$netAmt', '$$divisor'] },
-                                          '$$netAmt',
+                                        $subtract: [
+                                          { $multiply: ['$$baseRate', '$$qty'] },
+                                          { $multiply: ['$$discExcl', '$$qty'] },
                                         ],
                                       },
                                     ],
@@ -606,15 +638,16 @@ export const queryPurchasesReport = async (filters = {}) => {
                               },
                             },
                             in: {
-                              // ── fields carried forward ──────────────────
                               qty:     '$$qty',
                               gstRate: '$$gstRate',
-                              baseAmt: '$$baseAmt',
  
-                              // totalDisc — raw ₹ (no GST adjustment, mirrors frontend)
-                              totalDisc: '$$totalDisc',
+                              // subTotal contribution: baseRate × qty
+                              baseAmt: { $multiply: ['$$baseRate', '$$qty'] },
  
-                              // taxableValue (rounded to 2dp)
+                              // discountTotal contribution: discExcl × qty  (GST-stripped)
+                              discAmt: { $multiply: ['$$discExcl', '$$qty'] },
+ 
+                              // taxableValue (2dp)
                               taxableValue: { $round: ['$$taxableValue', 2] },
  
                               // gstAmount = taxableValue × gstRate%
@@ -632,8 +665,8 @@ export const queryPurchasesReport = async (filters = {}) => {
  
                               // ── itemTotal ───────────────────────────────
                               // gstRate = 0  →  netAmt
-                              // exclusive    →  taxableValue + gstAmount  (= netAmt + GST on top)
-                              // inclusive    →  netAmt                    (GST already baked in)
+                              // exclusive    →  taxableValue + gstAmount
+                              // inclusive    →  netAmt  (GST already inside price)
                               itemTotal: {
                                 $round: [
                                   {
@@ -677,34 +710,36 @@ export const queryPurchasesReport = async (filters = {}) => {
     },
  
     // ── STEP 2: invoice-level totals ──────────────────────────────────────
-    //
-    //  discountTotal  →  ₹ rupee sum (NOT a percentage string)
-    //                    matches: totalDiscount in generatePurchaseHTML forEach loop
-    //
     {
       $addFields: {
-        // Total quantity across all items
+        // Σ qty
         totalItemsQty: { $sum: '$calcItems.qty' },
  
-        // discountTotal: Σ (flat per-unit discount × qty)  →  ₹ rupee value
-        // Frontend: totalDiscount += perUnitDiscount * qty
-        discountTotal: {
-          $round: [{ $sum: '$calcItems.totalDisc' }, 2],
+        // subTotal = Σ baseRate*qty
+        // Frontend: acc.subtotal += baseRate * qty
+        subTotal: {
+          $round: [{ $sum: '$calcItems.baseAmt' }, 2],
         },
  
-        // taxableValue: Σ item taxable values  (gstRate=0 items contribute 0)
+        // discountTotal = Σ discExcl*qty  (GST-stripped discount in ₹)
+        // Frontend: acc.discountTotal += discountExclusivePerUnit * qty
+        discountTotal: {
+          $round: [{ $sum: '$calcItems.discAmt' }, 2],
+        },
+ 
+        // taxableValue = Σ item.taxableValue
         taxableValue: {
           $round: [{ $sum: '$calcItems.taxableValue' }, 2],
         },
  
-        // gstTotal: Σ item GST amounts
-        // Frontend: totalGST += gstAmount
+        // gstTotal = Σ item.gstAmount
+        // Frontend: acc.gstTotal += gstAmount
         gstTotal: {
           $round: [{ $sum: '$calcItems.gstAmount' }, 2],
         },
  
-        // netAmount: Σ itemTotal  (= grand total before roundOff & extra discount)
-        // Frontend: totalAmount += item.total
+        // netAmount = Σ item.itemTotal  (grand total before roundOff)
+        // Frontend: acc.totalAmount += item.total
         netAmount: {
           $round: [{ $sum: '$calcItems.itemTotal' }, 2],
         },
@@ -759,7 +794,7 @@ export const queryPurchasesReport = async (filters = {}) => {
  
     { $sort: { date: -1 } },
   ]);
-
+ 
   console.log('Purchase report result:', JSON.stringify(result));
  
   return result;

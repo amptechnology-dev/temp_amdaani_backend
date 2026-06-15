@@ -20,16 +20,23 @@ const purchaseItemSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
-  isTaxInclusive: {
+  isPurchaseTaxInclusive: {
     type: Boolean,
     default: false,
   },
+  isTaxInclusive: { type: Boolean, default: false },
   mrp: Number,
   quantity: {
     type: Number,
     required: true,
   },
-  discount: {
+  purchaseDiscount: {
+    type: Number,
+    default: 0,
+  },
+  purchaseDiscountType: { type: String, enum: ['percentage', 'amount'] },
+
+  purchaseDiscountPercentage: {
     type: Number,
     default: 0,
   },
@@ -37,8 +44,10 @@ const purchaseItemSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
+  discountType: { type: String, enum: ['percentage', 'amount'] },
+  discountPrice: Number,
+  discountPercentage: Number,
   sellingPrice: Number,
-  sellingDiscount: Number,
 });
 
 const purchaseSchema = new mongoose.Schema(

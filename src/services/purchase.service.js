@@ -59,6 +59,18 @@ export const createPurchase = async (data) => {
       const purchasePayload = {
         ...data,
         vendor: vendorId,
+        // ✅ remap item fields to match schema exactly
+        items: data.items.map((item) => ({
+          ...item,
+          rate: Number(item.rate ?? item.costPrice ?? 0),
+          costPrice: Number(item.costPrice ?? item.rate ?? 0),
+          isPurchaseTaxInclusive: Boolean(item.isPurchaseTaxInclusive ?? false),
+          isTaxInclusive: Boolean(item.isTaxInclusive ?? false),
+          purchaseDiscount: Number(item.purchaseDiscount ?? 0),
+          baseRate: Number(item.baseRate ?? 0),
+          taxableValue: Number(item.taxableValue ?? 0),
+          gstAmount: Number(item.gstAmount ?? 0),
+        })),
       };
 
       const purchase = new Purchase(purchasePayload);
@@ -503,16 +515,16 @@ export const cancelAfterPurchaseStock = async (purchaseId) => {
 
 export const queryPurchasesReport = async (filters = {}) => {
   const { store, startDate, endDate, status } = filters;
- 
+
   // ── match stage ───────────────────────────────────────────────────────────
   const matchStage = {
     status: { $ne: 'cancelled' },
   };
- 
+
   if (store) {
     matchStage.store = new mongoose.Types.ObjectId(String(store));
   }
- 
+
   if (startDate && endDate) {
     const start = new Date(startDate);
     start.setHours(0, 0, 0, 0);
@@ -520,14 +532,14 @@ export const queryPurchasesReport = async (filters = {}) => {
     end.setHours(23, 59, 59, 999);
     matchStage.date = { $gte: start, $lte: end };
   }
- 
+
   if (status && status !== 'cancelled') {
     matchStage.status = status;
   }
- 
+
   const result = await Purchase.aggregate([
     { $match: matchStage },
- 
+
     // ── store lookup ──────────────────────────────────────────────────────
     {
       $lookup: {
@@ -538,7 +550,7 @@ export const queryPurchasesReport = async (filters = {}) => {
       },
     },
     { $unwind: { path: '$storeInfo', preserveNullAndEmptyArrays: true } },
- 
+
     // ── STEP 1: per-item calculations ─────────────────────────────────────
     {
       $addFields: {
@@ -549,11 +561,11 @@ export const queryPurchasesReport = async (filters = {}) => {
             in: {
               $let: {
                 vars: {
-                  qty:     { $toDouble: { $ifNull: ['$$it.quantity', 0] } },
-                  rawRate: { $toDouble: { $ifNull: ['$$it.rate',     0] } },
+                  qty: { $toDouble: { $ifNull: ['$$it.quantity', 0] } },
+                  rawRate: { $toDouble: { $ifNull: ['$$it.rate', 0] } },
                   rawDisc: { $toDouble: { $ifNull: ['$$it.discount', 0] } },
-                  gstRate: { $toDouble: { $ifNull: ['$$it.gstRate',  0] } },
-                  isIncl:  { $ifNull:   ['$$it.isTaxInclusive', false] },
+                  gstRate: { $toDouble: { $ifNull: ['$$it.gstRate', 0] } },
+                  isIncl: { $ifNull: ['$$it.isTaxInclusive', false] },
                 },
                 in: {
                   $let: {
@@ -574,7 +586,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                               '$$rawRate',
                             ],
                           },
- 
+
                           // ── discExcl ──────────────────────────────────
                           // exclusive  →  rawDisc
                           // inclusive  →  rawDisc / divisor
@@ -585,7 +597,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                               '$$rawDisc',
                             ],
                           },
- 
+
                           // ── netAmt = rawRate*qty − rawDisc*qty ────────
                           // for inclusive itemTotal (GST already inside)
                           // for gstRate=0 exclusive itemTotal
@@ -627,30 +639,27 @@ export const queryPurchasesReport = async (filters = {}) => {
                               },
                             },
                             in: {
-                              qty:     '$$qty',
+                              qty: '$$qty',
                               gstRate: '$$gstRate',
- 
+
                               // rawDiscAmt: RAW per-unit discount × qty  (no GST strip)
                               // Used for discountTotal — mirrors generatePurchaseHTML:
                               //   totalDiscount += perUnitDiscount * qty  (no GST adjustment)
                               rawDiscAmt: { $multiply: ['$$rawDisc', '$$qty'] },
- 
+
                               // taxableValue rounded
                               taxableValue: { $round: ['$$taxableValue', 2] },
- 
+
                               // gstAmount = taxableValue × gstRate%
                               gstAmount: {
                                 $round: [
                                   {
-                                    $multiply: [
-                                      '$$taxableValue',
-                                      { $divide: ['$$gstRate', 100] },
-                                    ],
+                                    $multiply: ['$$taxableValue', { $divide: ['$$gstRate', 100] }],
                                   },
                                   2,
                                 ],
                               },
- 
+
                               // ── itemTotal ─────────────────────────────
                               // gstRate = 0  →  netAmt
                               // inclusive    →  netAmt           (GST inside)
@@ -669,10 +678,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                                             $add: [
                                               '$$taxableValue',
                                               {
-                                                $multiply: [
-                                                  '$$taxableValue',
-                                                  { $divide: ['$$gstRate', 100] },
-                                                ],
+                                                $multiply: ['$$taxableValue', { $divide: ['$$gstRate', 100] }],
                                               },
                                             ],
                                           },
@@ -696,37 +702,37 @@ export const queryPurchasesReport = async (filters = {}) => {
         },
       },
     },
- 
+
     // ── STEP 2: invoice-level totals ──────────────────────────────────────
     {
       $addFields: {
         // Σ qty
         totalItemsQty: { $sum: '$calcItems.qty' },
- 
+
         // discountTotal = Σ rawDisc*qty  (RAW ₹ — no GST strip)
         // generatePurchaseHTML: totalDiscount += perUnitDiscount * qty  (no adjustment)
         // Image: Butter ₹30 + Pintol ₹40 = ₹70  ✅
         discountTotal: {
           $round: [{ $sum: '$calcItems.rawDiscAmt' }, 2],
         },
- 
+
         // taxableValue = Σ item.taxableValue
         taxableValue: {
           $round: [{ $sum: '$calcItems.taxableValue' }, 2],
         },
- 
+
         // gstTotal = Σ item.gstAmount
         gstTotal: {
           $round: [{ $sum: '$calcItems.gstAmount' }, 2],
         },
- 
+
         // netAmount = Σ itemTotal  (grand total before roundOff)
         netAmount: {
           $round: [{ $sum: '$calcItems.itemTotal' }, 2],
         },
       },
     },
- 
+
     // ── STEP 3: subTotal = netAmount − gstTotal ───────────────────────────
     //
     //  Image shows:  Subtotal ₹580 = ₹589.60 (netAmount) − ₹9.60 (gstTotal)
@@ -735,25 +741,18 @@ export const queryPurchasesReport = async (filters = {}) => {
     {
       $addFields: {
         subTotal: {
-          $round: [
-            { $subtract: ['$netAmount', '$gstTotal'] },
-            2,
-          ],
+          $round: [{ $subtract: ['$netAmount', '$gstTotal'] }, 2],
         },
       },
     },
- 
+
     // ── STEP 4: CGST / SGST / IGST split ─────────────────────────────────
     {
       $addFields: {
         cgstTotal: {
           $round: [
             {
-              $cond: [
-                { $eq: ['$isIgst', true] },
-                0,
-                { $divide: ['$gstTotal', 2] },
-              ],
+              $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }],
             },
             2,
           ],
@@ -761,11 +760,7 @@ export const queryPurchasesReport = async (filters = {}) => {
         sgstTotal: {
           $round: [
             {
-              $cond: [
-                { $eq: ['$isIgst', true] },
-                0,
-                { $divide: ['$gstTotal', 2] },
-              ],
+              $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }],
             },
             2,
           ],
@@ -780,20 +775,20 @@ export const queryPurchasesReport = async (filters = {}) => {
         },
       },
     },
- 
+
     // ── STEP 5: clean up helper arrays ────────────────────────────────────
     {
       $project: {
         calcItems: 0,
-        items:     0,
+        items: 0,
       },
     },
- 
+
     { $sort: { date: -1 } },
   ]);
- 
+
   console.log('Purchase report result:', JSON.stringify(result));
- 
+
   return result;
 };
 

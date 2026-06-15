@@ -11,19 +11,38 @@ const purchaseItemSchema = yup.object().shape({
   unit: yup.string().nullable(),
   batchNo: yup.string().nullable(),
   expiryDate: yup.date().nullable(),
-  previousQuantity: yup.number(),
-  //isQtyChanged: yup.boolean().default(false),
+  previousQuantity: yup.number().default(0),
   mrp: yup.number().nullable(),
-  rate: yup.number().required('Rate is required').min(0, 'Rate must be >= 0'),
+  rate: yup.number().required('Rate is required').min(0),
+  costPrice: yup.number().min(0).default(0),
   gstRate: yup.number().min(0).default(0),
-  isTaxInclusive: yup.boolean().default(false),
   isPurchaseTaxInclusive: yup.boolean().default(false),
-  quantity: yup.number().required('Quantity is required').min(1, 'Quantity must be at least 1'),
+  isTaxInclusive: { type: Boolean, default: false },
+  quantity: yup.number().required('Quantity is required').min(1),
 
-  discount: yup.number().min(0).default(0),
+  // ✅ purchase discount fields — matches schema exactly
+  purchaseDiscount: yup.number().min(0).default(0),
+  purchaseDiscountType: yup
+    .string()
+    .transform((val) => (val === 'percentage' ? 'percentage' : 'amount'))
+    .oneOf(['percentage', 'amount'])
+    .default('amount'),
+  purchaseDiscountPercentage: yup.number().min(0).default(0),
+
+  // ✅ ADD — matches schema discountType, discountPrice, discountPercentage
+  discountType: yup
+    .string()
+    .transform((val) => (val === 'percentage' ? 'percentage' : 'amount'))
+    .oneOf(['percentage', 'amount'])
+    .default('amount'),
+  discountPrice: yup.number().min(0).nullable().default(0),
+  discountPercentage: yup.number().min(0).nullable().default(0),
+
+  baseRate: yup.number().min(0).default(0),
+  taxableValue: yup.number().min(0).default(0),
+  gstAmount: yup.number().min(0).default(0),
   total: yup.number().required('Total is required').min(0),
   sellingPrice: yup.number().min(0),
-  sellingDiscount: yup.number().min(0),
 });
 
 export const createPurchase = {

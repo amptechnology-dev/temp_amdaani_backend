@@ -19,6 +19,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_KEY }}
+          port: 22
           script: |
             cd /home/ubuntu/temp_amdaani_backend
 
@@ -29,7 +30,7 @@ jobs:
             echo "${{ secrets.ENV_FILE }}" > .env
 
             # Check if SSL certs exist
-            if [ ! -f "./certbot/conf/live/yourdomain.com/fullchain.pem" ]; then
+            if [ ! -f "./certbot/conf/live/amdaani.v1.amptechnology.in/fullchain.pem" ]; then
               echo "No certs found — running first-time SSL init..."
               bash ./init-ssl.sh
             else

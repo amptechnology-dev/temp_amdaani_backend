@@ -56,6 +56,13 @@ app.set('trust proxy', true);
 
 // API routes
 
+app.get('/test', (req, res) => {
+  res.status(200).json({
+    message: 'Amdaani Backend is running! from kingshuk',
+    version: '1.0.0',
+    timestamp: new Date(),
+  });
+});
 import apiRouter from './routes/api.routes.js';
 app.use('/api', apiRouter);
 

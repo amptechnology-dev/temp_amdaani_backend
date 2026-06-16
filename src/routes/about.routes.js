@@ -4,14 +4,6 @@ import { authenticate, authorizeRoles } from '../middlewares/auth.middleware.js'
 
 const router = Router();
 
-router.get('/test', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'All good! About route is working 🚀',
-    timestamp: new Date().toISOString(),
-  });
-});
-
 router.get('/public-about', aboutController.getAbout);
 router.use(authenticate);
 

@@ -11,7 +11,6 @@ import config from './config/config.js';
 import { errorConverter, errorHandler } from './middlewares/error.middleware.js';
 import { ApiError } from './utils/responseHandler.js';
 
-
 const app = express();
 
 // set security HTTP headers
@@ -24,17 +23,14 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 // sanitize request data
 app.use((req, res, next) => {
-  const skipRoutes = [
-    "/api/auth/logout",
-    "/api/auth/refresh-tokens",
-  ];
+  const skipRoutes = ['/api/auth/logout', '/api/auth/refresh-tokens'];
 
   if (
     skipRoutes.includes(req.path) ||
-    req.path.startsWith("/api/testimonial") ||
-    req.path.startsWith("/api/how-to-videos") ||
-    req.path.startsWith("/api/helpline") ||
-    req.path.startsWith("/api/herobutton")
+    req.path.startsWith('/api/testimonial') ||
+    req.path.startsWith('/api/how-to-videos') ||
+    req.path.startsWith('/api/helpline') ||
+    req.path.startsWith('/api/herobutton')
   ) {
     return next();
   }
@@ -59,6 +55,14 @@ app.set('trust proxy', true);
 // app.use('/v1/auth', authLimiter);
 
 // API routes
+
+app.get('/test', (req, res) => {
+  res.status(200).json({
+    message: 'Amdaani Backend is running!',
+    version: '1.0.0',
+    timestamp: new Date(),
+  });
+});
 import apiRouter from './routes/api.routes.js';
 app.use('/api', apiRouter);
 

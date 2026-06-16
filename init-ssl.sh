@@ -37,7 +37,7 @@ docker compose down
 docker compose up -d --no-deps nginx
 sleep 8
 
-# Step 4 — Verify nginx is running and serving port 80
+# Step 4 — Verify nginx is running
 if ! docker ps | grep -q nginx; then
   echo "ERROR: nginx failed to start!"
   docker logs nginx
@@ -49,11 +49,14 @@ curl -s http://localhost:80 > /dev/null
 echo "port 80 OK"
 
 # Step 5 — Get certificate only if not already obtained
-if [ ! -f "./certbot/conf/live/$DOMAIN/fullchain.pem" ]; then
+CERT_PATH="./certbot/conf/live/$DOMAIN/fullchain.pem"
+
+if ! sudo test -f "$CERT_PATH"; then
   echo "No cert found — requesting from Let's Encrypt..."
+
   docker run --rm \
-    -v $(pwd)/certbot/www:/var/www/certbot \
-    -v $(pwd)/certbot/conf:/etc/letsencrypt \
+    -v "$(pwd)/certbot/www:/var/www/certbot" \
+    -v "$(pwd)/certbot/conf:/etc/letsencrypt" \
     certbot/certbot certonly \
     --webroot \
     --webroot-path=/var/www/certbot \
@@ -62,11 +65,20 @@ if [ ! -f "./certbot/conf/live/$DOMAIN/fullchain.pem" ]; then
     --no-eff-email \
     -d $DOMAIN
 
-  if [ ! -f "./certbot/conf/live/$DOMAIN/fullchain.pem" ]; then
-    echo "ERROR: Certificate failed!"
+  # Fix ownership immediately — certbot runs as root inside Docker
+  sudo chown -R ubuntu:ubuntu ./certbot
+  chmod -R 755 ./certbot
+  sleep 2
+
+  # Verify cert was created
+  if ! sudo test -f "$CERT_PATH"; then
+    echo "ERROR: Certificate not found at $CERT_PATH"
+    echo "--- Listing certbot/conf/live/ ---"
+    sudo ls -la ./certbot/conf/live/ 2>/dev/null || echo "live/ folder does not exist"
     docker logs nginx
     exit 1
   fi
+
   echo "Certificate obtained!"
 else
   echo "Certificate already exists — skipping."

@@ -11,7 +11,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Deploy Via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -22,14 +22,9 @@ jobs:
           port: 22
           script: |
             cd /home/ubuntu/temp_amdaani_backend
-
-            # Pull latest code
             git pull origin main
-
-            # Write .env from GitHub secret
             echo "${{ secrets.ENV_FILE }}" > .env
 
-            # Check if SSL certs exist
             if [ ! -f "./certbot/conf/live/amdaani.v1.amptechnology.in/fullchain.pem" ]; then
               echo "No certs found — running first-time SSL init..."
               bash ./init-ssl.sh
@@ -39,5 +34,4 @@ jobs:
               docker compose exec nginx nginx -s reload
             fi
 
-            # Clean up old images
             docker image prune -f

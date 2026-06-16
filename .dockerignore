@@ -5,6 +5,12 @@ yarn-debug.log
 yarn-error.log
 logs
 
+certbot/
+nginx/
+.env
+*.log
+node_modules/
+
 # Environment and configuration files
 .env
 .env.*.local

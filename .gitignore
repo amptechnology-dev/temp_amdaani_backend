@@ -1,35 +1,37 @@
-# dependencies (bun install)
+# Dependencies
 node_modules
 
-
-# output
+# Output
 out
 dist
 *.tgz
 
-# code coverage
+# Code coverage
 coverage
 *.lcov
 
-# logs
+# Logs
 logs
-_.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+*.log
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
-# dotenv environment variable files
+# Environment variable files
 .env
 .env.development.local
 .env.test.local
 .env.production.local
 .env.local
 
-# caches
+# Caches
 .eslintcache
 .cache
 *.tsbuildinfo
 
-# IntelliJ based IDEs
+# Editor
 .idea
 
-# Finder (MacOS) folder config
+# OS
 .DS_Store
+
+# Runtime generated — do NOT ignore nginx/ since app.conf must be in git
+certbot/

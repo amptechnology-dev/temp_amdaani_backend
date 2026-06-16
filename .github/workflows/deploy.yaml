@@ -22,7 +22,7 @@ jobs:
           port: 22
           command_timeout: 20m
           script: |
-            # Clone repo if first time
+            # Clone repo if this is the first deploy
             if [ ! -d "/home/ubuntu/temp_amdaani_backend" ]; then
               git clone https://github.com/amptechnology-dev/temp_amdaani_backend.git /home/ubuntu/temp_amdaani_backend
             fi
@@ -32,20 +32,21 @@ jobs:
             # Pull latest code
             git fetch origin main
             git reset --hard origin/main
-            git pull origin main
 
-            # Write env file
+            # Write env file from GitHub secret
             echo "${{ secrets.ENV_FILE }}" > .env
 
-            # Fix certbot permissions
+            # Ensure certbot directories exist with correct permissions
             mkdir -p ./certbot/www/.well-known/acme-challenge ./certbot/conf
             sudo chown -R ubuntu:ubuntu ./certbot
             chmod -R 755 ./certbot
 
-            # Run SSL setup (skips cert if already exists)
+            # Run SSL setup:
+            #   - First push:  generates SSL cert, then starts full stack
+            #   - Later pushes: skips SSL, just rebuilds and redeploys app
             bash ./init-ssl.sh
 
-            # Cleanup old images
+            # Remove dangling images to free up disk space
             docker image prune -f
 
             echo "Deploy complete!"

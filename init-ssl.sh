@@ -5,6 +5,11 @@ EMAIL="devs.amptechnology@gmail.com"
 
 echo "=== Starting SSL setup for $DOMAIN ==="
 
+# Create required folders
+mkdir -p ./certbot/www/.well-known/acme-challenge ./certbot/conf
+sudo chown -R ubuntu:ubuntu ./certbot
+chmod -R 755 ./certbot
+
 # Step 1 — Write HTTP only nginx config
 cat > ./nginx/conf.d/app.conf << 'NGINXEOF'
 server {
@@ -21,43 +26,35 @@ server {
 }
 NGINXEOF
 
-echo "HTTP nginx config written"
-
-# Step 2 — Create required folders
-mkdir -p ./certbot/www ./certbot/conf
-
-# Step 3 — Start only nginx (no app, no mongo, no redis)
+# Step 2 — Start nginx only
 docker compose up -d --no-deps nginx
-sleep 8
+sleep 5
 
-# Step 4 — Check nginx running
-if ! docker ps | grep -q nginx; then
-  echo "ERROR: nginx failed to start!"
-  docker logs nginx
-  exit 1
-fi
-
-echo "nginx running — getting certificate..."
-
-# Step 5 — Get SSL certificate
-docker compose run --rm certbot certonly \
-  --webroot \
-  --webroot-path=/var/www/certbot \
-  --email $EMAIL \
-  --agree-tos \
-  --no-eff-email \
-  -d $DOMAIN
-
-# Step 6 — Check cert was obtained
+# Step 3 — Get certificate only if not already obtained
 if [ ! -f "./certbot/conf/live/$DOMAIN/fullchain.pem" ]; then
-  echo "ERROR: Certificate failed! Check DNS."
-  docker logs nginx
-  exit 1
+  echo "No cert found — requesting from Let's Encrypt..."
+  docker run --rm \
+    -v $(pwd)/certbot/www:/var/www/certbot \
+    -v $(pwd)/certbot/conf:/etc/letsencrypt \
+    certbot/certbot certonly \
+    --webroot \
+    --webroot-path=/var/www/certbot \
+    --email $EMAIL \
+    --agree-tos \
+    --no-eff-email \
+    -d $DOMAIN
+
+  if [ ! -f "./certbot/conf/live/$DOMAIN/fullchain.pem" ]; then
+    echo "ERROR: Certificate failed!"
+    docker logs nginx
+    exit 1
+  fi
+  echo "Certificate obtained!"
+else
+  echo "Certificate already exists — skipping."
 fi
 
-echo "Certificate obtained!"
-
-# Step 7 — Write full HTTPS nginx config
+# Step 4 — Write full HTTPS nginx config
 cat > ./nginx/conf.d/app.conf << NGINXEOF
 server {
     listen 80;
@@ -94,13 +91,12 @@ server {
 }
 NGINXEOF
 
-echo "HTTPS nginx config written"
+# Step 5 — Start all services
+docker compose up -d --build --remove-orphans
 
-# Step 8 — Reload nginx with SSL config
+# Step 6 — Reload nginx
+sleep 5
 docker compose exec nginx nginx -s reload
-
-# Step 9 — Start all services
-docker compose up -d
 
 echo ""
 echo "=== SSL setup complete! ==="

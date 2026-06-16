@@ -10,6 +10,10 @@ nginx/
 .env
 *.log
 node_modules/
+.git/
+
+
+node_modules/
 
 # Environment and configuration files
 .env

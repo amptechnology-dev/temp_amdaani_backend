@@ -30,6 +30,8 @@ jobs:
             git reset --hard origin/main
             git pull origin main
             echo "${{ secrets.ENV_FILE }}" > .env
+            sudo chown -R ubuntu:ubuntu ./certbot
+            chmod -R 755 ./certbot
             docker compose up -d --build --remove-orphans
             docker compose exec nginx nginx -s reload
             docker image prune -f

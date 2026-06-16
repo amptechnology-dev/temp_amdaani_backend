@@ -1,6 +1,12 @@
 # dependencies (bun install)
 node_modules
 
+certbot/
+nginx/
+.env
+*.log
+node_modules/
+
 # output
 out
 dist

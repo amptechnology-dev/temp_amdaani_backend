@@ -1,0 +1,42 @@
+name: AmdaaniBackend
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy Via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /home/ubuntu/temp_amdaani_backend
+
+            # Pull latest code
+            git pull origin main
+
+            # Write .env from GitHub secret
+            echo "${{ secrets.ENV_FILE }}" > .env
+
+            # Check if SSL certs exist
+            if [ ! -f "./certbot/conf/live/yourdomain.com/fullchain.pem" ]; then
+              echo "No certs found — running first-time SSL init..."
+              bash ./init-ssl.sh
+            else
+              echo "Certs exist — redeploying..."
+              docker compose up -d --build --remove-orphans
+              docker compose exec nginx nginx -s reload
+            fi
+
+            # Clean up old images
+            docker image prune -f

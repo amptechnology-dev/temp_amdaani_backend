@@ -1,20 +1,28 @@
-import { Router } from "express";
-import * as aboutController from "../controllers/about.controller.js";
-import { authenticate, authorizeRoles } from "../middlewares/auth.middleware.js";
+import { Router } from 'express';
+import * as aboutController from '../controllers/about.controller.js';
+import { authenticate, authorizeRoles } from '../middlewares/auth.middleware.js';
 
 const router = Router();
 
-router.get("/public-about", aboutController.getAbout);
+router.get('/test', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'All good! About route is working 🚀',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+router.get('/public-about', aboutController.getAbout);
 router.use(authenticate);
 
 router
-  .route("/")
+  .route('/')
   .get(aboutController.getAbout)
-  .post(authenticate, authorizeRoles("super-admin"), aboutController.createAbout);
+  .post(authenticate, authorizeRoles('super-admin'), aboutController.createAbout);
 
 router
-  .route("/:id")
+  .route('/:id')
   .get(aboutController.getAboutById)
-  .put(authenticate, authorizeRoles("super-admin"), aboutController.updateAbout);
+  .put(authenticate, authorizeRoles('super-admin'), aboutController.updateAbout);
 
 export default router;

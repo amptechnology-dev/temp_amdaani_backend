@@ -5,12 +5,14 @@ EMAIL="devs.amptechnology@gmail.com"
 
 echo "=== Starting SSL setup for $DOMAIN ==="
 
-# Create required folders
-mkdir -p ./certbot/www/.well-known/acme-challenge ./certbot/conf
+# Create ALL required folders first
+mkdir -p ./nginx/conf.d
+mkdir -p ./certbot/www/.well-known/acme-challenge
+mkdir -p ./certbot/conf
 sudo chown -R ubuntu:ubuntu ./certbot
 chmod -R 755 ./certbot
 
-# Step 1 — Write HTTP only nginx config
+# Step 1 — Write temporary HTTP-only config for certbot challenge
 cat > ./nginx/conf.d/app.conf << 'NGINXEOF'
 server {
     listen 80;
@@ -26,11 +28,27 @@ server {
 }
 NGINXEOF
 
-# Step 2 — Start nginx only
-docker compose up -d --no-deps nginx
-sleep 5
+echo "HTTP nginx config written"
 
-# Step 3 — Get certificate only if not already obtained
+# Step 2 — Stop any running containers cleanly
+docker compose down
+
+# Step 3 — Start nginx only
+docker compose up -d --no-deps nginx
+sleep 8
+
+# Step 4 — Verify nginx is running and serving port 80
+if ! docker ps | grep -q nginx; then
+  echo "ERROR: nginx failed to start!"
+  docker logs nginx
+  exit 1
+fi
+
+echo "nginx is up — testing port 80..."
+curl -s http://localhost:80 > /dev/null
+echo "port 80 OK"
+
+# Step 5 — Get certificate only if not already obtained
 if [ ! -f "./certbot/conf/live/$DOMAIN/fullchain.pem" ]; then
   echo "No cert found — requesting from Let's Encrypt..."
   docker run --rm \
@@ -54,48 +72,15 @@ else
   echo "Certificate already exists — skipping."
 fi
 
-# Step 4 — Write full HTTPS nginx config
-cat > ./nginx/conf.d/app.conf << NGINXEOF
-server {
-    listen 80;
-    server_name $DOMAIN;
+# Step 6 — Restore your real nginx config from repo
+git checkout -- ./nginx/conf.d/app.conf
+echo "HTTPS nginx config restored from repo"
 
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-    }
-
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl;
-    server_name $DOMAIN;
-
-    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
-
-    add_header Strict-Transport-Security "max-age=31536000" always;
-    add_header X-Frame-Options DENY;
-    add_header X-Content-Type-Options nosniff;
-
-    location / {
-        proxy_pass http://app:8010;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_read_timeout 90;
-    }
-}
-NGINXEOF
-
-# Step 5 — Start all services
+# Step 7 — Start all services and rebuild app
 docker compose up -d --build --remove-orphans
-
-# Step 6 — Reload nginx
 sleep 5
+
+# Step 8 — Reload nginx with full HTTPS config
 docker compose exec nginx nginx -s reload
 
 echo ""

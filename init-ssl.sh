@@ -1,15 +1,24 @@
 #!/bin/bash
 
 DOMAIN="amdaani.v1.amptechnology.in"
-EMAIL="devs.amptechnology@gmail.com"         # <-- change to your real email
+EMAIL="devs.amptechnology@gmail.com"
 
 echo "Starting first-time SSL setup for $DOMAIN..."
 
-# Start nginx in HTTP-only mode
-docker compose up -d nginx
+# Start ONLY nginx — no dependencies
+docker compose up -d --no-deps nginx
 sleep 5
 
-# Get certificate
+# Check nginx is running
+if ! docker ps | grep -q nginx; then
+  echo "ERROR: nginx failed to start!"
+  docker logs nginx
+  exit 1
+fi
+
+echo "nginx is running, requesting certificate..."
+
+# Get certificate (takes 30-60 seconds)
 docker compose run --rm certbot certonly \
   --webroot \
   --webroot-path=/var/www/certbot \
@@ -17,6 +26,15 @@ docker compose run --rm certbot certonly \
   --agree-tos \
   --no-eff-email \
   -d $DOMAIN
+
+# Check if cert was obtained
+if [ ! -f "./certbot/conf/live/$DOMAIN/fullchain.pem" ]; then
+  echo "ERROR: Certificate failed!"
+  echo "Check DNS: nslookup $DOMAIN"
+  exit 1
+fi
+
+echo "Certificate obtained successfully!"
 
 # Reload nginx to activate HTTPS
 docker compose exec nginx nginx -s reload

@@ -21,24 +21,21 @@ services:
       - app-network
 
   nginx:
-  image: nginx:alpine
-  container_name: nginx
-  restart: unless-stopped
-  ports:
-    - '80:80'
-    - '443:443'
-  volumes:
-    - ./nginx/conf.d:/etc/nginx/conf.d
-    - ./certbot/www:/var/www/certbot
-    - ./certbot/conf:/etc/letsencrypt
-  # ✅ No depends_on here — nginx manages upstream errors gracefully
-  networks:
-    - app-network
+    image: nginx:alpine
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    networks:
+      - app-network
 
   certbot:
     image: certbot/certbot
-    container_name: certbot
-    restart: unless-stopped
     volumes:
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt

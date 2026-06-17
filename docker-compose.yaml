@@ -31,31 +31,26 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
-    depends_on:
-      - app
     networks:
       - app-network
 
   certbot:
     image: certbot/certbot
-    container_name: certbot
-    restart: unless-stopped
     volumes:
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do sleep 12h & wait $${!}; certbot renew --quiet; done'"
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --quiet --webroot --webroot-path=/var/www/certbot; sleep 12h & wait $${!}; done'"
     networks:
       - app-network
-
   mongodb:
     image: mongo:7
     container_name: mongodb
     restart: unless-stopped
     command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
-    volumes:
-      - mongodb-data:/data/db
     ports:
       - '127.0.0.1:27017:27017'
+    volumes:
+      - mongodb-data:/data/db
     networks:
       - app-network
     healthcheck:
@@ -64,7 +59,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
-
   mongo-init:
     image: mongo:7
     depends_on:

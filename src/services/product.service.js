@@ -508,8 +508,14 @@ export const adjustProductStock = async (data, session = null) => {
 
     purchasePrice,
     salePrice,
-    sellingDiscount,
+
+    discountPrice,
+    discountType,
+    discountPercentage,
+
     purchaseDiscount,
+    purchaseDiscountType,
+    purchaseDiscountPercentage,
 
     remarks = '',
 
@@ -546,12 +552,28 @@ export const adjustProductStock = async (data, session = null) => {
     product.sellingPrice = salePrice;
   }
 
-  if (sellingDiscount !== undefined) {
-    product.discountPrice = sellingDiscount;
+  if (discountPrice !== undefined) {
+    product.discountPrice = discountPrice;
+  }
+
+  if (discountType !== undefined) {
+    product.discountType = discountType;
+  }
+
+  if (discountPercentage !== undefined) {
+    product.discountPercentage = discountPercentage;
   }
 
   if (purchaseDiscount !== undefined) {
     product.purchaseDiscount = purchaseDiscount;
+  }
+
+  if (purchaseDiscountType !== undefined) {
+    product.purchaseDiscountType = purchaseDiscountType;
+  }
+
+  if (purchaseDiscountPercentage !== undefined) {
+    product.purchaseDiscountPercentage = purchaseDiscountPercentage;
   }
 
   if (hsn) {
@@ -568,7 +590,6 @@ export const adjustProductStock = async (data, session = null) => {
 
   if (gstRate !== undefined) {
     product.gstRate = gstRate;
-
     product.purchaseGstRate = gstRate;
   }
 
@@ -684,8 +705,12 @@ export const updateStockAfterPurchase = async (purchase, session = null) => {
         purchasePrice: item.rate,
         remarks: `Purchase added for ${item.quantity} units`,
         salePrice: item.sellingPrice,
-        sellingDiscount: item.sellingDiscount,
-        purchseDiscount: item.purchaseDiscount,
+        discountPrice: item.discountPrice,
+        discountType: item.discountType,
+        discountPercentage: item.discountPercentage,
+        purchaseDiscount: item.purchaseDiscount,
+        purchaseDiscountType: item.purchaseDiscountType,
+        purchaseDiscountPercentage: item.purchaseDiscountPercentage,
         isTaxInclusive: item.isTaxInclusive,
         isPurchaseTaxInclusive: item.isPurchaseTaxInclusive,
         hsn: item.hsn,

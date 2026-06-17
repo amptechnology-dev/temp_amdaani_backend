@@ -43,23 +43,23 @@ services:
     networks:
       - app-network
 
-  mongodb:
-  image: mongo:7
-  container_name: mongodb
-  restart: unless-stopped
-  command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
-  ports:
-    - '127.0.0.1:27017:27017'
-  volumes:
-    - mongodb-data:/data/db
-  networks:
-    - app-network
-  healthcheck:
-    test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
-    interval: 10s
-    timeout: 5s
-    retries: 5
-    start_period: 20s
+ mongodb:
+    image: mongo:7
+    container_name: mongodb
+    restart: unless-stopped
+    command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
+    ports:
+      - '127.0.0.1:27017:27017'
+    volumes:
+      - mongodb-data:/data/db
+    networks:
+      - app-network
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   mongo-init:
     image: mongo:7

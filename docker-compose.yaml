@@ -1,16 +1,22 @@
 services:
   app:
     build: .
-    container_name: node-app
+    container_name: bun-app
     restart: unless-stopped
     env_file:
       - .env
     expose:
-      - '9001'
-    command: sh -c "node src/index.js"
+      - '8010'
+    command: >
+      sh -c "
+      until bun run src/seeders/roleSeeder.js;
+      do echo 'Seeder failed, retrying in 5s...'; sleep 5; done &&
+      bun run src/index.js"
     depends_on:
-      mongo-init:
-        condition: service_completed_successfully
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - app-network
 
@@ -25,8 +31,6 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
-    depends_on:
-      - app
     networks:
       - app-network
 
@@ -38,16 +42,11 @@ services:
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --quiet --webroot --webroot-path=/var/www/certbot; sleep 12h & wait $${!}; done'"
     networks:
       - app-network
-
   mongodb:
     image: mongo:7
     container_name: mongodb
     restart: unless-stopped
     command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: mongo-root
-      MONGO_INITDB_ROOT_PASSWORD: BeekeepingOutingElapsesRadioed
-      MONGO_INITDB_DATABASE: office-management
     ports:
       - '127.0.0.1:27017:27017'
     volumes:
@@ -55,27 +54,13 @@ services:
     networks:
       - app-network
     healthcheck:
-      test:
-        [
-          'CMD',
-          'mongosh',
-          '-u',
-          'mongo-root',
-          '-p',
-          'BeekeepingOutingElapsesRadioed',
-          '--authenticationDatabase',
-          'admin',
-          '--eval',
-          "db.adminCommand('ping')",
-        ]
+      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 20s
-
   mongo-init:
     image: mongo:7
-    container_name: mongo-init
     depends_on:
       mongodb:
         condition: service_healthy
@@ -84,23 +69,28 @@ services:
     restart: 'no'
     entrypoint: >
       bash -c "
-      echo 'Initializing replica set...' &&
-      mongosh mongodb:27017 -u mongo-root -p BeekeepingOutingElapsesRadioed --authenticationDatabase admin --eval '
-        try {
-          rs.status();
-          print(\"Replica set already initialized\");
-        } catch (e) {
-          rs.initiate({
-            _id: \"rs0\",
-            members: [{ _id: 0, host: \"mongodb:27017\" }]
-          });
-          print(\"Replica set initialized\");
-        }
-      '
+      echo 'Waiting for MongoDB...' &&
+      sleep 5 &&
+      mongosh mongodb:27017 --eval '
+        rs.initiate({
+          _id: \"rs0\",
+          members: [{ _id: 0, host: \"mongodb:27017\" }]
+        })
+      ' || true
       "
+
+  redis:
+    image: redis:7
+    container_name: redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - app-network
 
 volumes:
   mongodb-data:
+  redis-data:
 
 networks:
   app-network:

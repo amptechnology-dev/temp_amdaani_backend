@@ -6,7 +6,7 @@ import { updateStockAfterPurchase } from '../services/product.service.js';
 import { createVendorPayment, getVendorPaymentsByPurchase, updateVendorPayment } from './vendorPayment.service.js';
 import { ApiError } from '../utils/responseHandler.js';
 import { StockTransaction } from '../models/stockTransaction.model.js';
-import { adjustProductStock } from '../services/product.service.js';
+import { adjustProductStock ,forRemoveadjustProductStock} from '../services/product.service.js';
 import { StockTransactionType } from '../config/constants.js';
 
 export const createPurchase = async (data) => {
@@ -258,7 +258,7 @@ export const reverseStockAfterPurchase = async (purchase, session = null) => {
 
   // ✅ Reverse each item by applying negative quantity
   for (const item of items) {
-    await adjustProductStock(
+    await forRemoveadjustProductStock(
       {
         productId: item.product,
         date: date || new Date(),

@@ -539,6 +539,154 @@ export const adjustProductStock = async (data, session = null) => {
   // ==========================
   // UPDATE CURRENT STOCK
   // ==========================
+
+  product.currentStock += quantity;
+
+  // ==========================
+  // UPDATE PRODUCT INFO
+  // ==========================
+  if (purchasePrice !== undefined) {
+    product.costPrice = purchasePrice;
+  }
+
+  if (salePrice !== undefined) {
+    product.sellingPrice = salePrice;
+  }
+
+  if (discountPrice !== undefined) {
+    product.discountPrice = discountPrice;
+  }
+
+  if (discountType !== undefined) {
+    product.discountType = discountType;
+  }
+
+  if (discountPercentage !== undefined) {
+    product.discountPercentage = discountPercentage;
+  }
+
+  if (purchaseDiscount !== undefined) {
+    product.purchaseDiscount = purchaseDiscount;
+  }
+
+  if (purchaseDiscountType !== undefined) {
+    product.purchaseDiscountType = purchaseDiscountType;
+  }
+
+  if (purchaseDiscountPercentage !== undefined) {
+    product.purchaseDiscountPercentage = purchaseDiscountPercentage;
+  }
+
+  if (hsn) {
+    product.hsn = hsn;
+  }
+
+  if (isTaxInclusive !== undefined) {
+    product.isTaxInclusive = isTaxInclusive;
+  }
+
+  if (isPurchaseTaxInclusive !== undefined) {
+    product.isPurchaseTaxInclusive = isPurchaseTaxInclusive;
+  }
+
+  if (gstRate !== undefined) {
+    product.gstRate = gstRate;
+    product.purchaseGstRate = gstRate;
+  }
+
+  // ==========================
+  // SAVE PRODUCT
+  // ==========================
+  await product.save({
+    session,
+  });
+
+  // ==========================
+  // CREATE STOCK TRANSACTION
+  // ==========================
+  const stockTransaction = new StockTransaction({
+    product: productId,
+
+    store: product.store,
+
+    batch: batchId,
+
+    date,
+
+    transactionType: transactionType || 'MANUAL',
+
+    quantity: Math.abs(quantity),
+
+    direction: quantity >= 0 ? 'IN' : 'OUT',
+
+    rate,
+
+    purchaseId,
+    saleId,
+
+    totalAmount: rate * Math.abs(quantity),
+
+    remarks,
+  });
+
+  // ==========================
+  // SAVE TRANSACTION
+  // ==========================
+  return await stockTransaction.save({
+    session,
+  });
+};
+
+export const forRemoveadjustProductStock = async (data, session = null) => {
+  const {
+    productId,
+    date = new Date(),
+    transactionType,
+
+    quantity,
+    rate = 0,
+
+    batchId = null,
+    purchaseId = null,
+    saleId = null,
+
+    purchasePrice,
+    salePrice,
+
+    discountPrice,
+    discountType,
+    discountPercentage,
+
+    purchaseDiscount,
+    purchaseDiscountType,
+    purchaseDiscountPercentage,
+
+    remarks = '',
+
+    hsn,
+    isTaxInclusive = false,
+    isPurchaseTaxInclusive = false,
+    gstRate,
+  } = data;
+
+  console.log('Adjusting stock for product', JSON.stringify(productId), 'with quantity', JSON.stringify(quantity));
+
+  // ==========================
+  // FIND PRODUCT
+  // ==========================
+  const product = await Product.findById(productId).session(session);
+
+  if (!product) {
+    throw new Error('Product not found');
+  }
+
+  // ==========================
+  // UPDATE CURRENT STOCK
+  // ==========================
+  if (quantity < 0 && product.currentStock <= 0) {
+    return null;
+  }
+
   product.currentStock += quantity;
 
   // ==========================

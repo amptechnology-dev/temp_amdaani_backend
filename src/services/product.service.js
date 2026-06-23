@@ -391,48 +391,48 @@ const adjustProductStockForSale = async (data, session = null) => {
     throw new Error(`Invalid numeric values for product ${productId}`);
   }
 
-  console.log('a', safeQuantity);
+  // console.log('a', safeQuantity);
 
   // ==========================
   // UPDATE CURRENT STOCK
   // ==========================
   product.currentStock += safeQuantity; // negative quantity = OUT (deduct on sale)
 
-  // ==========================
-  // UPDATE PRODUCT INFO
-  // ==========================
-  if (salePrice !== undefined) {
-    product.sellingPrice = salePrice;
-  }
+  // // ==========================
+  // // UPDATE PRODUCT INFO
+  // // ==========================
+  // if (salePrice !== undefined) {
+  //   product.sellingPrice = salePrice;
+  // }
 
-  if (purchasePrice !== undefined) {
-    product.costPrice = purchasePrice;
-  }
+  // if (purchasePrice !== undefined) {
+  //   product.costPrice = purchasePrice;
+  // }
 
-  if (sellingDiscount !== undefined) {
-    product.discountPrice = sellingDiscount;
-  }
+  // if (sellingDiscount !== undefined) {
+  //   product.discountPrice = sellingDiscount;
+  // }
 
-  if (purchaseDiscount !== undefined) {
-    product.purchaseDiscount = purchaseDiscount;
-  }
+  // if (purchaseDiscount !== undefined) {
+  //   product.purchaseDiscount = purchaseDiscount;
+  // }
 
-  if (hsn) {
-    product.hsn = hsn;
-  }
+  // if (hsn) {
+  //   product.hsn = hsn;
+  // }
 
-  if (isTaxInclusive !== undefined) {
-    product.isTaxInclusive = isTaxInclusive;
-  }
+  // if (isTaxInclusive !== undefined) {
+  //   product.isTaxInclusive = isTaxInclusive;
+  // }
 
-  if (isPurchaseTaxInclusive !== undefined) {
-    product.isPurchaseTaxInclusive = isPurchaseTaxInclusive;
-  }
+  // if (isPurchaseTaxInclusive !== undefined) {
+  //   product.isPurchaseTaxInclusive = isPurchaseTaxInclusive;
+  // }
 
-  if (gstRate !== undefined) {
-    product.gstRate = gstRate;
-    product.purchaseGstRate = gstRate;
-  }
+  // if (gstRate !== undefined) {
+  //   product.gstRate = gstRate;
+  //   product.purchaseGstRate = gstRate;
+  // }
 
   // ==========================
   // SAVE PRODUCT

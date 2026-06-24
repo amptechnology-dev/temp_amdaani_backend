@@ -1101,10 +1101,7 @@ export const getGstPurchaseReport = async (filters = {}) => {
             {
               $round: [
                 {
-                  $divide: [
-                    '$items.total',
-                    { $add: [1, { $divide: ['$items.gstRate', 100] }] },
-                  ],
+                  $divide: ['$items.total', { $add: [1, { $divide: ['$items.gstRate', 100] }] }],
                 },
                 2,
               ],
@@ -1191,13 +1188,22 @@ export const getProfitLossReport = async (filters = {}) => {
 
     { $unwind: '$items' },
 
-    // ── latest purchase for this product ─────────────────────────────────
-    // We fetch rate, purchaseDiscount, purchaseDiscountType, isTaxInclusive
-    // so we can calculate the real effective purchase cost per unit
+    // ── Step 1: preserve invoice fields before lookup ─────────────────────
+    {
+      $addFields: {
+        _invoiceQty: '$items.quantity', // sold qty (for salesAmount)
+        _invoiceSellingPrice: '$items.sellingPrice', // selling price per unit
+        _invoiceProductId: '$items.product',
+        _invoiceProductName: '$items.name',
+      },
+    },
+
+    // ── Step 2: fetch latest purchase item for this product ───────────────
+    // ALL purchase fields come from Purchase schema (purchases collection)
     {
       $lookup: {
         from: 'purchases',
-        let: { productId: '$items.product' },
+        let: { productId: '$_invoiceProductId' },
         pipeline: [
           { $match: { status: { $ne: 'cancelled' } } },
           { $unwind: '$items' },
@@ -1210,13 +1216,17 @@ export const getProfitLossReport = async (filters = {}) => {
           { $limit: 1 },
           {
             $project: {
-              rate: '$items.rate',
-              quantity: '$items.quantity',
-              productName: '$items.name',
-              purchaseDiscount: '$items.purchaseDiscount',
-              purchaseDiscountType: '$items.purchaseDiscountType',
-              isTaxInclusive: '$items.isTaxInclusive',
-              gstRate: '$items.gstRate',
+              _id: 0,
+              // ── from Purchase schema: purchaseItemSchema fields ──────
+              purchaseQty: '$items.quantity', // e.g. 5
+              rate: '$items.rate', // e.g. 20
+              gstRate: '$items.gstRate', // e.g. 12
+              purchaseDiscount: '$items.purchaseDiscount', // flat ₹ e.g. 10
+              purchaseDiscountType: '$items.purchaseDiscountType', // "percentage"
+              purchaseDiscountPercentage: '$items.purchaseDiscountPercentage', // e.g. 50
+              isPurchaseTaxInclusive: {
+                $ifNull: ['$items.isPurchaseTaxInclusive', { $ifNull: ['$items.isTaxInclusive', false] }],
+              },
             },
           },
         ],
@@ -1226,71 +1236,70 @@ export const getProfitLossReport = async (filters = {}) => {
 
     {
       $addFields: {
-        purchaseItem: { $arrayElemAt: ['$purchaseData', 0] },
+        _p: { $arrayElemAt: ['$purchaseData', 0] },
       },
     },
 
-    // ── calculate effective purchase cost per unit ────────────────────────
-    // Mirrors queryPurchasesReport / generatePurchaseHTML logic:
+    // ── Step 3: resolve discount per unit from Purchase schema ────────────
     //
-    //   percentage → rawDiscPerUnit = rate × (purchaseDiscount / 100)
-    //   amount     → rawDiscPerUnit = purchaseDiscount
+    //  purchaseDiscountType = "percentage"
+    //    → discPerUnit = rate × (purchaseDiscountPercentage / 100)
+    //    → e.g. 20 × (50/100) = 10
     //
-    //   isTaxInclusive && gstRate > 0:
-    //     baseRate     = rate / (1 + gstRate/100)
-    //     discExclUnit = rawDiscPerUnit / (1 + gstRate/100)
-    //     effectiveCostPerUnit = baseRate - discExclUnit
-    //   else:
-    //     effectiveCostPerUnit = rate - rawDiscPerUnit
-    //
-    //   itemPurchaseCost = effectiveCostPerUnit × invoiceItemQty
+    //  purchaseDiscountType = "amount"
+    //    → discPerUnit = purchaseDiscount (flat ₹)
+    //    → e.g. 10
     {
       $addFields: {
-        // rawDiscPerUnit in ₹
-        _purchaseRawDiscPerUnit: {
+        _pRate: { $ifNull: ['$_p.rate', 0] },
+        _pGst: { $ifNull: ['$_p.gstRate', 0] },
+        _pIsIncl: { $ifNull: ['$_p.isPurchaseTaxInclusive', false] },
+        _pQty: { $ifNull: ['$_p.purchaseQty', 0] }, // ← from Purchase schema
+
+        _pDiscPerUnit: {
           $let: {
             vars: {
-              rate: { $ifNull: ['$purchaseItem.rate', 0] },
-              discAmt: { $ifNull: ['$purchaseItem.purchaseDiscount', 0] },
-              discType: { $ifNull: ['$purchaseItem.purchaseDiscountType', 'amount'] },
+              rate: { $ifNull: ['$_p.rate', 0] },
+              discAmt: { $ifNull: ['$_p.purchaseDiscount', 0] },
+              discPct: { $ifNull: ['$_p.purchaseDiscountPercentage', 0] },
+              discType: { $ifNull: ['$_p.purchaseDiscountType', 'amount'] },
             },
             in: {
               $cond: [
                 { $eq: ['$$discType', 'percentage'] },
-                { $multiply: ['$$rate', { $divide: ['$$discAmt', 100] }] },
-                '$$discAmt',
+                { $multiply: ['$$rate', { $divide: ['$$discPct', 100] }] }, // 20×0.5=10
+                '$$discAmt', // flat ₹
               ],
             },
           },
         },
-
-        _purchaseGstRate: { $ifNull: ['$purchaseItem.gstRate', 0] },
-        _purchaseIsInclusive: { $ifNull: ['$purchaseItem.isTaxInclusive', false] },
-        _purchaseRate: { $ifNull: ['$purchaseItem.rate', 0] },
       },
     },
 
+    // ── Step 4: taxable value per unit (ex-GST) from Purchase schema ──────
+    //
+    //  isPurchaseTaxInclusive = false (tax-exclusive):
+    //    taxablePerUnit = rate - discPerUnit
+    //    e.g. 20 - 10 = ₹10/unit  ✓  matches purchase subTotal/qty = 50/5
+    //
+    //  isPurchaseTaxInclusive = true (tax-inclusive):
+    //    taxablePerUnit = (rate - discPerUnit) / (1 + gstRate/100)
     {
       $addFields: {
-        // effective ex-GST cost per unit (what we actually paid excluding tax)
-        _effectivePurchaseCostPerUnit: {
+        _taxablePerUnit: {
           $let: {
             vars: {
-              rate: '$_purchaseRate',
-              disc: '$_purchaseRawDiscPerUnit',
-              gstRate: '$_purchaseGstRate',
-              isIncl: '$_purchaseIsInclusive',
-              divisor: { $add: [1, { $divide: ['$_purchaseGstRate', 100] }] },
+              rate: '$_pRate',
+              disc: '$_pDiscPerUnit',
+              gst: '$_pGst',
+              isIncl: '$_pIsIncl',
+              divisor: { $add: [1, { $divide: ['$_pGst', 100] }] },
             },
             in: {
               $cond: [
-                { $and: ['$$isIncl', { $gt: ['$$gstRate', 0] }] },
-                // inclusive: strip GST from both rate and discount
-                {
-                  $subtract: [{ $divide: ['$$rate', '$$divisor'] }, { $divide: ['$$disc', '$$divisor'] }],
-                },
-                // exclusive / no GST: straightforward
-                { $subtract: ['$$rate', '$$disc'] },
+                { $and: ['$$isIncl', { $gt: ['$$gst', 0] }] },
+                { $divide: [{ $subtract: ['$$rate', '$$disc'] }, '$$divisor'] },
+                { $subtract: ['$$rate', '$$disc'] }, // 20 - 10 = 10
               ],
             },
           },
@@ -1298,17 +1307,30 @@ export const getProfitLossReport = async (filters = {}) => {
       },
     },
 
-    // ── item level sales & purchase amounts ───────────────────────────────
+    // ── Step 5: sales amount (invoice) & purchase amount (purchase schema) ─
+    //
+    //  invoiceSalesAmount = sellingPrice(invoice) × qty(invoice)
+    //    e.g. 30 × invoiceQty  ← entirely from Invoice
+    //
+    //  purchaseCostAmount = taxablePerUnit(purchase) × qty(PURCHASE)
+    //    e.g. 10 × 5 = ₹50    ← entirely from Purchase schema ✓
+    //
+    //  itemProfit = invoiceSalesAmount - purchaseCostAmount
     {
       $addFields: {
-        itemSalesAmount: {
-          $multiply: [{ $ifNull: ['$items.sellingPrice', 0] }, { $ifNull: ['$items.quantity', 0] }],
+        // SALES: from Invoice schema
+        _itemSalesAmount: {
+          $round: [{ $multiply: [{ $ifNull: ['$_invoiceSellingPrice', 0] }, { $ifNull: ['$_invoiceQty', 0] }] }, 2],
         },
 
-        itemPurchaseCost: {
+        // PURCHASE COST: taxablePerUnit × purchaseQty — 100% from Purchase schema
+        _itemPurchaseCost: {
           $round: [
             {
-              $multiply: [{ $max: [0, '$_effectivePurchaseCostPerUnit'] }, { $ifNull: ['$items.quantity', 0] }],
+              $multiply: [
+                { $max: [0, '$_taxablePerUnit'] },
+                { $ifNull: ['$_pQty', 0] }, // ← Purchase schema qty, NOT invoice qty
+              ],
             },
             2,
           ],
@@ -1316,14 +1338,13 @@ export const getProfitLossReport = async (filters = {}) => {
       },
     },
 
-    // ── item profit ───────────────────────────────────────────────────────
     {
       $addFields: {
-        itemProfit: { $subtract: ['$itemSalesAmount', '$itemPurchaseCost'] },
+        _itemProfit: { $subtract: ['$_itemSalesAmount', '$_itemPurchaseCost'] },
       },
     },
 
-    // ── group back to invoice level ───────────────────────────────────────
+    // ── Step 6: group back to invoice level ───────────────────────────────
     {
       $group: {
         _id: '$_id',
@@ -1335,35 +1356,38 @@ export const getProfitLossReport = async (filters = {}) => {
 
         items: {
           $push: {
-            product: '$items.name',
-            quantity: '$items.quantity',
-            invoicePrice: '$items.sellingPrice',
-            invoiceAmount: '$itemSalesAmount',
-            purchasePrice: {
-              $round: ['$_effectivePurchaseCostPerUnit', 2],
-            },
-            purchaseAmount: '$itemPurchaseCost',
-            itemProfit: '$itemProfit',
+            product: '$_invoiceProductName',
+
+            // ── Invoice side ──────────────────────────────────────────
+            invoiceQuantity: '$_invoiceQty', // sold qty from Invoice
+            invoicePrice: '$_invoiceSellingPrice', // per unit from Invoice
+            invoiceAmount: '$_itemSalesAmount', // sellingPrice × invoiceQty
+
+            // ── Purchase side (all from Purchase schema) ──────────────
+            purchaseQuantity: '$_pQty', // qty from Purchase
+            purchasePrice: { $round: ['$_taxablePerUnit', 2] }, // taxable per unit
+            purchaseAmount: '$_itemPurchaseCost', // taxablePerUnit × purchaseQty = 50
+
+            // ── Profit ───────────────────────────────────────────────
+            itemProfit: '$_itemProfit',
           },
         },
 
-        totalSales: { $sum: '$itemSalesAmount' },
-        totalPurchase: { $sum: '$itemPurchaseCost' },
-        totalProfit: { $sum: '$itemProfit' },
+        totalSales: { $sum: '$_itemSalesAmount' },
+        totalPurchase: { $sum: '$_itemPurchaseCost' },
+        totalProfit: { $sum: '$_itemProfit' },
       },
     },
 
+    // ── Step 7: final shape ───────────────────────────────────────────────
     {
       $project: {
         invoiceDate: 1,
         invoiceNumber: 1,
-
         customerDescription: {
           $concat: [{ $ifNull: ['$customerName', 'Cash Customer'] }, ' , ', { $ifNull: ['$customerMobile', '-'] }],
         },
-
         items: 1,
-
         totalSales: { $round: ['$totalSales', 2] },
         totalPurchase: { $round: ['$totalPurchase', 2] },
         profitLoss: { $round: ['$totalProfit', 2] },
@@ -1386,14 +1410,13 @@ export const getProfitLossReport = async (filters = {}) => {
 
   return {
     summary: {
-      totalSales: overall.totalSales,
-      totalPurchase: overall.totalPurchase,
-      totalProfit: overall.totalProfit,
+      totalSales: parseFloat(overall.totalSales.toFixed(2)),
+      totalPurchase: parseFloat(overall.totalPurchase.toFixed(2)),
+      totalProfit: parseFloat(overall.totalProfit.toFixed(2)),
     },
     invoices: result,
   };
 };
-
 // export async function getStockBalance(filters) {
 //   const { store, itemName, asOnDate, startDate, endDate } = filters;
 

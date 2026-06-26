@@ -20,17 +20,14 @@ sudo chown -R ubuntu:ubuntu ./certbot
 chmod -R 755 ./certbot
 
 # ─────────────────────────────────────────────────────────────
-# FIX: Certbot sometimes creates folder with -0001 suffix
-# e.g. amdaani.v1.amptechnology.in-0001 instead of amdaani.v1.amptechnology.in
-# This renames it to the correct folder name
+# FIX 1: Certbot sometimes creates folder with -0001 suffix
+# Renames it to the correct folder name nginx expects
 # ─────────────────────────────────────────────────────────────
 fix_cert_folder_name() {
   local WRONG_LIVE="$CERT_LIVE_DIR/${DOMAIN}-0001"
   local RIGHT_LIVE="$CERT_LIVE_DIR/${DOMAIN}"
-
   local WRONG_ARCHIVE="./certbot/conf/archive/${DOMAIN}-0001"
   local RIGHT_ARCHIVE="./certbot/conf/archive/${DOMAIN}"
-
   local WRONG_RENEWAL="./certbot/conf/renewal/${DOMAIN}-0001.conf"
   local RIGHT_RENEWAL="./certbot/conf/renewal/${DOMAIN}.conf"
 
@@ -46,9 +43,9 @@ fix_cert_folder_name() {
 }
 
 # ─────────────────────────────────────────────────────────────
-# FIX: Replace certbot symlinks with real files
-# Certbot creates symlinks: fullchain.pem -> ../../archive/...
-# But nginx container cannot see archive/ folder → SSL fails
+# FIX 2: Replace certbot symlinks with real files
+# Symlinks point to ../../archive/ which nginx container
+# cannot see — so SSL fails with "No such file or directory"
 # ─────────────────────────────────────────────────────────────
 fix_symlinks() {
   local LIVE_DIR="$CERT_LIVE_DIR/$DOMAIN"
@@ -71,6 +68,29 @@ fix_symlinks() {
   sudo chown -R ubuntu:ubuntu ./certbot
   chmod -R 755 ./certbot
   echo "Symlinks fixed — nginx can now read real cert files."
+}
+
+# ─────────────────────────────────────────────────────────────
+# FIX 3: Write HTTP-only config first so nginx doesn't crash
+# on startup when cert files don't exist yet
+# ─────────────────────────────────────────────────────────────
+write_http_only_config() {
+cat > ./nginx/conf.d/app.conf << NGINXEOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 200 'OK';
+        add_header Content-Type text/plain;
+    }
+}
+NGINXEOF
+  echo "HTTP-only nginx config written."
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -105,7 +125,7 @@ server {
     ssl_session_cache         shared:SSL:10m;
     ssl_session_timeout       1d;
 
-    # Allow large file uploads
+    # Fix: allow large file uploads
     client_max_body_size      20M;
 
     location / {
@@ -143,12 +163,12 @@ validate_and_reload_nginx() {
 if sudo test -f "$CERT_PATH" || sudo test -f "$CERT_LIVE_DIR/${DOMAIN}-0001/fullchain.pem"; then
   echo "Certificate already exists — running redeploy..."
 
+  # Fix folder name, symlinks, then write HTTPS config
   fix_cert_folder_name
   fix_symlinks
   write_https_config
 
   docker compose up -d --build --remove-orphans
-
   sleep 5
   validate_and_reload_nginx
 
@@ -163,29 +183,13 @@ fi
 # ─────────────────────────────────────────────────────────────
 echo "No certificate found — starting first-time SSL setup..."
 
-# Write temporary HTTP-only config for ACME challenge
-cat > ./nginx/conf.d/app.conf << NGINXEOF
-server {
-    listen 80;
-    server_name $DOMAIN;
-
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-    }
-
-    location / {
-        return 200 'OK';
-        add_header Content-Type text/plain;
-    }
-}
-NGINXEOF
-
-echo "Temporary HTTP config written."
+# FIX: Write HTTP-only config FIRST so nginx starts without crashing
+write_http_only_config
 
 # Tear down cleanly
 docker compose down || true
 
-# Start nginx only
+# Start nginx only with HTTP config (no SSL yet — won't crash)
 docker compose up -d --no-deps nginx
 echo "Waiting for nginx to be ready..."
 sleep 8
@@ -193,14 +197,14 @@ sleep 8
 # Confirm nginx started
 if ! docker ps --format '{{.Names}}' | grep -q '^nginx$'; then
   echo "ERROR: nginx failed to start!"
-  docker logs nginx
+  docker logs nginx --tail 20
   exit 1
 fi
 
 echo "nginx is up — verifying port 80..."
 curl -sf http://localhost:80 > /dev/null \
   && echo "port 80 OK" \
-  || { echo "ERROR: port 80 not responding"; exit 1; }
+  || { echo "ERROR: port 80 not responding"; docker logs nginx --tail 20; exit 1; }
 
 # Request SSL certificate
 echo "Requesting certificate from Let's Encrypt..."
@@ -224,7 +228,7 @@ sleep 2
 if ! sudo test -f "$CERT_PATH" && ! sudo test -f "$CERT_LIVE_DIR/${DOMAIN}-0001/fullchain.pem"; then
   echo "ERROR: Certificate not found after certbot run!"
   sudo ls -la ./certbot/conf/live/ 2>/dev/null || echo "live/ folder does not exist"
-  docker logs nginx
+  docker logs nginx --tail 20
   exit 1
 fi
 
@@ -233,16 +237,16 @@ echo "Certificate obtained successfully!"
 # Fix folder name FIRST (handles -0001 suffix)
 fix_cert_folder_name
 
-# Then fix symlinks
+# Fix symlinks so nginx container can read real files
 fix_symlinks
 
-# Write real HTTPS config
+# Write HTTPS config now that certs exist
 write_https_config
 
-# Stop temporary nginx
+# Stop everything cleanly
 docker compose down || true
 
-# Start full stack
+# Start full stack with correct HTTPS config
 echo "Starting full application stack..."
 docker compose up -d --build --remove-orphans
 
@@ -255,7 +259,7 @@ validate_and_reload_nginx
 # Final verification
 echo ""
 echo "Testing SSL connection..."
-curl -sI https://$DOMAIN | head -5 || echo "WARNING: SSL test failed — check nginx logs"
+curl -sI https://$DOMAIN | head -5 || echo "WARNING: SSL test failed — check: docker logs nginx"
 
 echo ""
 echo "=== SSL setup complete! ==="

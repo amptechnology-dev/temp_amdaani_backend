@@ -32,7 +32,7 @@ services:
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./certbot/www:/var/www/certbot
-      - ./certbot/conf:/etc/letsencrypt # <-- FULL conf, not just live/
+      - ./certbot/conf:/etc/letsencrypt
     networks:
       - app-network
 

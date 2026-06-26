@@ -1,14 +1,14 @@
 #!/bin/bash
 set -e
- 
+
 DOMAIN="amdaani.v1.amptechnology.in"
 EMAIL="devs.amptechnology@gmail.com"
 APP_CONTAINER="bun-app"
 APP_PORT="8010"
 CERT_PATH="./certbot/conf/live/$DOMAIN/fullchain.pem"
- 
+
 echo "=== Starting SSL setup for $DOMAIN ==="
- 
+
 # ─────────────────────────────────────────────────────────────
 # Create required directories
 # ─────────────────────────────────────────────────────────────
@@ -17,7 +17,37 @@ mkdir -p ./certbot/www/.well-known/acme-challenge
 mkdir -p ./certbot/conf
 sudo chown -R ubuntu:ubuntu ./certbot
 chmod -R 755 ./certbot
- 
+
+# ─────────────────────────────────────────────────────────────
+# FIX: Replace certbot symlinks with real files
+# Certbot creates symlinks: fullchain.pem -> ../../archive/...
+# But nginx container can't see archive/ folder so SSL fails
+# This copies the real files over the symlinks
+# ─────────────────────────────────────────────────────────────
+fix_symlinks() {
+  local LIVE_DIR="./certbot/conf/live/$DOMAIN"
+  echo "Fixing symlinks in $LIVE_DIR ..."
+
+  for FILE in cert.pem chain.pem fullchain.pem privkey.pem; do
+    TARGET=$(readlink -f "$LIVE_DIR/$FILE" 2>/dev/null || true)
+    if [ -z "$TARGET" ]; then
+      echo "  SKIP: $FILE is not a symlink or does not exist"
+      continue
+    fi
+    if [ ! -f "$TARGET" ]; then
+      echo "  ERROR: symlink target $TARGET does not exist!"
+      exit 1
+    fi
+    cp --remove-destination "$TARGET" "$LIVE_DIR/$FILE"
+    echo "  FIXED: $FILE (real file copied)"
+  done
+
+  # Fix ownership again after copy
+  sudo chown -R ubuntu:ubuntu ./certbot
+  chmod -R 755 ./certbot
+  echo "Symlinks fixed — nginx can now read real cert files."
+}
+
 # ─────────────────────────────────────────────────────────────
 # Write final HTTPS nginx config (Cloudflare-compatible)
 # ─────────────────────────────────────────────────────────────
@@ -26,30 +56,33 @@ cat > ./nginx/conf.d/app.conf << NGINXEOF
 server {
     listen 80;
     server_name $DOMAIN;
- 
+
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
     }
- 
+
     location / {
         return 301 https://\$host\$request_uri;
     }
 }
- 
+
 server {
     listen 443 ssl;
     server_name $DOMAIN;
- 
+
     ssl_certificate     /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
- 
-    # Cloudflare-compatible SSL — fixes ERR_SSL_VERSION_OR_CIPHER_MISMATCH
+
+    # Cloudflare-compatible SSL
     ssl_protocols             TLSv1.2 TLSv1.3;
     ssl_ciphers               ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
     ssl_prefer_server_ciphers off;
     ssl_session_cache         shared:SSL:10m;
     ssl_session_timeout       1d;
- 
+
+    # Allow large file uploads (fixes: client intended to send too large body)
+    client_max_body_size      20M;
+
     location / {
         proxy_pass         http://$APP_CONTAINER:$APP_PORT;
         proxy_http_version 1.1;
@@ -65,7 +98,7 @@ server {
 NGINXEOF
   echo "HTTPS nginx config written to ./nginx/conf.d/app.conf"
 }
- 
+
 # ─────────────────────────────────────────────────────────────
 # Validate and reload nginx safely
 # ─────────────────────────────────────────────────────────────
@@ -78,70 +111,72 @@ validate_and_reload_nginx() {
   docker compose exec nginx nginx -s reload
   echo "nginx reloaded successfully."
 }
- 
+
 # ─────────────────────────────────────────────────────────────
-# CASE 1: Certificate already exists → redeploy
+# CASE 1: Certificate already exists → fix symlinks + redeploy
 # ─────────────────────────────────────────────────────────────
 if sudo test -f "$CERT_PATH"; then
   echo "Certificate already exists — running redeploy..."
- 
+
+  # Always fix symlinks on redeploy too
+  fix_symlinks
   write_https_config
- 
+
   docker compose up -d --build --remove-orphans
- 
+
   sleep 5
   validate_and_reload_nginx
- 
+
   echo ""
   echo "=== Redeploy complete! ==="
   echo "=== https://$DOMAIN is live ==="
   exit 0
 fi
- 
+
 # ─────────────────────────────────────────────────────────────
 # CASE 2: First time — issue SSL cert then deploy
 # ─────────────────────────────────────────────────────────────
 echo "No certificate found — starting first-time SSL setup..."
- 
+
 # Write temporary HTTP-only config for ACME challenge
 cat > ./nginx/conf.d/app.conf << NGINXEOF
 server {
     listen 80;
     server_name $DOMAIN;
- 
+
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
     }
- 
+
     location / {
         return 200 'OK';
         add_header Content-Type text/plain;
     }
 }
 NGINXEOF
- 
+
 echo "Temporary HTTP config written."
- 
+
 # Tear down cleanly
 docker compose down || true
- 
+
 # Start nginx only
 docker compose up -d --no-deps nginx
 echo "Waiting for nginx to be ready..."
 sleep 8
- 
+
 # Confirm nginx started
 if ! docker ps --format '{{.Names}}' | grep -q '^nginx$'; then
   echo "ERROR: nginx failed to start!"
   docker logs nginx
   exit 1
 fi
- 
+
 echo "nginx is up — verifying port 80..."
 curl -sf http://localhost:80 > /dev/null \
   && echo "port 80 OK" \
   || { echo "ERROR: port 80 not responding"; exit 1; }
- 
+
 # Request SSL certificate
 echo "Requesting certificate from Let's Encrypt..."
 docker run --rm \
@@ -154,12 +189,12 @@ docker run --rm \
   --agree-tos \
   --no-eff-email \
   -d "$DOMAIN"
- 
-# Fix ownership
+
+# Fix ownership after certbot runs as root
 sudo chown -R ubuntu:ubuntu ./certbot
 chmod -R 755 ./certbot
 sleep 2
- 
+
 # Verify cert was created
 if ! sudo test -f "$CERT_PATH"; then
   echo "ERROR: Certificate not found at $CERT_PATH after certbot run!"
@@ -167,25 +202,33 @@ if ! sudo test -f "$CERT_PATH"; then
   docker logs nginx
   exit 1
 fi
- 
+
 echo "Certificate obtained successfully!"
- 
-# Write real HTTPS config (embedded — no git checkout needed)
+
+# *** FIX SYMLINKS IMMEDIATELY AFTER CERTBOT ***
+fix_symlinks
+
+# Write real HTTPS config
 write_https_config
- 
+
 # Stop temporary nginx
 docker compose down || true
- 
+
 # Start full stack
 echo "Starting full application stack..."
 docker compose up -d --build --remove-orphans
- 
+
 echo "Waiting for services to be ready..."
 sleep 8
- 
+
 # Reload nginx with HTTPS config
 validate_and_reload_nginx
- 
+
+# Final verification
+echo ""
+echo "Testing SSL connection..."
+curl -sI https://$DOMAIN | head -5 || echo "WARNING: SSL test failed — check logs"
+
 echo ""
 echo "=== SSL setup complete! ==="
 echo "=== https://$DOMAIN is now live! ==="

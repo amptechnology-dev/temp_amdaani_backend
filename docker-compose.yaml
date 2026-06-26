@@ -30,18 +30,16 @@ services:
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./certbot/www:/var/www/certbot
-      - ./certbot/conf:/etc/letsencrypt
+      # FIX: Mount the live folder directly (not the whole conf/)
+      # This way nginx sees real files, not broken symlinks
+      - ./certbot/conf/live:/etc/letsencrypt/live
     networks:
       - app-network
 
-  certbot:
-    image: certbot/certbot
-    volumes:
-      - ./certbot/www:/var/www/certbot
-      - ./certbot/conf:/etc/letsencrypt
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --quiet --webroot --webroot-path=/var/www/certbot; sleep 12h & wait $${!}; done'"
-    networks:
-      - app-network
+  # REMOVED: certbot container was continuously renewing certs
+  # and recreating symlinks that broke nginx SSL
+  # Cert renewal is now handled by a cron job instead (see deploy.sh)
+
   mongodb:
     image: mongo:7
     container_name: mongodb
@@ -59,6 +57,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
   mongo-init:
     image: mongo:7
     depends_on:

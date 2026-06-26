@@ -20,17 +20,19 @@ services:
     networks:
       - app-network
 
-  nginx:
+ nginx:
     image: nginx:alpine
     container_name: nginx
     restart: unless-stopped
+    depends_on:
+      - app          # ← prevents "host not found" on cold start
     ports:
       - '80:80'
       - '443:443'
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./certbot/www:/var/www/certbot
-      - ./certbot/conf:/etc/letsencrypt # <-- Full conf, symlinks resolve correctly
+      - ./certbot/conf/live:/etc/letsencrypt/live
     networks:
       - app-network
 

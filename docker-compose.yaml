@@ -20,19 +20,19 @@ services:
     networks:
       - app-network
 
- nginx:
+  nginx:
     image: nginx:alpine
     container_name: nginx
     restart: unless-stopped
     depends_on:
-      - app          # ← prevents "host not found" on cold start
+      - app
     ports:
       - '80:80'
       - '443:443'
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./certbot/www:/var/www/certbot
-      - ./certbot/conf/live:/etc/letsencrypt/live
+      - ./certbot/conf:/etc/letsencrypt # <-- FULL conf, not just live/
     networks:
       - app-network
 
@@ -40,7 +40,7 @@ services:
     image: certbot/certbot
     restart: unless-stopped
     volumes:
-      - ./certbot/conf:/etc/letsencrypt # <-- Same full mount
+      - ./certbot/conf:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
     entrypoint: >
       /bin/sh -c "trap exit TERM;

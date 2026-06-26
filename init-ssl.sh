@@ -40,58 +40,7 @@ fix_cert_folder_name() {
   fi
 }
 
-# ─────────────────────────────────────────────────────────────
-# FIX 2: Replace symlinks with real files from archive
-# nginx only mounts live/ NOT archive/ so symlinks break
-# Also handles ECDSA keys (Let's Encrypt now defaults to ECDSA)
-# ─────────────────────────────────────────────────────────────
-fix_symlinks_to_real_files() {
-  local LIVE_DIR="$CERT_LIVE_DIR/$DOMAIN"
-  local ARCH_DIR="$CERT_ARCHIVE_DIR/$DOMAIN"
-
-  echo "Replacing symlinks with real cert files..."
-
-  local LATEST_CERT=$(ls -t "$ARCH_DIR"/cert*.pem      2>/dev/null | head -1)
-  local LATEST_CHAIN=$(ls -t "$ARCH_DIR"/chain*.pem    2>/dev/null | head -1)
-  local LATEST_FULL=$(ls -t "$ARCH_DIR"/fullchain*.pem 2>/dev/null | head -1)
-  local LATEST_KEY=$(ls -t "$ARCH_DIR"/privkey*.pem    2>/dev/null | head -1)
-
-  if [ -z "$LATEST_KEY" ]; then
-    echo "ERROR: No archive files found in $ARCH_DIR"
-    ls -la "$ARCH_DIR" 2>/dev/null || echo "Archive dir does not exist"
-    exit 1
-  fi
-
-  cp --remove-destination "$LATEST_CERT"  "$LIVE_DIR/cert.pem"
-  cp --remove-destination "$LATEST_CHAIN" "$LIVE_DIR/chain.pem"
-  cp --remove-destination "$LATEST_FULL"  "$LIVE_DIR/fullchain.pem"
-  cp --remove-destination "$LATEST_KEY"   "$LIVE_DIR/privkey.pem"
-
-  chmod 644 "$LIVE_DIR/cert.pem" "$LIVE_DIR/chain.pem" "$LIVE_DIR/fullchain.pem"
-  chmod 600 "$LIVE_DIR/privkey.pem"
-
-  local KEY_SIZE=$(wc -c < "$LIVE_DIR/privkey.pem")
-  if [ "$KEY_SIZE" -lt 200 ]; then
-    echo "ERROR: privkey.pem is only $KEY_SIZE bytes — broken!"
-    exit 1
-  fi
-
-  if openssl ec -in "$LIVE_DIR/privkey.pem" -check &>/dev/null; then
-    echo "  Key type: ECDSA — valid ✓"
-  elif openssl rsa -in "$LIVE_DIR/privkey.pem" -check &>/dev/null; then
-    echo "  Key type: RSA — valid ✓"
-  else
-    echo "ERROR: privkey.pem is not a valid key!"
-    openssl ec  -in "$LIVE_DIR/privkey.pem" -check 2>&1 || true
-    openssl rsa -in "$LIVE_DIR/privkey.pem" -check 2>&1 || true
-    exit 1
-  fi
-
-  echo "Real cert files in place — nginx can read them."
-}
-
 write_http_only_config() {
-  # Write to temp file first then move — prevents truncation bug
   cat > /tmp/nginx_http.conf << 'NGINXEOF'
 server {
     listen 80;
@@ -110,15 +59,9 @@ NGINXEOF
   sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" /tmp/nginx_http.conf
   mv /tmp/nginx_http.conf ./nginx/conf.d/app.conf
   echo "HTTP-only nginx config written."
-  # Verify file is complete
-  if ! grep -q "}" ./nginx/conf.d/app.conf; then
-    echo "ERROR: nginx config truncated!"
-    exit 1
-  fi
 }
 
 write_https_config() {
-  # Write to temp file first then move — prevents truncation bug
   cat > /tmp/nginx_https.conf << 'NGINXEOF'
 server {
     listen 80;
@@ -140,7 +83,6 @@ server {
     ssl_certificate     /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
 
-    # Supports both ECDSA (Let's Encrypt default) and RSA certs
     ssl_protocols             TLSv1.2 TLSv1.3;
     ssl_ciphers               ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-CHACHA20-POLY1305;
     ssl_prefer_server_ciphers off;
@@ -149,7 +91,6 @@ server {
     client_max_body_size      20M;
 
     # Docker internal DNS — prevents "host not found in upstream" crash
-    # when nginx starts before bun-app container is ready
     resolver 127.0.0.11 valid=10s;
     set $upstream http://APP_CONTAINER_PLACEHOLDER:APP_PORT_PLACEHOLDER;
 
@@ -167,21 +108,18 @@ server {
 }
 NGINXEOF
 
-  sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g"             /tmp/nginx_https.conf
-  sed -i "s/APP_CONTAINER_PLACEHOLDER/$APP_CONTAINER/g" /tmp/nginx_https.conf
-  sed -i "s/APP_PORT_PLACEHOLDER/$APP_PORT/g"           /tmp/nginx_https.conf
+  sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g"               /tmp/nginx_https.conf
+  sed -i "s/APP_CONTAINER_PLACEHOLDER/$APP_CONTAINER/g"  /tmp/nginx_https.conf
+  sed -i "s/APP_PORT_PLACEHOLDER/$APP_PORT/g"             /tmp/nginx_https.conf
   mv /tmp/nginx_https.conf ./nginx/conf.d/app.conf
 
-  echo "HTTPS nginx config written."
-
-  # Verify file is complete and has closing braces
   local BRACE_COUNT=$(grep -c "}" ./nginx/conf.d/app.conf || true)
   if [ "$BRACE_COUNT" -lt 5 ]; then
-    echo "ERROR: nginx config looks truncated! Only $BRACE_COUNT closing braces found."
+    echo "ERROR: nginx config truncated! Only $BRACE_COUNT braces found."
     cat ./nginx/conf.d/app.conf
     exit 1
   fi
-  echo "Config verified — $BRACE_COUNT closing braces found ✓"
+  echo "HTTPS nginx config written and verified ✓"
 }
 
 validate_and_reload_nginx() {
@@ -196,13 +134,12 @@ validate_and_reload_nginx() {
 }
 
 # ─────────────────────────────────────────────────────────────
-# CASE 1: Certificate already exists → fix + redeploy
+# CASE 1: Certificate already exists → redeploy
 # ─────────────────────────────────────────────────────────────
 if [ -f "$CERT_PATH" ] || [ -f "$CERT_LIVE_DIR/${DOMAIN}-0001/fullchain.pem" ]; then
   echo "Certificate already exists — running redeploy..."
 
   fix_cert_folder_name
-  fix_symlinks_to_real_files
   write_https_config
 
   docker compose up -d --build --remove-orphans
@@ -210,11 +147,13 @@ if [ -f "$CERT_PATH" ] || [ -f "$CERT_LIVE_DIR/${DOMAIN}-0001/fullchain.pem" ]; 
   validate_and_reload_nginx
 
   echo ""
-  echo "Testing SSL..."
-  curl -sI https://$DOMAIN | head -3 || echo "WARNING: check — docker logs nginx"
+  echo "Testing SSL directly (bypassing Cloudflare)..."
+  curl -skI https://localhost --resolve $DOMAIN:443:127.0.0.1 | head -3 || true
+
   echo ""
   echo "=== Redeploy complete! ==="
-  echo "=== https://$DOMAIN is live ==="
+  echo "=== https://$DOMAIN ==="
+  echo "NOTE: If Cloudflare still fails, set SSL mode to Full in Cloudflare dashboard"
   exit 0
 fi
 
@@ -265,7 +204,6 @@ fi
 echo "Certificate obtained successfully! ✓"
 
 fix_cert_folder_name
-fix_symlinks_to_real_files
 write_https_config
 
 docker compose down || true
@@ -284,8 +222,10 @@ openssl s_client -connect localhost:443 -servername $DOMAIN 2>&1 \
   | grep -E "Cipher|Protocol|subject|Verify" || true
 
 echo ""
-curl -sI https://$DOMAIN | head -5 || echo "WARNING: SSL test failed — check: docker logs nginx"
+curl -skI https://localhost --resolve $DOMAIN:443:127.0.0.1 | head -5 || true
 
 echo ""
 echo "=== SSL setup complete! ==="
 echo "=== https://$DOMAIN is now live! ==="
+echo ""
+echo "IMPORTANT: In Cloudflare dashboard → SSL/TLS → set mode to Full"

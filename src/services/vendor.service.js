@@ -57,6 +57,7 @@ export const queryVendor = async (filters = {}, options = {}) => {
     { $project: { invoiceStats: 0 } }, // hide intermediate field
     */
   ]);
+
   return Vendor.aggregatePaginate(aggregate, paginationOptions);
 };
 

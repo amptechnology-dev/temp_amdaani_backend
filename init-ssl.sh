@@ -5,7 +5,8 @@ DOMAIN="amdaani.v1.amptechnology.in"
 EMAIL="devs.amptechnology@gmail.com"
 APP_CONTAINER="bun-app"
 APP_PORT="8010"
-CERT_PATH="./certbot/conf/live/$DOMAIN/fullchain.pem"
+CERT_LIVE_DIR="./certbot/conf/live"
+CERT_PATH="$CERT_LIVE_DIR/$DOMAIN/fullchain.pem"
 
 echo "=== Starting SSL setup for $DOMAIN ==="
 
@@ -19,13 +20,38 @@ sudo chown -R ubuntu:ubuntu ./certbot
 chmod -R 755 ./certbot
 
 # ─────────────────────────────────────────────────────────────
+# FIX: Certbot sometimes creates folder with -0001 suffix
+# e.g. amdaani.v1.amptechnology.in-0001 instead of amdaani.v1.amptechnology.in
+# This renames it to the correct folder name
+# ─────────────────────────────────────────────────────────────
+fix_cert_folder_name() {
+  local WRONG_LIVE="$CERT_LIVE_DIR/${DOMAIN}-0001"
+  local RIGHT_LIVE="$CERT_LIVE_DIR/${DOMAIN}"
+
+  local WRONG_ARCHIVE="./certbot/conf/archive/${DOMAIN}-0001"
+  local RIGHT_ARCHIVE="./certbot/conf/archive/${DOMAIN}"
+
+  local WRONG_RENEWAL="./certbot/conf/renewal/${DOMAIN}-0001.conf"
+  local RIGHT_RENEWAL="./certbot/conf/renewal/${DOMAIN}.conf"
+
+  if [ -d "$WRONG_LIVE" ] && [ ! -d "$RIGHT_LIVE" ]; then
+    echo "Fixing cert folder name: ${DOMAIN}-0001 → ${DOMAIN}"
+    mv "$WRONG_LIVE"    "$RIGHT_LIVE"
+    mv "$WRONG_ARCHIVE" "$RIGHT_ARCHIVE" 2>/dev/null || true
+    mv "$WRONG_RENEWAL" "$RIGHT_RENEWAL" 2>/dev/null || true
+    echo "Cert folder renamed successfully."
+  else
+    echo "Cert folder name is correct — no rename needed."
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────
 # FIX: Replace certbot symlinks with real files
 # Certbot creates symlinks: fullchain.pem -> ../../archive/...
-# But nginx container can't see archive/ folder so SSL fails
-# This copies the real files over the symlinks
+# But nginx container cannot see archive/ folder → SSL fails
 # ─────────────────────────────────────────────────────────────
 fix_symlinks() {
-  local LIVE_DIR="./certbot/conf/live/$DOMAIN"
+  local LIVE_DIR="$CERT_LIVE_DIR/$DOMAIN"
   echo "Fixing symlinks in $LIVE_DIR ..."
 
   for FILE in cert.pem chain.pem fullchain.pem privkey.pem; do
@@ -42,7 +68,6 @@ fix_symlinks() {
     echo "  FIXED: $FILE (real file copied)"
   done
 
-  # Fix ownership again after copy
   sudo chown -R ubuntu:ubuntu ./certbot
   chmod -R 755 ./certbot
   echo "Symlinks fixed — nginx can now read real cert files."
@@ -80,7 +105,7 @@ server {
     ssl_session_cache         shared:SSL:10m;
     ssl_session_timeout       1d;
 
-    # Allow large file uploads (fixes: client intended to send too large body)
+    # Allow large file uploads
     client_max_body_size      20M;
 
     location / {
@@ -113,12 +138,12 @@ validate_and_reload_nginx() {
 }
 
 # ─────────────────────────────────────────────────────────────
-# CASE 1: Certificate already exists → fix symlinks + redeploy
+# CASE 1: Certificate already exists → fix + redeploy
 # ─────────────────────────────────────────────────────────────
-if sudo test -f "$CERT_PATH"; then
+if sudo test -f "$CERT_PATH" || sudo test -f "$CERT_LIVE_DIR/${DOMAIN}-0001/fullchain.pem"; then
   echo "Certificate already exists — running redeploy..."
 
-  # Always fix symlinks on redeploy too
+  fix_cert_folder_name
   fix_symlinks
   write_https_config
 
@@ -195,9 +220,9 @@ sudo chown -R ubuntu:ubuntu ./certbot
 chmod -R 755 ./certbot
 sleep 2
 
-# Verify cert was created
-if ! sudo test -f "$CERT_PATH"; then
-  echo "ERROR: Certificate not found at $CERT_PATH after certbot run!"
+# Verify cert was created (check both possible folder names)
+if ! sudo test -f "$CERT_PATH" && ! sudo test -f "$CERT_LIVE_DIR/${DOMAIN}-0001/fullchain.pem"; then
+  echo "ERROR: Certificate not found after certbot run!"
   sudo ls -la ./certbot/conf/live/ 2>/dev/null || echo "live/ folder does not exist"
   docker logs nginx
   exit 1
@@ -205,7 +230,10 @@ fi
 
 echo "Certificate obtained successfully!"
 
-# *** FIX SYMLINKS IMMEDIATELY AFTER CERTBOT ***
+# Fix folder name FIRST (handles -0001 suffix)
+fix_cert_folder_name
+
+# Then fix symlinks
 fix_symlinks
 
 # Write real HTTPS config
@@ -227,7 +255,7 @@ validate_and_reload_nginx
 # Final verification
 echo ""
 echo "Testing SSL connection..."
-curl -sI https://$DOMAIN | head -5 || echo "WARNING: SSL test failed — check logs"
+curl -sI https://$DOMAIN | head -5 || echo "WARNING: SSL test failed — check nginx logs"
 
 echo ""
 echo "=== SSL setup complete! ==="

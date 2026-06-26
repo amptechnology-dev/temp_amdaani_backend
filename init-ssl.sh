@@ -42,13 +42,8 @@ fix_cert_folder_name() {
 
 # ─────────────────────────────────────────────────────────────
 # FIX 2: Replace symlinks with real files from archive
-#
-# nginx only mounts certbot/conf/live/ — NOT archive/
-# So symlinks like cert.pem -> ../../archive/... are BROKEN
-# inside the container. We copy the real files over them.
-#
+# nginx only mounts live/ NOT archive/ so symlinks break
 # Also handles ECDSA keys (Let's Encrypt now defaults to ECDSA)
-# by using `openssl ec` check instead of `openssl rsa`
 # ─────────────────────────────────────────────────────────────
 fix_symlinks_to_real_files() {
   local LIVE_DIR="$CERT_LIVE_DIR/$DOMAIN"
@@ -56,7 +51,6 @@ fix_symlinks_to_real_files() {
 
   echo "Replacing symlinks with real cert files..."
 
-  # Find latest numbered cert files in archive
   local LATEST_CERT=$(ls -t "$ARCH_DIR"/cert*.pem      2>/dev/null | head -1)
   local LATEST_CHAIN=$(ls -t "$ARCH_DIR"/chain*.pem    2>/dev/null | head -1)
   local LATEST_FULL=$(ls -t "$ARCH_DIR"/fullchain*.pem 2>/dev/null | head -1)
@@ -76,19 +70,18 @@ fix_symlinks_to_real_files() {
   chmod 644 "$LIVE_DIR/cert.pem" "$LIVE_DIR/chain.pem" "$LIVE_DIR/fullchain.pem"
   chmod 600 "$LIVE_DIR/privkey.pem"
 
-  # Verify key is valid (supports both RSA and ECDSA)
   local KEY_SIZE=$(wc -c < "$LIVE_DIR/privkey.pem")
   if [ "$KEY_SIZE" -lt 200 ]; then
-    echo "ERROR: privkey.pem is only $KEY_SIZE bytes — still a broken symlink or empty!"
+    echo "ERROR: privkey.pem is only $KEY_SIZE bytes — broken!"
     exit 1
   fi
 
   if openssl ec -in "$LIVE_DIR/privkey.pem" -check &>/dev/null; then
-    echo "  Key type: ECDSA — valid"
+    echo "  Key type: ECDSA — valid ✓"
   elif openssl rsa -in "$LIVE_DIR/privkey.pem" -check &>/dev/null; then
-    echo "  Key type: RSA — valid"
+    echo "  Key type: RSA — valid ✓"
   else
-    echo "ERROR: privkey.pem is not a valid RSA or ECDSA key!"
+    echo "ERROR: privkey.pem is not a valid key!"
     openssl ec  -in "$LIVE_DIR/privkey.pem" -check 2>&1 || true
     openssl rsa -in "$LIVE_DIR/privkey.pem" -check 2>&1 || true
     exit 1
@@ -98,10 +91,11 @@ fix_symlinks_to_real_files() {
 }
 
 write_http_only_config() {
-cat > ./nginx/conf.d/app.conf << NGINXEOF
+  # Write to temp file first then move — prevents truncation bug
+  cat > /tmp/nginx_http.conf << 'NGINXEOF'
 server {
     listen 80;
-    server_name $DOMAIN;
+    server_name DOMAIN_PLACEHOLDER;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -113,65 +107,92 @@ server {
     }
 }
 NGINXEOF
+  sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" /tmp/nginx_http.conf
+  mv /tmp/nginx_http.conf ./nginx/conf.d/app.conf
   echo "HTTP-only nginx config written."
+  # Verify file is complete
+  if ! grep -q "}" ./nginx/conf.d/app.conf; then
+    echo "ERROR: nginx config truncated!"
+    exit 1
+  fi
 }
 
 write_https_config() {
-cat > ./nginx/conf.d/app.conf << NGINXEOF
+  # Write to temp file first then move — prevents truncation bug
+  cat > /tmp/nginx_https.conf << 'NGINXEOF'
 server {
     listen 80;
-    server_name $DOMAIN;
+    server_name DOMAIN_PLACEHOLDER;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
     }
 
     location / {
-        return 301 https://\$host\$request_uri;
+        return 301 https://$host$request_uri;
     }
 }
 
 server {
     listen 443 ssl;
-    server_name $DOMAIN;
+    server_name DOMAIN_PLACEHOLDER;
 
-    ssl_certificate     /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
 
-    ssl_protocols             TLSv1.2 TLSv1.3;
     # Supports both ECDSA (Let's Encrypt default) and RSA certs
+    ssl_protocols             TLSv1.2 TLSv1.3;
     ssl_ciphers               ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-CHACHA20-POLY1305;
     ssl_prefer_server_ciphers off;
     ssl_session_cache         shared:SSL:10m;
     ssl_session_timeout       1d;
-
     client_max_body_size      20M;
 
+    # Docker internal DNS — prevents "host not found in upstream" crash
+    # when nginx starts before bun-app container is ready
+    resolver 127.0.0.11 valid=10s;
+    set $upstream http://APP_CONTAINER_PLACEHOLDER:APP_PORT_PLACEHOLDER;
+
     location / {
-        proxy_pass         http://$APP_CONTAINER:$APP_PORT;
+        proxy_pass         $upstream;
         proxy_http_version 1.1;
-        proxy_set_header   Upgrade \$http_upgrade;
+        proxy_set_header   Upgrade $http_upgrade;
         proxy_set_header   Connection 'upgrade';
-        proxy_set_header   Host \$host;
-        proxy_set_header   X-Real-IP \$remote_addr;
-        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
     }
 }
 NGINXEOF
+
+  sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g"             /tmp/nginx_https.conf
+  sed -i "s/APP_CONTAINER_PLACEHOLDER/$APP_CONTAINER/g" /tmp/nginx_https.conf
+  sed -i "s/APP_PORT_PLACEHOLDER/$APP_PORT/g"           /tmp/nginx_https.conf
+  mv /tmp/nginx_https.conf ./nginx/conf.d/app.conf
+
   echo "HTTPS nginx config written."
+
+  # Verify file is complete and has closing braces
+  local BRACE_COUNT=$(grep -c "}" ./nginx/conf.d/app.conf || true)
+  if [ "$BRACE_COUNT" -lt 5 ]; then
+    echo "ERROR: nginx config looks truncated! Only $BRACE_COUNT closing braces found."
+    cat ./nginx/conf.d/app.conf
+    exit 1
+  fi
+  echo "Config verified — $BRACE_COUNT closing braces found ✓"
 }
 
 validate_and_reload_nginx() {
   echo "Validating nginx config..."
-  if ! docker compose exec nginx nginx -t; then
-    echo "ERROR: nginx config invalid."
-    docker compose exec nginx nginx -t 2>&1
+  if ! docker compose exec nginx nginx -t 2>&1; then
+    echo "ERROR: nginx config invalid — dumping config:"
+    cat ./nginx/conf.d/app.conf
     exit 1
   fi
   docker compose exec nginx nginx -s reload
-  echo "nginx reloaded successfully."
+  echo "nginx reloaded successfully ✓"
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -185,9 +206,12 @@ if [ -f "$CERT_PATH" ] || [ -f "$CERT_LIVE_DIR/${DOMAIN}-0001/fullchain.pem" ]; 
   write_https_config
 
   docker compose up -d --build --remove-orphans
-  sleep 5
+  sleep 10
   validate_and_reload_nginx
 
+  echo ""
+  echo "Testing SSL..."
+  curl -sI https://$DOMAIN | head -3 || echo "WARNING: check — docker logs nginx"
   echo ""
   echo "=== Redeploy complete! ==="
   echo "=== https://$DOMAIN is live ==="
@@ -213,7 +237,7 @@ if ! docker ps --format '{{.Names}}' | grep -q '^nginx$'; then
 fi
 
 curl -sf http://localhost:80 > /dev/null \
-  && echo "port 80 OK" \
+  && echo "port 80 OK ✓" \
   || { echo "ERROR: port 80 not responding"; docker logs nginx --tail 20; exit 1; }
 
 echo "Requesting certificate from Let's Encrypt..."
@@ -238,7 +262,7 @@ if [ ! -f "$CERT_PATH" ] && [ ! -f "$CERT_LIVE_DIR/${DOMAIN}-0001/fullchain.pem"
   exit 1
 fi
 
-echo "Certificate obtained successfully!"
+echo "Certificate obtained successfully! ✓"
 
 fix_cert_folder_name
 fix_symlinks_to_real_files
@@ -249,14 +273,17 @@ docker compose down || true
 echo "Starting full application stack..."
 docker compose up -d --build --remove-orphans
 
-echo "Waiting for services to be ready..."
-sleep 8
+echo "Waiting for all services to be ready..."
+sleep 12
 
 validate_and_reload_nginx
 
 echo ""
 echo "Testing SSL connection..."
-openssl s_client -connect localhost:443 -servername $DOMAIN 2>&1 | grep -E "Cipher|Protocol|subject|verify" || true
+openssl s_client -connect localhost:443 -servername $DOMAIN 2>&1 \
+  | grep -E "Cipher|Protocol|subject|Verify" || true
+
+echo ""
 curl -sI https://$DOMAIN | head -5 || echo "WARNING: SSL test failed — check: docker logs nginx"
 
 echo ""

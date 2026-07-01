@@ -163,76 +163,81 @@ export const getProductById = async (id) => {
 };
 
 export const updateProductById = async (id, data, session = null) => {
+  const { openingStock, value, ...updateData } = data;
+
+  const product = await Product.findById(id).session(session);
+  if (!product) return null;
+
+  const store = await Store.findById(product.store).session(session);
+  if (!store) throw new Error('Store not found');
+
+  const currentFY = store.currentFinancialYear;
+  if (!currentFY) throw new Error('Current financial year not found');
+
+  const fyIndex = product.financialYearStocks.findIndex((fy) => fy.financialYear === currentFY);
+
+  const previousOpeningStock = fyIndex > -1 ? Number(product.financialYearStocks[fyIndex].stock) || 0 : 0;
+  const previousValue = fyIndex > -1 ? Number(product.financialYearStocks[fyIndex].value) || 0 : 0;
+
+  const isStockUpdate = openingStock !== undefined || value !== undefined;
+
+  const newOpeningStock = openingStock !== undefined ? Number(openingStock) || 0 : previousOpeningStock;
+  const newValue = value !== undefined ? Number(value) || 0 : previousValue;
+
+  if (isStockUpdate && newOpeningStock === 0 && newValue !== 0) {
+    throw new Error('Opening stock quantity cannot be 0 while opening stock value is greater than 0');
+  }
+
   try {
-    const { openingStock, value, ...updateData } = data;
-
-    const product = await Product.findById(id).session(session);
-    if (!product) return null;
-
-    const store = await Store.findById(product.store).session(session);
-    if (!store) throw new Error('Store not found');
-
-    const currentFY = store.currentFinancialYear;
-    if (!currentFY) throw new Error('Current financial year not found');
-
-    const fyIndex = product.financialYearStocks.findIndex((fy) => fy.financialYear === currentFY);
-
-    const previousOpeningStock = fyIndex > -1 ? Number(product.financialYearStocks[fyIndex].stock) || 0 : 0;
-
-    const newOpeningStock = Number(openingStock) || 0;
-
-    if (openingStock !== undefined) {
+    if (isStockUpdate) {
       const diff = newOpeningStock - previousOpeningStock;
-
       product.currentStock = (Number(product.currentStock) || 0) + diff;
-    }
 
-    if (fyIndex > -1) {
-      if (openingStock !== undefined) {
+      if (fyIndex > -1) {
         product.financialYearStocks[fyIndex].stock = newOpeningStock;
+        product.financialYearStocks[fyIndex].value = newValue;
+      } else {
+        product.financialYearStocks.push({
+          financialYear: currentFY,
+          stock: newOpeningStock,
+          value: newValue,
+        });
       }
-
-      if (value !== undefined) {
-        product.financialYearStocks[fyIndex].value = Number(value) || 0;
-      }
-    } else {
-      product.financialYearStocks.push({
-        financialYear: currentFY,
-        stock: newOpeningStock,
-        value: Number(value) || 0,
-      });
     }
 
     Object.assign(product, updateData);
 
     const saved = await product.save({ session });
 
-    await StockTransaction.deleteMany(
-      {
+    if (isStockUpdate) {
+      await StockTransaction.deleteMany(
+        {
+          product: saved._id,
+          transactionType: StockTransactionType.OPENINGSTOCK,
+        },
+        { session }
+      );
+
+      const safeTotalAmount = Number((newValue * Math.abs(newOpeningStock)).toFixed(2));
+
+      const stockTransaction = new StockTransaction({
         product: saved._id,
+        store: product.store,
+        date: product.createdAt,
         transactionType: StockTransactionType.OPENINGSTOCK,
-      },
-      { session }
-    );
+        quantity: newOpeningStock,
+        direction: 'IN',
+        rate: newValue,
+        totalAmount: safeTotalAmount,
+      });
 
-    const safeTotalAmount = Number((Number(value || 0) * Math.abs(newOpeningStock || 0)).toFixed(2));
-
-    const stockTransaction = new StockTransaction({
-      product: saved._id,
-      store: product.store,
-      date: product.createdAt,
-      transactionType: StockTransactionType.OPENINGSTOCK,
-      quantity: newOpeningStock,
-      direction: 'IN',
-      rate: Number(value) || 0,
-      totalAmount: safeTotalAmount,
-    });
-
-    await stockTransaction.save({ session });
+      await stockTransaction.save({ session });
+    }
 
     return saved;
   } catch (error) {
     handleDuplicateKeyError(error, Product);
+    throw error;
   }
 };
 

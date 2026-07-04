@@ -2,9 +2,10 @@ import { Router } from 'express';
 import * as vendorController from '../controllers/vendor.controller.js';
 import validate from '../middlewares/validate.middleware.js';
 import * as vendorSchema from '../validations/vendor.validation.js';
+
 import { authenticate } from '../middlewares/auth.middleware.js';
 
-const router = Router();
+const router = Router();//
 
 router.use(authenticate);
 router

@@ -1071,11 +1071,15 @@ export const getGstPurchaseReport = async (filters = {}) => {
     matchStage.store = new mongoose.Types.ObjectId(store);
   }
 
-  if (startDate && endDate) {
-    matchStage.date = {
-      $gte: startDate,
-      $lte: endDate,
-    };
+  // date string আসলে এটা ঠিক করে Date object এ convert করে full day range cover করা হলো
+  if (startDate || endDate) {
+    matchStage.date = {};
+    if (startDate) matchStage.date.$gte = new Date(startDate);
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      matchStage.date.$lte = end;
+    }
   }
 
   const result = await Purchase.aggregate([
@@ -1085,66 +1089,69 @@ export const getGstPurchaseReport = async (filters = {}) => {
 
     { $match: { 'items.gstRate': { $gt: 0 } } },
 
+    // Step 1: taxableValue নির্ণয় — tax inclusive হলে total থেকে GST বের করে আসল taxable value পাওয়া হবে
+    {
+      $addFields: {
+        'items.taxableValue': {
+          $cond: [
+            { $eq: ['$items.isPurchaseTaxInclusive', true] },
+            {
+              $round: [
+                {
+                  $divide: ['$items.total', { $add: [1, { $divide: ['$items.gstRate', 100] }] }],
+                },
+                2,
+              ],
+            },
+            '$items.total',
+          ],
+        },
+      },
+    },
+
+    // Step 2: taxableValue পেলে gstAmount = total - taxableValue
+    {
+      $addFields: {
+        'items.gstAmount': {
+          $round: [{ $subtract: ['$items.total', '$items.taxableValue'] }, 2],
+        },
+      },
+    },
+
     {
       $project: {
         invoiceDate: '$date',
         invoiceNumber: '$invoiceNumber',
 
-        supplierName: {
-          $ifNull: ['$vendorName', 'Unknown Vendor'],
-        },
-
-        supplierGst: {
-          $ifNull: ['$vendorGstNumber', '-'],
-        },
+        supplierName: { $ifNull: ['$vendorName', 'Unknown Vendor'] },
+        supplierGst: { $ifNull: ['$vendorGstNumber', '-'] },
+        supplierPan: { $ifNull: ['$vendorPanNumber', '-'] },
+        supplierState: { $ifNull: ['$vendorState', '-'] },
 
         item: '$items.name',
-
-        hsn: {
-          $ifNull: ['$items.hsn', '-'],
-        },
-
-        unit: '$items.unit',
+        hsn: { $ifNull: ['$items.hsn', '-'] },
+        unit: { $ifNull: ['$items.unit', '-'] },
         quantity: '$items.quantity',
 
-        taxableValue: '$items.total',
+        taxableValue: '$items.taxableValue',
+        gstRate: '$items.gstRate',
+        isIgst: '$isIgst',
 
-        cgstPercent: {
-          $divide: ['$items.gstRate', 2],
-        },
+        // isIgst true হলে IGST column এ বসবে, false হলে CGST+SGST split হবে
+        igstPercent: { $cond: ['$isIgst', '$items.gstRate', 0] },
+        igstAmount: { $cond: ['$isIgst', '$items.gstAmount', 0] },
 
-        sgstPercent: {
-          $divide: ['$items.gstRate', 2],
-        },
+        cgstPercent: { $cond: ['$isIgst', 0, { $divide: ['$items.gstRate', 2] }] },
+        sgstPercent: { $cond: ['$isIgst', 0, { $divide: ['$items.gstRate', 2] }] },
 
         cgstAmount: {
-          $round: [
-            {
-              $divide: [
-                {
-                  $multiply: ['$items.total', '$items.gstRate'],
-                },
-                200,
-              ],
-            },
-            2,
-          ],
+          $cond: ['$isIgst', 0, { $round: [{ $divide: ['$items.gstAmount', 2] }, 2] }],
         },
-
         sgstAmount: {
-          $round: [
-            {
-              $divide: [
-                {
-                  $multiply: ['$items.total', '$items.gstRate'],
-                },
-                200,
-              ],
-            },
-            2,
-          ],
+          $cond: ['$isIgst', 0, { $round: [{ $divide: ['$items.gstAmount', 2] }, 2] }],
         },
 
+        totalGstAmount: '$items.gstAmount',
         invoiceAmount: '$grandTotal',
       },
     },
@@ -1158,77 +1165,179 @@ export const getGstPurchaseReport = async (filters = {}) => {
 export const getProfitLossReport = async (filters = {}) => {
   const { store, startDate, endDate } = filters;
 
-  const matchStage = {
-    status: {
-      $ne: 'cancelled',
-    },
-  };
+  const matchStage = { status: { $ne: 'cancelled' } };
 
-  // store filter
   if (store) {
     matchStage.store = new mongoose.Types.ObjectId(String(store));
   }
 
-  // date filter
   if (startDate && endDate) {
-    matchStage.invoiceDate = {
-      $gte: new Date(startDate),
-      $lte: new Date(endDate),
-    };
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    matchStage.invoiceDate = { $gte: start, $lte: end };
   }
 
   const result = await Invoice.aggregate([
+    { $match: matchStage },
+    { $unwind: '$items' },
+
+    // ── Preserve invoice item fields ──────────────────────────────────────
     {
-      $match: matchStage,
+      $addFields: {
+        _invoiceQty:            '$items.quantity',
+        _invoiceSellingPrice:   '$items.sellingPrice',
+        _invoiceGstRate:        { $ifNull: ['$items.gstRate', 0] },
+        _invoiceIsTaxInclusive: { $ifNull: ['$items.isTaxInclusive', false] },
+        _invoiceProductId:      '$items.product',
+        _invoiceProductName:    '$items.name',
+        _invoiceItemTotal:      { $ifNull: ['$items.total', 0] },
+      },
     },
 
+    // ── Step 1: sale taxable per unit ─────────────────────────────────────
+    // items.total includes GST always → taxable = total / (1 + gst/100) / qty
+    // e.g. 160 / 1.05 / 2 = 76.19
     {
-      $unwind: '$items',
+      $addFields: {
+        _saleTaxablePerUnit: {
+          $cond: [
+            {
+              $and: [
+                { $gt: ['$_invoiceItemTotal', 0] },
+                { $gt: ['$_invoiceQty', 0] },
+              ],
+            },
+            {
+              $divide: [
+                {
+                  $divide: [
+                    '$_invoiceItemTotal',
+                    { $add: [1, { $divide: ['$_invoiceGstRate', 100] }] },
+                  ],
+                },
+                '$_invoiceQty',
+              ],
+            },
+            // fallback: sellingPrice already ex-GST in non-inclusive mode
+            {
+              $cond: [
+                {
+                  $and: [
+                    '$_invoiceIsTaxInclusive',
+                    { $gt: ['$_invoiceGstRate', 0] },
+                  ],
+                },
+                {
+                  $divide: [
+                    '$_invoiceSellingPrice',
+                    { $add: [1, { $divide: ['$_invoiceGstRate', 100] }] },
+                  ],
+                },
+                '$_invoiceSellingPrice',
+              ],
+            },
+          ],
+        },
+      },
     },
 
-    // latest purchase
+    // ── Step 2: fetch latest purchase — compute taxablePerUnit INSIDE pipeline ──
+    // Computing inside $lookup avoids the null-field problem entirely
     {
       $lookup: {
         from: 'purchases',
-        let: {
-          productId: '$items.product',
-        },
+        let: { productId: '$_invoiceProductId' },
         pipeline: [
+          { $match: { status: { $ne: 'cancelled' } } },
+          { $unwind: '$items' },
           {
             $match: {
-              status: {
-                $ne: 'cancelled',
+              $expr: { $eq: ['$items.product', '$$productId'] },
+            },
+          },
+          { $sort: { createdAt: -1 } },
+          { $limit: 1 },
+          {
+            $addFields: {
+              _pGst:    { $ifNull: ['$items.gstRate', 0] },
+              _pQty:    { $max: [1, { $ifNull: ['$items.quantity', 1] }] },
+              _pTotal:  { $ifNull: ['$items.total', 0] },
+              _pRate:   { $ifNull: ['$items.rate', 0] },
+              _pIsIncl: {
+                $ifNull: [
+                  '$items.isPurchaseTaxInclusive',
+                  { $ifNull: ['$items.isTaxInclusive', false] },
+                ],
+              },
+              _pDiscRaw: { $ifNull: ['$items.purchaseDiscount', 0] },
+              _pDiscPct: { $ifNull: ['$items.purchaseDiscountPercentage', 0] },
+              _pDiscType:{ $ifNull: ['$items.purchaseDiscountType', 'amount'] },
+            },
+          },
+          {
+            $addFields: {
+              // ── taxablePerUnit computed HERE inside lookup ──────────────
+              // PRIMARY: use items.total (GST-inclusive) → strip GST → divide by qty
+              // e.g. total=120, gst=5%, qty=3 → 120/1.05/3 = 38.10
+              purchaseTaxablePerUnit: {
+                $cond: [
+                  { $gt: ['$_pTotal', 0] },
+                  {
+                    $divide: [
+                      {
+                        $divide: [
+                          '$_pTotal',
+                          { $add: [1, { $divide: ['$_pGst', 100] }] },
+                        ],
+                      },
+                      '$_pQty',
+                    ],
+                  },
+                  // FALLBACK: manual calc from rate - discPerUnit
+                  {
+                    $let: {
+                      vars: {
+                        discPerUnit: {
+                          $cond: [
+                            { $eq: ['$_pDiscType', 'percentage'] },
+                            { $multiply: ['$_pRate', { $divide: ['$_pDiscPct', 100] }] },
+                            // amount type: purchaseDiscount is TOTAL line ÷ qty
+                            { $divide: ['$_pDiscRaw', '$_pQty'] },
+                          ],
+                        },
+                        divisor: {
+                          $add: [1, { $divide: ['$_pGst', 100] }],
+                        },
+                      },
+                      in: {
+                        $max: [
+                          0,
+                          {
+                            $cond: [
+                              { $and: ['$_pIsIncl', { $gt: ['$_pGst', 0] }] },
+                              {
+                                $divide: [
+                                  { $subtract: ['$_pRate', '$$discPerUnit'] },
+                                  '$$divisor',
+                                ],
+                              },
+                              { $subtract: ['$_pRate', '$$discPerUnit'] },
+                            ],
+                          },
+                        ],
+                      },
+                    },
+                  },
+                ],
               },
             },
           },
-
-          {
-            $unwind: '$items',
-          },
-
-          {
-            $match: {
-              $expr: {
-                $eq: ['$items.product', '$$productId'],
-              },
-            },
-          },
-
-          {
-            $sort: {
-              createdAt: -1,
-            },
-          },
-
-          {
-            $limit: 1,
-          },
-
           {
             $project: {
-              rate: '$items.rate',
-              quantity: '$items.quantity',
-              productName: '$items.name',
+              _id: 0,
+              purchaseTaxablePerUnit: 1,
             },
           },
         ],
@@ -1236,173 +1345,890 @@ export const getProfitLossReport = async (filters = {}) => {
       },
     },
 
+    // ── Step 3: extract purchase taxable per unit ─────────────────────────
     {
       $addFields: {
-        purchaseItem: {
-          $arrayElemAt: ['$purchaseData', 0],
-        },
-      },
-    },
-
-    // calculation
-    {
-      $addFields: {
-        itemSalesAmount: {
-          $multiply: [
-            {
-              $ifNull: ['$items.sellingPrice', 0],
-            },
-            {
-              $ifNull: ['$items.quantity', 0],
-            },
-          ],
-        },
-
-        itemPurchaseCost: {
-          $multiply: [
-            {
-              $ifNull: ['$purchaseItem.rate', 0],
-            },
-            {
-              $ifNull: ['$items.quantity', 0],
-            },
+        _purchaseTaxablePerUnit: {
+          $ifNull: [
+            { $arrayElemAt: ['$purchaseData.purchaseTaxablePerUnit', 0] },
+            0,
           ],
         },
       },
     },
 
-    // item profit
+    // ── Step 4: amounts and profit ────────────────────────────────────────
+    // profit = (saleTaxablePerUnit - purchaseTaxablePerUnit) × salesQty
     {
       $addFields: {
-        itemProfit: {
-          $subtract: ['$itemSalesAmount', '$itemPurchaseCost'],
+        _itemSalesAmount: {
+          $round: [
+            { $multiply: ['$_saleTaxablePerUnit', '$_invoiceQty'] },
+            2,
+          ],
+        },
+        _itemPurchaseCost: {
+          $round: [
+            { $multiply: ['$_purchaseTaxablePerUnit', '$_invoiceQty'] },
+            2,
+          ],
         },
       },
     },
 
-    // invoice group
+    {
+      $addFields: {
+        _itemProfit: {
+          $round: [
+            { $subtract: ['$_itemSalesAmount', '$_itemPurchaseCost'] },
+            2,
+          ],
+        },
+      },
+    },
+
+    // ── Step 5: group back to invoice level ───────────────────────────────
     {
       $group: {
         _id: '$_id',
 
-        invoiceDate: {
-          $first: '$invoiceDate',
-        },
+        invoiceDate:    { $first: '$invoiceDate' },
+        invoiceNumber:  { $first: '$invoiceNumber' },
+        customerName:   { $first: '$customerName' },
+        customerMobile: { $first: '$customerMobile' },
 
-        invoiceNumber: {
-          $first: '$invoiceNumber',
-        },
-
-        customerName: {
-          $first: '$customerName',
-        },
-
-        customerMobile: {
-          $first: '$customerMobile',
-        },
-
-        // details per item
         items: {
           $push: {
-            product: '$items.name',
+            product: '$_invoiceProductName',
 
-            quantity: '$items.quantity',
+            // Sale side
+            invoiceQuantity:    '$_invoiceQty',
+            invoicePrice:       '$_invoiceSellingPrice',
+            saleTaxablePerUnit: { $round: ['$_saleTaxablePerUnit', 2] },
+            invoiceAmount:      '$_itemSalesAmount',
 
-            invoicePrice: '$items.sellingPrice',
+            // Purchase side
+            purchaseTaxablePerUnit: { $round: ['$_purchaseTaxablePerUnit', 2] },
+            purchaseAmount:         '$_itemPurchaseCost',
 
-            invoiceAmount: '$itemSalesAmount',
-
-            purchasePrice: '$purchaseItem.rate',
-
-            purchaseAmount: '$itemPurchaseCost',
-
-            itemProfit: '$itemProfit',
+            // Profit
+            itemProfit: '$_itemProfit',
           },
         },
 
-        totalSales: {
-          $sum: '$itemSalesAmount',
-        },
-
-        totalPurchase: {
-          $sum: '$itemPurchaseCost',
-        },
-
-        totalProfit: {
-          $sum: '$itemProfit',
-        },
+        totalSales:    { $sum: '$_itemSalesAmount' },
+        totalPurchase: { $sum: '$_itemPurchaseCost' },
+        totalProfit:   { $sum: '$_itemProfit' },
       },
     },
 
+    // ── Step 6: final shape ───────────────────────────────────────────────
     {
       $project: {
-        invoiceDate: 1,
+        invoiceDate:   1,
         invoiceNumber: 1,
-
         customerDescription: {
           $concat: [
-            {
-              $ifNull: ['$customerName', 'Cash Customer'],
-            },
+            { $ifNull: ['$customerName', 'Cash Customer'] },
             ' , ',
-            {
-              $ifNull: ['$customerMobile', '-'],
-            },
+            { $ifNull: ['$customerMobile', '-'] },
           ],
         },
-
-        items: 1,
-
-        totalSales: {
-          $round: ['$totalSales', 2],
-        },
-
-        totalPurchase: {
-          $round: ['$totalPurchase', 2],
-        },
-
-        profitLoss: {
-          $round: ['$totalProfit', 2],
-        },
+        items:         1,
+        totalSales:    { $round: ['$totalSales', 2] },
+        totalPurchase: { $round: ['$totalPurchase', 2] },
+        profitLoss:    { $round: ['$totalProfit', 2] },
       },
     },
 
-    {
-      $sort: {
-        invoiceDate: 1,
-      },
-    },
+    { $sort: { invoiceDate: 1 } },
   ]);
 
-  // overall summary
+  // ── Overall summary ───────────────────────────────────────────────────────
   const overall = result.reduce(
     (acc, curr) => {
-      acc.totalSales += curr.totalSales || 0;
-
+      acc.totalSales    += curr.totalSales    || 0;
       acc.totalPurchase += curr.totalPurchase || 0;
-
-      acc.totalProfit += curr.profitLoss || 0;
-
+      acc.totalProfit   += curr.profitLoss    || 0;
       return acc;
     },
-    {
-      totalSales: 0,
-      totalPurchase: 0,
-      totalProfit: 0,
-    }
+    { totalSales: 0, totalPurchase: 0, totalProfit: 0 },
   );
 
   return {
     summary: {
-      totalSales: overall.totalSales,
-      totalPurchase: overall.totalPurchase,
-      totalProfit: overall.totalProfit,
-    },
+      totalSales:    parseFloat(overall.totalSales.toFixed(2)),
+      totalPurchase: parseFloat(overall.totalPurchase.toFixed(2)),
+      totalProfit:   parseFloat(overall.totalProfit.toFixed(2)),
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+      
+    },
     invoices: result,
   };
 };
-
 // export async function getStockBalance(filters) {
 //   const { store, itemName, asOnDate, startDate, endDate } = filters;
 

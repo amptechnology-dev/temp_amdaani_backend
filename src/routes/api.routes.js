@@ -11,6 +11,8 @@ import customerRoutes from './customer.routes.js';
 router.use('/customer', customerRoutes);
 import invoiceRoutes from './invoice.routes.js';
 router.use('/invoice', invoiceRoutes);
+import orderRoutes from './order.routes.js';
+router.use('/order', orderRoutes);
 import adsRoutes from './ads.routes.js';
 router.use('/ads', adsRoutes);
 import planRoutes from './plan.routes.js';

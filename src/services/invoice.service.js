@@ -71,7 +71,7 @@ export const createInvoice = async (data) => {
       });
     }
 
-    console.log('Invoice Items:', JSON.stringify(invoiceItems));
+    // console.log('Invoice Items:', JSON.stringify(invoiceItems));
 
     const customerId = await findOrCreateCustomer(
       data.store,
@@ -174,106 +174,103 @@ export const createInvoice = async (data) => {
   }
 };
 
-export const updateInvoice = async (invoiceId, data) => {
+export const updateOrder = async (orderId, data) => {
   const { items = [] } = data;
 
   if (!items.length) {
-    throw new ApiError(400, 'Invalid invoice items!', {
-      source: 'body',
-      field: 'items',
-      message: 'Invoice must have at least one item',
+    throw new ApiError(400, "Invalid order items!", {
+      source: "body",
+      field: "items",
+      message: "Order must have at least one item",
     });
   }
 
   const session = await mongoose.startSession();
+
   try {
     session.startTransaction();
 
-    const invoice = await Invoice.findById(invoiceId).session(session);
-    if (!invoice) throw new ApiError(404, 'Invoice not found');
+    const order = await Order.findById(orderId).session(session);
 
-    // --- Step 1: Build invoice items (with resolved productIds) ---
-    const invoiceItems = [];
+    if (!order) {
+      throw new ApiError(404, "Order not found");
+    }
+
+    // ==========================
+    // Validate Customer
+    // ==========================
+
+    const customer = await Customer.findOne({
+      _id: data.customer,
+      store: order.store,
+      isActive: true,
+    }).session(session);
+
+    if (!customer) {
+      throw new ApiError(404, "Customer not found");
+    }
+
+    // ==========================
+    // Build Order Items
+    // ==========================
+
+    const orderItems = [];
+
     for (const item of items) {
-      const productId = await findOrCreateProduct(invoice.store, item, session);
+      const product = await Product.findById(item.product).session(session);
 
-      if (!productId) {
-        console.warn(`[updateInvoice] No productId resolved for item: "${item.name}"`);
+      if (!product) {
+        throw new ApiError(404, `Product not found`);
       }
 
-      invoiceItems.push({
-        ...item,
-        // ✅ Always attach product field — resolved or fallback to existing
-        product: productId ?? item.product ?? null,
+      orderItems.push({
+        product: product._id,
+
+        name: item.name,
+        hsn: item.hsn,
+        unit: item.unit,
+
+        sellingPrice: item.sellingPrice,
+
+        gstRate: item.gstRate,
+
+        isTaxInclusive: item.isTaxInclusive,
+
+        quantity: item.quantity,
+
+        discount: item.discount,
+
+        total: item.total,
       });
     }
 
-    console.log(
-      '[updateInvoice] resolved items:',
-      JSON.stringify(invoiceItems.map((i) => ({ name: i.name, product: i.product })))
-    );
+    // ==========================
+    // Update Order
+    // ==========================
 
-    // --- Step 2: Update or re-link customer ---
-    const customerId = await findOrCreateCustomer(
-      invoice.store,
-      {
-        _id: data.customer,
-        name: data.customerName,
-        mobile: data.customerMobile,
-        address: data.customerAddress,
-        city: data.customerCity,
-        state: data.customerState,
-        country: data.customerCountry,
-        postalCode: data.customerPostalCode,
-        gstNumber: data.customerGstNumber,
-      },
-      session
-    );
-
-    // --- Step 3: Reverse old stock ---
-    await reverseStockAfterSale(invoice, session);
-
-    // --- Step 4: Reverse old transaction ---
-    await Transaction.deleteMany({ invoice: invoice._id }, { session });
-
-    // --- Step 5: Update invoice fields ---
-    invoice.set({
+    order.set({
       ...data,
-      items: invoiceItems,
-      customer: customerId,
+
+      customer: customer._id,
+
+      customerName: customer.name,
+      customerMobile: customer.mobile,
+      customerAddress: customer.address,
+      customerGstNumber: customer.gstNumber,
+
+      items: orderItems,
+
       edited: true,
     });
 
-    await invoice.save({ session });
-
-    // --- Step 6: Recreate transaction ---
-    await createTransaction(
-      {
-        store: invoice.store,
-        invoice: invoice._id,
-        amount: invoice.amountPaid,
-        paymentMethod: invoice.paymentMethod,
-        note: invoice.paymentNote,
-      },
-      session
-    );
-
-    // --- Step 7: Apply new stock ---
-    // ✅ Pass data from request.body BUT with productIds injected from Step 1
-    await updateStockAfterSale(
-      {
-        ...data, // all request.body fields (invoiceDate, storeSettings, etc.)
-        _id: invoice._id, // ✅ needed for saleId in stock transaction
-        items: invoiceItems, // ✅ items now have product field attached
-      },
-      session
-    );
+    await order.save({ session });
 
     await session.commitTransaction();
-    return invoice;
+
+    return order;
   } catch (error) {
     await session.abortTransaction();
-    throw handleDuplicateKeyError(error) || error;
+    throw error;
   } finally {
     await session.endSession();
   }

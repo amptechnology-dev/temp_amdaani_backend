@@ -9,6 +9,9 @@ services:
       - '8010'
     command: >
       sh -c "
+      export REDIS_IP=$$(getent hosts redis | awk '{print \$$1}') &&
+      export REDIS_URL=\"redis://$${REDIS_IP}:6379\" &&
+      echo \"Resolved redis -> $${REDIS_URL}\" &&
       until bun run src/seeders/roleSeeder.js;
       do echo 'Seeder failed, retrying in 5s...'; sleep 5; done &&
       bun run src/index.js"
@@ -88,8 +91,7 @@ services:
     volumes:
       - redis-data:/data
     networks:
-      app-network:
-        ipv4_address: 172.28.0.2
+      - app-network
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 3s
@@ -104,6 +106,3 @@ volumes:
 networks:
   app-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.28.0.0/16 

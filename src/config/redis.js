@@ -11,7 +11,7 @@ client.on('error', (err) => {
   console.log('❌ Redis Error:', err?.message || err);
 });
 client.on('connect', () => {
-  console.log('🔄 Connecting to Redis...');
+  console.log('🔄 Connecting to Redis...'); 
 });
 client.on('ready', () => {
   console.log('✅ Redis Connected');

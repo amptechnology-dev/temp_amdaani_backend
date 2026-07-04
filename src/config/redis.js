@@ -1,8 +1,9 @@
 import { createClient } from 'redis';
 
 const client = createClient({
-  url: process.env.REDIS_URL, // ✅ correct
+  url: process.env.REDIS_URL,
   socket: {
+    family: 4, // force IPv4 resolution — avoids Bun's dual-stack DNS bug
     reconnectStrategy: (retries) => Math.min(retries * 50, 500),
   },
 });
@@ -10,11 +11,9 @@ const client = createClient({
 client.on('error', (err) => {
   console.log('❌ Redis Error:', err);
 });
-
 client.on('connect', () => {
   console.log('🔄 Connecting to Redis...');
 });
-
 client.on('ready', () => {
   console.log('✅ Redis Connected');
 });

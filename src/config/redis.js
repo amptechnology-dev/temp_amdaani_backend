@@ -1,15 +1,14 @@
 import { createClient } from 'redis';
-
+ 
 const client = createClient({
-  url: process.env.REDIS_URL,
+  url: process.env.REDIS_URL, // now points directly to the static IP, e.g. redis://172.28.0.2:6379
   socket: {
-    family: 4, // force IPv4 resolution — avoids Bun's dual-stack DNS bug
     reconnectStrategy: (retries) => Math.min(retries * 50, 500),
   },
 });
-
+ 
 client.on('error', (err) => {
-  console.log('❌ Redis Error:', err);
+  console.log('❌ Redis Error:', err?.message || err);
 });
 client.on('connect', () => {
   console.log('🔄 Connecting to Redis...');
@@ -17,13 +16,13 @@ client.on('connect', () => {
 client.on('ready', () => {
   console.log('✅ Redis Connected');
 });
-
+ 
 (async () => {
   try {
     await client.connect();
   } catch (err) {
-    console.log('❌ Redis Connection Failed:', err);
+    console.log('❌ Redis Connection Failed:', err?.message || err);
   }
 })();
-
+ 
 export default client;

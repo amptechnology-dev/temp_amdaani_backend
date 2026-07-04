@@ -88,7 +88,8 @@ services:
     volumes:
       - redis-data:/data
     networks:
-      - app-network
+      app-network:
+        ipv4_address: 172.28.0.2
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 3s
@@ -103,3 +104,6 @@ volumes:
 networks:
   app-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

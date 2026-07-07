@@ -4,12 +4,17 @@ import { Product } from '../models/product.model.js';
 import { Customer } from '../models/customer.model.js';
 import { ApiError } from '../utils/responseHandler.js';
 import { handleDuplicateKeyError } from '../utils/dbErrorHandler.js';
-import { createInvoice } from "./invoice.service.js";
+import { createInvoice } from './invoice.service.js';
 
 export const createOrder = async (body) => {
   const session = await mongoose.startSession();
-  session.startTransaction();
+
   try {
+    session.startTransaction();
+
+    // ===========================
+    // Customer Validation
+    // ===========================
     const customer = await Customer.findOne({
       _id: body.customer,
       store: body.store,
@@ -20,6 +25,9 @@ export const createOrder = async (body) => {
       throw new ApiError(404, 'Customer not found');
     }
 
+    // ===========================
+    // Duplicate Order Number Check
+    // ===========================
     const existingOrder = await Order.findOne({
       store: body.store,
       orderNumber: body.orderNumber,
@@ -34,9 +42,49 @@ export const createOrder = async (body) => {
     body.customerAddress = customer.address;
     body.customerGstNumber = customer.gstNumber;
 
-    const order = await Order.create([body], {
-      session,
-    });
+    const orderItems = [];
+
+    for (const item of body.items) {
+      const product = await Product.findOne({
+        _id: item.product,
+        store: body.store,
+      }).session(session);
+
+      if (!product) {
+        throw new ApiError(404, `Product not found`);
+      }
+
+      const total = item.quantity * item.sellingPrice;
+
+      orderItems.push({
+        product: product._id,
+
+        // Product Snapshot
+        name: product.name,
+        hsn: product.hsn,
+        unit: product.unit,
+        gstRate: product.gstRate,
+        isTaxInclusive: product.isTaxInclusive,
+
+        // User Input
+        quantity: item.quantity,
+        sellingPrice: item.sellingPrice,
+
+        discount: 0,
+
+        total,
+      });
+    }
+
+    const order = await Order.create(
+      [
+        {
+          ...body,
+          items: orderItems,
+        },
+      ],
+      { session }
+    );
 
     await session.commitTransaction();
 
@@ -45,7 +93,7 @@ export const createOrder = async (body) => {
     await session.abortTransaction();
     throw error;
   } finally {
-    session.endSession();
+    await session.endSession();
   }
 };
 
@@ -53,10 +101,10 @@ export const updateOrder = async (orderId, data) => {
   const { items = [] } = data;
 
   if (!items.length) {
-    throw new ApiError(400, "Invalid order items!", {
-      source: "body",
-      field: "items",
-      message: "Order must have at least one item",
+    throw new ApiError(400, 'Invalid order items!', {
+      source: 'body',
+      field: 'items',
+      message: 'Order must have at least one item',
     });
   }
 
@@ -68,9 +116,10 @@ export const updateOrder = async (orderId, data) => {
     const order = await Order.findById(orderId).session(session);
 
     if (!order) {
-      throw new ApiError(404, "Order not found");
+      throw new ApiError(404, 'Order not found');
     }
 
+    // Customer Validation
     const customer = await Customer.findOne({
       _id: data.customer,
       store: order.store,
@@ -78,41 +127,58 @@ export const updateOrder = async (orderId, data) => {
     }).session(session);
 
     if (!customer) {
-      throw new ApiError(404, "Customer not found");
+      throw new ApiError(404, 'Customer not found');
     }
 
+    // Duplicate Order Number Check (optional)
+    const existingOrder = await Order.findOne({
+      _id: { $ne: orderId },
+      store: order.store,
+      orderNumber: data.orderNumber,
+    }).session(session);
+
+    if (existingOrder) {
+      throw new ApiError(400, 'Order number already exists');
+    }
+
+    // Prepare Items
     const orderItems = [];
 
     for (const item of items) {
-      const product = await Product.findById(item.product).session(session);
+      const product = await Product.findOne({
+        _id: item.product,
+        store: order.store,
+      }).session(session);
 
       if (!product) {
-        throw new ApiError(404, "Product not found");
+        throw new ApiError(404, 'Product not found');
       }
+
+      const total = item.quantity * item.sellingPrice;
 
       orderItems.push({
         product: product._id,
 
-        name: item.name,
-        hsn: item.hsn,
-        unit: item.unit,
+        // Product Snapshot
+        name: product.name,
+        hsn: product.hsn,
+        unit: product.unit,
+        gstRate: product.gstRate,
+        isTaxInclusive: product.isTaxInclusive,
 
+        // User Input
         sellingPrice: item.sellingPrice,
-
-        gstRate: item.gstRate || 0,
-
-        isTaxInclusive: item.isTaxInclusive || false,
-
         quantity: item.quantity,
 
-        discount: item.discount || 0,
+        discount: 0,
 
-        total: item.total,
+        total,
       });
     }
 
     order.set({
-      ...data,
+      orderNumber: data.orderNumber,
+      orderDate: data.orderDate,
 
       customer: customer._id,
       customerName: customer.name,
@@ -121,6 +187,7 @@ export const updateOrder = async (orderId, data) => {
       customerGstNumber: customer.gstNumber,
 
       items: orderItems,
+
       edited: true,
     });
 
@@ -138,12 +205,7 @@ export const updateOrder = async (orderId, data) => {
 };
 
 export const queryOrders = async (filter = {}, options = {}) => {
-  const {
-    page = 1,
-    limit = 20,
-    sortBy = "createdAt",
-    order = "desc",
-  } = options;
+  const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;
 
   if (filter.userId) {
     filter.userId = new mongoose.Types.ObjectId(String(filter.userId));
@@ -163,10 +225,10 @@ export const queryOrders = async (filter = {}, options = {}) => {
     // ==========================
     {
       $lookup: {
-        from: "stores",
-        localField: "store",
-        foreignField: "_id",
-        as: "store",
+        from: 'stores',
+        localField: 'store',
+        foreignField: '_id',
+        as: 'store',
         pipeline: [
           {
             $project: {
@@ -182,7 +244,7 @@ export const queryOrders = async (filter = {}, options = {}) => {
     },
     {
       $unwind: {
-        path: "$store",
+        path: '$store',
         preserveNullAndEmptyArrays: true,
       },
     },
@@ -192,10 +254,10 @@ export const queryOrders = async (filter = {}, options = {}) => {
     // ==========================
     {
       $lookup: {
-        from: "products",
-        localField: "items.product",
-        foreignField: "_id",
-        as: "productDetails",
+        from: 'products',
+        localField: 'items.product',
+        foreignField: '_id',
+        as: 'productDetails',
         pipeline: [
           {
             $project: {
@@ -213,10 +275,10 @@ export const queryOrders = async (filter = {}, options = {}) => {
     // ==========================
     {
       $lookup: {
-        from: "users",
-        localField: "userId",
-        foreignField: "_id",
-        as: "createdBy",
+        from: 'users',
+        localField: 'userId',
+        foreignField: '_id',
+        as: 'createdBy',
         pipeline: [
           {
             $project: {
@@ -232,7 +294,7 @@ export const queryOrders = async (filter = {}, options = {}) => {
     },
     {
       $unwind: {
-        path: "$createdBy",
+        path: '$createdBy',
         preserveNullAndEmptyArrays: true,
       },
     },
@@ -262,7 +324,7 @@ export const queryOrders = async (filter = {}, options = {}) => {
 
     {
       $sort: {
-        [sortBy]: order === "desc" ? -1 : 1,
+        [sortBy]: order === 'desc' ? -1 : 1,
       },
     },
   ]);
@@ -288,10 +350,10 @@ export const getOrderById = async (id) => {
     // ==========================
     {
       $lookup: {
-        from: "customers",
-        localField: "customer",
-        foreignField: "_id",
-        as: "customerDetails",
+        from: 'customers',
+        localField: 'customer',
+        foreignField: '_id',
+        as: 'customerDetails',
         pipeline: [
           {
             $project: {
@@ -310,7 +372,7 @@ export const getOrderById = async (id) => {
     },
     {
       $unwind: {
-        path: "$customerDetails",
+        path: '$customerDetails',
         preserveNullAndEmptyArrays: true,
       },
     },
@@ -320,10 +382,10 @@ export const getOrderById = async (id) => {
     // ==========================
     {
       $lookup: {
-        from: "products",
-        localField: "items.product",
-        foreignField: "_id",
-        as: "productDetails",
+        from: 'products',
+        localField: 'items.product',
+        foreignField: '_id',
+        as: 'productDetails',
         pipeline: [
           {
             $project: {
@@ -343,10 +405,10 @@ export const getOrderById = async (id) => {
     // ==========================
     {
       $lookup: {
-        from: "stores",
-        localField: "store",
-        foreignField: "_id",
-        as: "store",
+        from: 'stores',
+        localField: 'store',
+        foreignField: '_id',
+        as: 'store',
         pipeline: [
           {
             $project: {
@@ -362,7 +424,7 @@ export const getOrderById = async (id) => {
     },
     {
       $unwind: {
-        path: "$store",
+        path: '$store',
         preserveNullAndEmptyArrays: true,
       },
     },
@@ -372,10 +434,10 @@ export const getOrderById = async (id) => {
     // ==========================
     {
       $lookup: {
-        from: "users",
-        localField: "userId",
-        foreignField: "_id",
-        as: "createdBy",
+        from: 'users',
+        localField: 'userId',
+        foreignField: '_id',
+        as: 'createdBy',
         pipeline: [
           {
             $project: {
@@ -391,7 +453,7 @@ export const getOrderById = async (id) => {
     },
     {
       $unwind: {
-        path: "$createdBy",
+        path: '$createdBy',
         preserveNullAndEmptyArrays: true,
       },
     },
@@ -431,68 +493,48 @@ export const getOrderById = async (id) => {
   return result[0] || null;
 };
 
-export const changeOrderStatus = async (orderId, status, approvedBy, cancelReason = "") => {
+export const changeOrderStatus = async (orderId, data, approvedBy) => {
   const session = await mongoose.startSession();
-
   try {
     session.startTransaction();
-
     const order = await Order.findById(orderId).session(session);
-
     if (!order) {
-      throw new ApiError(404, "Order not found");
+      throw new ApiError(404, 'Order not found');
     }
-
-    if (order.status === "completed") {
-      throw new ApiError(400, "Completed order cannot be modified");
+    if (order.status === 'delivered') {
+      throw new ApiError(400, 'Delivered order cannot be modified');
     }
-
-    if (order.status === "cancelled") {
-      throw new ApiError(400, "Cancelled order cannot be modified");
-    }
-
+    const { status } = data;
     const statusFlow = {
-      pending: ["confirmed", "cancelled"],
-      confirmed: ["packed", "cancelled"],
-      packed: ["dispatched", "cancelled"],
-      dispatched: ["delivered", "cancelled"],
-      delivered: ["completed"],
-      completed: [],
-      cancelled: [],
+      order_taken: ['approved'],
+      approved: ['invoiced'],
+      invoiced: ['delivered'],
+      delivered: [],
     };
-
     if (!statusFlow[order.status].includes(status)) {
-      throw new ApiError(
-        400,
-        `Cannot change status from "${order.status}" to "${status}"`
-      );
+      throw new ApiError(400, `Cannot change status from "${order.status}" to "${status}"`);
     }
-
     order.status = status;
     order.approvedBy = approvedBy;
-
-    const now = new Date();
-
     switch (status) {
-      case "confirmed":
-        order.confirmedAt = now;
+      case 'approved':
+        order.approvedAt = new Date();
         break;
 
-      case "dispatched":
-        order.dispatchedAt = now;
+      case 'invoiced':
+        order.invoicedAt = new Date();
         break;
 
-      case "delivered":
-        order.deliveredAt = now;
-        break;
+      case 'delivered':
+        order.deliveredBy = data.deliveredBy;
+        order.challanNo = data.challanNo;
+        order.challanDate = data.challanDate;
+        order.lorryNumber = data.lorryNumber;
+        order.deliveryAddress = data.deliveryAddress;
 
-      case "completed":
-        order.completedAt = now;
-        break;
+        // Auto
+        order.actualDeliveryDate = new Date();
 
-      case "cancelled":
-        order.cancelledAt = now;
-        order.cancelReason = cancelReason;
         break;
     }
 
@@ -509,12 +551,7 @@ export const changeOrderStatus = async (orderId, status, approvedBy, cancelReaso
   }
 };
 
-export const createInvoiceFromOrder = async (
-  orderId,
-  store,
-  userId,
-  invoiceNumber
-) => {
+export const createInvoiceFromOrder = async (orderId, body, store, userId) => {
   const session = await mongoose.startSession();
 
   try {
@@ -526,70 +563,31 @@ export const createInvoiceFromOrder = async (
     }).session(session);
 
     if (!order) {
-      throw new ApiError(404, "Order not found");
+      throw new ApiError(404, 'Order not found');
     }
 
     if (order.isInvoiceCreated) {
-      throw new ApiError(400, "Invoice already created for this order");
+      throw new ApiError(400, 'Invoice already created');
     }
 
-    if (
-      !["confirmed", "packed", "dispatched", "delivered"].includes(
-        order.status
-      )
-    ) {
-      throw new ApiError(
-        400,
-        "Invoice can only be created from confirmed orders"
-      );
+    if (order.status !== 'approved') {
+      throw new ApiError(400, 'Only approved orders can be converted into invoice');
     }
 
     const invoiceData = {
+      ...body,
+
       store,
       userId,
 
-      
-      invoiceNumber,
-
-      customer: order.customer,
-
-      customerName: order.customerName,
-      customerMobile: order.customerMobile,
-      customerAddress: order.customerAddress,
-      customerGstNumber: order.customerGstNumber,
-
-      invoiceDate: new Date(),
-
-      items: order.items,
-
-      subTotal: order.subTotal,
-      gstTotal: order.gstTotal,
-      discountTotal: order.discountTotal,
-      roundOff: order.roundOff,
-      grandTotal: order.grandTotal,
-
-      transportName: order.transportName,
-      trackingId: order.trackingId,
-      lorryNumber: order.lorryNumber,
-
-      deliveryAddress: order.deliveryAddress,
-
-      remarks: order.remarks,
-
       order: order._id,
-
-      paymentStatus: "unpaid",
-      paymentMethod: "cash",
-      amountPaid: 0,
-      amountDue: order.grandTotal,
     };
 
     const invoice = await createInvoice(invoiceData);
 
     order.invoice = invoice._id;
     order.isInvoiceCreated = true;
-    order.status = "completed";
-    order.completedAt = new Date();
+    order.status = 'invoiced';
 
     await order.save({ session });
 
@@ -603,4 +601,3 @@ export const createInvoiceFromOrder = async (
     await session.endSession();
   }
 };
-

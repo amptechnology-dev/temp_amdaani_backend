@@ -17,4 +17,4 @@ export const StockTransactionType = {
   OPENINGSTOCK: 'OPENINGSTOCK',
 };
 
-export const ORDER_STATUS = ['pending', 'confirmed', 'packed', 'dispatched', 'delivered', 'cancelled', 'completed'];
+export const ORDER_STATUS = ['order_taken', 'approved', 'invoiced', 'delivered'];

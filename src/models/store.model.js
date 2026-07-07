@@ -12,13 +12,11 @@ const storeSchema = new mongoose.Schema(
     registrationNo: { type: String, trim: true },
     contactNo: { type: String, trim: true },
     email: { type: String, trim: true, lowercase: true },
-    registeredFinancialYear:
-    {
+    registeredFinancialYear: {
       type: String,
       required: true,
     },
-    currentFinancialYear:
-    {
+    currentFinancialYear: {
       type: String,
       required: true,
     },
@@ -60,11 +58,17 @@ const storeSchema = new mongoose.Schema(
     },
     referredBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Store",
+      ref: 'Store',
       default: null,
     },
     agentCode: {
       type: String,
+      default: null,
+    },
+    registeredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Staff',
+      default: null,
     },
     logoUrl: String,
     signatureUrl: String,

@@ -63,3 +63,15 @@ export const deleteStaff = asyncHandler(async (req, res) => {
     "Staff deleted successfully"
   ).send(res);
 });
+
+export const getStoresRegisteredByStaff = asyncHandler(async (req, res) => {
+  const { staffId } = req.params;
+
+  const result = await staffService.getStoresByStaff(staffId);
+
+  return new ApiResponse(
+    200,
+    result,
+    "Stores fetched successfully"
+  ).send(res);
+});

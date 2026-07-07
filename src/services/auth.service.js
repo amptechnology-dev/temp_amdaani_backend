@@ -812,23 +812,19 @@ export const assignAgentCodeToStore = async (storeId, agentCode) => {
     throw new ApiError(400, "Agent code is required");
   }
 
-  // Check whether the staff exists
+  // Find staff by agent code (optional)
   const staff = await Staff.findOne({
     agentCode: agentCode.trim(),
     isActive: true,
   });
 
-  if (!staff) {
-    throw new ApiError(404, "Invalid agent code");
-  }
-
-  // Update store with agent code and staff id
+  // Update store
   const updatedStore = await Store.findByIdAndUpdate(
     storeId,
     {
       $set: {
-        agentCode: staff.agentCode,
-        registeredBy: staff._id,
+        agentCode: agentCode.trim(),
+        registeredBy: staff ? staff._id : null,
       },
     },
     {

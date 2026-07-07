@@ -9,6 +9,7 @@ router.use(authorizeRoles("super-admin"));
 
 router.post("/", staffController.createStaff);
 router.get("/", staffController.getAllStaff);
+router.get("/stores/:staffId", staffController.getStoresRegisteredByStaff);
 
 router
   .route("/:id")

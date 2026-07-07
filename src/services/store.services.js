@@ -115,7 +115,7 @@ export const getAllStoresWithSubscription = async () => {
   const stores = await Store.aggregate([
     {
       $lookup: {
-        from: "staffs", // MongoDB collection name
+        from: "staffs",
         localField: "agentCode",
         foreignField: "agentCode",
         as: "staffInfo",
@@ -124,7 +124,32 @@ export const getAllStoresWithSubscription = async () => {
     {
       $unwind: {
         path: "$staffInfo",
-        preserveNullAndEmptyArrays: true, // jader agentCode nai tarao ashbe
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $lookup: {
+        from: "users",
+        localField: "_id",
+        foreignField: "store",
+        as: "userInfo",
+      },
+    },
+    {
+      $addFields: {
+        userId: {
+          $ifNull: [
+            {
+              $arrayElemAt: ["$userInfo._id", 0],
+            },
+            null,
+          ],
+        },
+      },
+    },
+    {
+      $project: {
+        userInfo: 0,
       },
     },
     {
@@ -136,22 +161,18 @@ export const getAllStoresWithSubscription = async () => {
 
   const result = await Promise.all(
     stores.map(async (store) => {
-      const subscription =
-        await getCurrentSubscription(store._id);
+      const subscription = await getCurrentSubscription(store._id);
 
       let usage = null;
 
       if (subscription) {
-        usage = await getUsage(
-          subscription._id
-        );
+        usage = await getUsage(subscription._id);
       }
 
       return {
         ...store,
         staff: store.staffInfo || null,
-        subscription:
-          subscription || null,
+        subscription: subscription || null,
         usage,
       };
     })

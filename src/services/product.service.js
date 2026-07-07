@@ -1095,25 +1095,31 @@ export const carryForwardStockToNextFinancialYear = async (storeId) => {
   };
 };
 
-export const getProductSuggestions = async (storeId, search = '') => {
+export const getProductSuggestions = async (storeId, search = "") => {
+  const query = {
+    store: new mongoose.Types.ObjectId(storeId),
+    status: "active",
+  };
+
+  // If no search query, return latest 4 products
   if (!search || !search.trim()) {
-    return [];
+    return Product.find(query)
+      .select("_id name sku currentStock sellingPrice")
+      .sort({ createdAt: -1 })
+      .limit(4)
+      .lean();
   }
 
+  // Search products by name
   return Product.find({
-    store: new mongoose.Types.ObjectId(storeId),
-
-    status: 'active',
-
+    ...query,
     name: {
       $regex: search.trim(),
-      $options: 'i',
+      $options: "i",
     },
   })
-    .select('_id name sku currentStock sellingPrice')
-    .sort({
-      name: 1,
-    })
+    .select("_id name sku currentStock sellingPrice")
+    .sort({ name: 1 })
     .limit(10)
     .lean();
 };

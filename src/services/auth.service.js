@@ -29,6 +29,7 @@ import { Referral } from "../models/referral.model.js";
 import { saveLoginActivity } from './loginActivity.service.js';
 import { createUserSession } from './userSession.service.js';
 import { UserTracking } from '../models/UserTracking.model.js';
+import { Staff } from "../models/staff.model.js";
 
 export const sendOtp = async (phone) => {
   if (!phone) {
@@ -806,4 +807,40 @@ export const refreshAuth = async (
   }
 };
 
+export const assignAgentCodeToStore = async (storeId, agentCode) => {
+  if (!agentCode) {
+    throw new ApiError(400, "Agent code is required");
+  }
+
+  // Check whether the staff exists
+  const staff = await Staff.findOne({
+    agentCode: agentCode.trim(),
+    isActive: true,
+  });
+
+  if (!staff) {
+    throw new ApiError(404, "Invalid agent code");
+  }
+
+  // Update store with agent code and staff id
+  const updatedStore = await Store.findByIdAndUpdate(
+    storeId,
+    {
+      $set: {
+        agentCode: staff.agentCode,
+        registeredBy: staff._id,
+      },
+    },
+    {
+      new: true,
+      runValidators: true,
+    }
+  );
+
+  if (!updatedStore) {
+    throw new ApiError(404, "Store not found");
+  }
+
+  return updatedStore;
+};
 

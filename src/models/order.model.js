@@ -100,39 +100,16 @@ const orderSchema = new mongoose.Schema(
 
     items: [orderItemSchema],
 
-    subTotal: {
-      type: Number,
-      required: true,
-    },
-
-    gstTotal: {
-      type: Number,
-      default: 0,
-    },
-
-    discountTotal: {
-      type: Number,
-      default: 0,
-    },
-
-    roundOff: {
-      type: Number,
-      default: 0,
-    },
-
-    grandTotal: {
-      type: Number,
-      required: true,
-    },
-
-    transportName: {
+    deliveredBy: {
       type: String,
       trim: true,
     },
 
-    trackingId: {
-      type: String,
-      trim: true,
+    deliveryDate:{
+      type: Date,
+    },
+    actualDeliveryDate:{
+      type: Date,
     },
 
     lorryNumber: {
@@ -145,20 +122,23 @@ const orderSchema = new mongoose.Schema(
       trim: true,
     },
 
-    remarks: {
-      type: String,
-      trim: true,
-    },
-
     status: {
       type: String,
       enum: ORDER_STATUS,
-      default: 'pending',
+      default: 'order_taken',
     },
 
     invoice: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Invoice',
+    },
+
+    challanNo:{
+      type: String,
+      trim: true,
+    },
+    challanDate:{
+      type: Date,
     },
 
     isInvoiceCreated: {
@@ -169,23 +149,6 @@ const orderSchema = new mongoose.Schema(
     approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-    },
-
-    confirmedAt: Date,
-
-    dispatchedAt: Date,
-
-    deliveredAt: Date,
-
-    completedAt: Date,
-
-    cancelledAt: Date,
-
-    cancelReason: String,
-
-    isActive: {
-      type: Boolean,
-      default: true,
     },
   },
   {

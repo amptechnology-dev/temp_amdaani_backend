@@ -51,4 +51,8 @@ router.post('/phone-change-email/update-email', authController.updateChangeEmail
 // router.post('/reset-password', validate(authSchema.resetPassword), authController.resetPassword);
 router.patch('/toggle-store-status/:storeId', authenticate, authController.toggleStoreStatus);
 
+router.patch("/assign-agent-code",authenticate, authController.updateStoreAgentCode);
+
+
+
 export default router;

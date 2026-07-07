@@ -31,6 +31,7 @@ import crypto from 'crypto';
 import redis from '../config/redis.js';
 import { get } from 'https';
 import { logoutOtherDevices } from '../services/userSession.service.js';
+import { assignAgentCodeToStore } from '../services/auth.service.js';
 
 export const createSuperAdminUser = asyncHandler(async (req, res) => {
   const { phone, name, email } = req.body;
@@ -517,15 +518,12 @@ export const logoutAllOtherDevices = asyncHandler(async (req, res) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
-    throw new ApiError(401, "Token missing");
+    throw new ApiError(401, 'Token missing');
   }
 
-  const accessToken = authHeader.split(" ")[1];
+  const accessToken = authHeader.split(' ')[1];
 
-  const result = await logoutOtherDevices(
-    req.user.id,
-    accessToken
-  );
+  const result = await logoutOtherDevices(req.user.id, accessToken);
 
   return new ApiResponse(
     200,
@@ -533,7 +531,7 @@ export const logoutAllOtherDevices = asyncHandler(async (req, res) => {
       deactivatedSessions: result.sessionResult?.modifiedCount,
       deletedLoginActivities: result.loginActivityResult?.deletedCount,
     },
-    "Logged out from all other devices successfully"
+    'Logged out from all other devices successfully'
   ).send(res);
 });
 
@@ -541,22 +539,20 @@ export const verifySession = asyncHandler(async (req, res) => {
   return new ApiResponse(200, req.user, 'Session valid').send(res);
 });
 
-export const toggleStoreStatus =
-  asyncHandler(
-    async (req, res) => {
-      const {
-        storeId,
-      } = req.params;
+export const toggleStoreStatus = asyncHandler(async (req, res) => {
+  const { storeId } = req.params;
 
-      const result =
-        await toggleStoreAndUsersStatus(
-          storeId
-        );
+  const result = await toggleStoreAndUsersStatus(storeId);
 
-      return new ApiResponse(
-        200,
-        result,
-        result.message
-      ).send(res);
-    }
-  );
+  return new ApiResponse(200, result, result.message).send(res);
+});
+
+export const updateStoreAgentCode = asyncHandler(async (req, res) => {
+  const storeId = req.user.store;
+
+  const { agentCode } = req.body;
+
+  const store = await assignAgentCodeToStore(storeId, agentCode);
+
+  return new ApiResponse(200, store, 'Agent code assigned successfully').send(res);
+});

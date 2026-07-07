@@ -174,14 +174,14 @@ export const createInvoice = async (data) => {
   }
 };
 
-export const updateOrder = async (orderId, data) => {
+export const updateInvoice = async (invoiceId, data) => {
   const { items = [] } = data;
 
   if (!items.length) {
-    throw new ApiError(400, "Invalid order items!", {
-      source: "body",
-      field: "items",
-      message: "Order must have at least one item",
+    throw new ApiError(400, 'Invalid invoice items!', {
+      source: 'body',
+      field: 'items',
+      message: 'Invoice must have at least one item',
     });
   }
 
@@ -190,87 +190,91 @@ export const updateOrder = async (orderId, data) => {
   try {
     session.startTransaction();
 
-    const order = await Order.findById(orderId).session(session);
+    const invoice = await Invoice.findById(invoiceId).session(session);
+    if (!invoice) throw new ApiError(404, 'Invoice not found');
 
-    if (!order) {
-      throw new ApiError(404, "Order not found");
-    }
-
-    // ==========================
-    // Validate Customer
-    // ==========================
-
-    const customer = await Customer.findOne({
-      _id: data.customer,
-      store: order.store,
-      isActive: true,
-    }).session(session);
-
-    if (!customer) {
-      throw new ApiError(404, "Customer not found");
-    }
-
-    // ==========================
-    // Build Order Items
-    // ==========================
-
-    const orderItems = [];
+    // --- Step 1: Build invoice items (with resolved productIds) ---
+    const invoiceItems = [];
 
     for (const item of items) {
-      const product = await Product.findById(item.product).session(session);
+      const productId = await findOrCreateProduct(invoice.store, item, session);
 
-      if (!product) {
-        throw new ApiError(404, `Product not found`);
+      if (!productId) {
+        console.warn(`[updateInvoice] No productId resolved for item: "${item.name}"`);
       }
 
-      orderItems.push({
-        product: product._id,
-
-        name: item.name,
-        hsn: item.hsn,
-        unit: item.unit,
-
-        sellingPrice: item.sellingPrice,
-
-        gstRate: item.gstRate,
-
-        isTaxInclusive: item.isTaxInclusive,
-
-        quantity: item.quantity,
-
-        discount: item.discount,
-
-        total: item.total,
+      invoiceItems.push({
+        ...item,
+        // ✅ Always attach product field — resolved or fallback to existing
+        product: productId ?? item.product ?? null,
       });
     }
 
-    // ==========================
-    // Update Order
-    // ==========================
+    console.log(
+      '[updateInvoice] resolved items:',
+      JSON.stringify(invoiceItems.map((i) => ({ name: i.name, product: i.product })))
+    );
 
-    order.set({
+    // --- Step 2: Update or re-link customer ---
+    const customerId = await findOrCreateCustomer(
+      invoice.store,
+      {
+        _id: data.customer,
+        name: data.customerName,
+        mobile: data.customerMobile,
+        address: data.customerAddress,
+        city: data.customerCity,
+        state: data.customerState,
+        country: data.customerCountry,
+        postalCode: data.customerPostalCode,
+        gstNumber: data.customerGstNumber,
+      },
+      session
+    );
+
+    // --- Step 3: Reverse old stock ---
+    await reverseStockAfterSale(invoice, session);
+
+    // --- Step 4: Reverse old transaction ---
+    await Transaction.deleteMany({ invoice: invoice._id }, { session });
+
+    // --- Step 5: Update invoice fields ---
+    invoice.set({
       ...data,
-
-      customer: customer._id,
-
-      customerName: customer.name,
-      customerMobile: customer.mobile,
-      customerAddress: customer.address,
-      customerGstNumber: customer.gstNumber,
-
-      items: orderItems,
-
+      items: invoiceItems,
+      customer: customerId,
       edited: true,
     });
+    await invoice.save({ session });
 
-    await order.save({ session });
+    // --- Step 6: Recreate transaction ---
+    await createTransaction(
+      {
+        store: invoice.store,
+        invoice: invoice._id,
+        amount: invoice.amountPaid,
+        paymentMethod: invoice.paymentMethod,
+        note: invoice.paymentNote,
+      },
+      session
+    );
+
+    // --- Step 7: Apply new stock ---
+    // ✅ Pass data from request.body BUT with productIds injected from Step 1
+    await updateStockAfterSale(
+      {
+        ...data, // all request.body fields (invoiceDate, storeSettings, etc.)
+        _id: invoice._id, // ✅ needed for saleId in stock transaction
+        items: invoiceItems, // ✅ items now have product field attached
+      },
+      session
+    );
 
     await session.commitTransaction();
-
-    return order;
+    return invoice;
   } catch (error) {
     await session.abortTransaction();
-    throw error;
+    throw handleDuplicateKeyError(error) || error;
   } finally {
     await session.endSession();
   }
@@ -1186,13 +1190,13 @@ export const getProfitLossReport = async (filters = {}) => {
     // ── Preserve invoice item fields ──────────────────────────────────────
     {
       $addFields: {
-        _invoiceQty:            '$items.quantity',
-        _invoiceSellingPrice:   '$items.sellingPrice',
-        _invoiceGstRate:        { $ifNull: ['$items.gstRate', 0] },
+        _invoiceQty: '$items.quantity',
+        _invoiceSellingPrice: '$items.sellingPrice',
+        _invoiceGstRate: { $ifNull: ['$items.gstRate', 0] },
         _invoiceIsTaxInclusive: { $ifNull: ['$items.isTaxInclusive', false] },
-        _invoiceProductId:      '$items.product',
-        _invoiceProductName:    '$items.name',
-        _invoiceItemTotal:      { $ifNull: ['$items.total', 0] },
+        _invoiceProductId: '$items.product',
+        _invoiceProductName: '$items.name',
+        _invoiceItemTotal: { $ifNull: ['$items.total', 0] },
       },
     },
 
@@ -1204,18 +1208,12 @@ export const getProfitLossReport = async (filters = {}) => {
         _saleTaxablePerUnit: {
           $cond: [
             {
-              $and: [
-                { $gt: ['$_invoiceItemTotal', 0] },
-                { $gt: ['$_invoiceQty', 0] },
-              ],
+              $and: [{ $gt: ['$_invoiceItemTotal', 0] }, { $gt: ['$_invoiceQty', 0] }],
             },
             {
               $divide: [
                 {
-                  $divide: [
-                    '$_invoiceItemTotal',
-                    { $add: [1, { $divide: ['$_invoiceGstRate', 100] }] },
-                  ],
+                  $divide: ['$_invoiceItemTotal', { $add: [1, { $divide: ['$_invoiceGstRate', 100] }] }],
                 },
                 '$_invoiceQty',
               ],
@@ -1224,16 +1222,10 @@ export const getProfitLossReport = async (filters = {}) => {
             {
               $cond: [
                 {
-                  $and: [
-                    '$_invoiceIsTaxInclusive',
-                    { $gt: ['$_invoiceGstRate', 0] },
-                  ],
+                  $and: ['$_invoiceIsTaxInclusive', { $gt: ['$_invoiceGstRate', 0] }],
                 },
                 {
-                  $divide: [
-                    '$_invoiceSellingPrice',
-                    { $add: [1, { $divide: ['$_invoiceGstRate', 100] }] },
-                  ],
+                  $divide: ['$_invoiceSellingPrice', { $add: [1, { $divide: ['$_invoiceGstRate', 100] }] }],
                 },
                 '$_invoiceSellingPrice',
               ],
@@ -1261,19 +1253,16 @@ export const getProfitLossReport = async (filters = {}) => {
           { $limit: 1 },
           {
             $addFields: {
-              _pGst:    { $ifNull: ['$items.gstRate', 0] },
-              _pQty:    { $max: [1, { $ifNull: ['$items.quantity', 1] }] },
-              _pTotal:  { $ifNull: ['$items.total', 0] },
-              _pRate:   { $ifNull: ['$items.rate', 0] },
+              _pGst: { $ifNull: ['$items.gstRate', 0] },
+              _pQty: { $max: [1, { $ifNull: ['$items.quantity', 1] }] },
+              _pTotal: { $ifNull: ['$items.total', 0] },
+              _pRate: { $ifNull: ['$items.rate', 0] },
               _pIsIncl: {
-                $ifNull: [
-                  '$items.isPurchaseTaxInclusive',
-                  { $ifNull: ['$items.isTaxInclusive', false] },
-                ],
+                $ifNull: ['$items.isPurchaseTaxInclusive', { $ifNull: ['$items.isTaxInclusive', false] }],
               },
               _pDiscRaw: { $ifNull: ['$items.purchaseDiscount', 0] },
               _pDiscPct: { $ifNull: ['$items.purchaseDiscountPercentage', 0] },
-              _pDiscType:{ $ifNull: ['$items.purchaseDiscountType', 'amount'] },
+              _pDiscType: { $ifNull: ['$items.purchaseDiscountType', 'amount'] },
             },
           },
           {
@@ -1287,10 +1276,7 @@ export const getProfitLossReport = async (filters = {}) => {
                   {
                     $divide: [
                       {
-                        $divide: [
-                          '$_pTotal',
-                          { $add: [1, { $divide: ['$_pGst', 100] }] },
-                        ],
+                        $divide: ['$_pTotal', { $add: [1, { $divide: ['$_pGst', 100] }] }],
                       },
                       '$_pQty',
                     ],
@@ -1318,10 +1304,7 @@ export const getProfitLossReport = async (filters = {}) => {
                             $cond: [
                               { $and: ['$_pIsIncl', { $gt: ['$_pGst', 0] }] },
                               {
-                                $divide: [
-                                  { $subtract: ['$_pRate', '$$discPerUnit'] },
-                                  '$$divisor',
-                                ],
+                                $divide: [{ $subtract: ['$_pRate', '$$discPerUnit'] }, '$$divisor'],
                               },
                               { $subtract: ['$_pRate', '$$discPerUnit'] },
                             ],
@@ -1349,10 +1332,7 @@ export const getProfitLossReport = async (filters = {}) => {
     {
       $addFields: {
         _purchaseTaxablePerUnit: {
-          $ifNull: [
-            { $arrayElemAt: ['$purchaseData.purchaseTaxablePerUnit', 0] },
-            0,
-          ],
+          $ifNull: [{ $arrayElemAt: ['$purchaseData.purchaseTaxablePerUnit', 0] }, 0],
         },
       },
     },
@@ -1362,16 +1342,10 @@ export const getProfitLossReport = async (filters = {}) => {
     {
       $addFields: {
         _itemSalesAmount: {
-          $round: [
-            { $multiply: ['$_saleTaxablePerUnit', '$_invoiceQty'] },
-            2,
-          ],
+          $round: [{ $multiply: ['$_saleTaxablePerUnit', '$_invoiceQty'] }, 2],
         },
         _itemPurchaseCost: {
-          $round: [
-            { $multiply: ['$_purchaseTaxablePerUnit', '$_invoiceQty'] },
-            2,
-          ],
+          $round: [{ $multiply: ['$_purchaseTaxablePerUnit', '$_invoiceQty'] }, 2],
         },
       },
     },
@@ -1379,10 +1353,7 @@ export const getProfitLossReport = async (filters = {}) => {
     {
       $addFields: {
         _itemProfit: {
-          $round: [
-            { $subtract: ['$_itemSalesAmount', '$_itemPurchaseCost'] },
-            2,
-          ],
+          $round: [{ $subtract: ['$_itemSalesAmount', '$_itemPurchaseCost'] }, 2],
         },
       },
     },
@@ -1392,9 +1363,9 @@ export const getProfitLossReport = async (filters = {}) => {
       $group: {
         _id: '$_id',
 
-        invoiceDate:    { $first: '$invoiceDate' },
-        invoiceNumber:  { $first: '$invoiceNumber' },
-        customerName:   { $first: '$customerName' },
+        invoiceDate: { $first: '$invoiceDate' },
+        invoiceNumber: { $first: '$invoiceNumber' },
+        customerName: { $first: '$customerName' },
         customerMobile: { $first: '$customerMobile' },
 
         items: {
@@ -1402,42 +1373,38 @@ export const getProfitLossReport = async (filters = {}) => {
             product: '$_invoiceProductName',
 
             // Sale side
-            invoiceQuantity:    '$_invoiceQty',
-            invoicePrice:       '$_invoiceSellingPrice',
+            invoiceQuantity: '$_invoiceQty',
+            invoicePrice: '$_invoiceSellingPrice',
             saleTaxablePerUnit: { $round: ['$_saleTaxablePerUnit', 2] },
-            invoiceAmount:      '$_itemSalesAmount',
+            invoiceAmount: '$_itemSalesAmount',
 
             // Purchase side
             purchaseTaxablePerUnit: { $round: ['$_purchaseTaxablePerUnit', 2] },
-            purchaseAmount:         '$_itemPurchaseCost',
+            purchaseAmount: '$_itemPurchaseCost',
 
             // Profit
             itemProfit: '$_itemProfit',
           },
         },
 
-        totalSales:    { $sum: '$_itemSalesAmount' },
+        totalSales: { $sum: '$_itemSalesAmount' },
         totalPurchase: { $sum: '$_itemPurchaseCost' },
-        totalProfit:   { $sum: '$_itemProfit' },
+        totalProfit: { $sum: '$_itemProfit' },
       },
     },
 
     // ── Step 6: final shape ───────────────────────────────────────────────
     {
       $project: {
-        invoiceDate:   1,
+        invoiceDate: 1,
         invoiceNumber: 1,
         customerDescription: {
-          $concat: [
-            { $ifNull: ['$customerName', 'Cash Customer'] },
-            ' , ',
-            { $ifNull: ['$customerMobile', '-'] },
-          ],
+          $concat: [{ $ifNull: ['$customerName', 'Cash Customer'] }, ' , ', { $ifNull: ['$customerMobile', '-'] }],
         },
-        items:         1,
-        totalSales:    { $round: ['$totalSales', 2] },
+        items: 1,
+        totalSales: { $round: ['$totalSales', 2] },
         totalPurchase: { $round: ['$totalPurchase', 2] },
-        profitLoss:    { $round: ['$totalProfit', 2] },
+        profitLoss: { $round: ['$totalProfit', 2] },
       },
     },
 
@@ -1447,784 +1414,19 @@ export const getProfitLossReport = async (filters = {}) => {
   // ── Overall summary ───────────────────────────────────────────────────────
   const overall = result.reduce(
     (acc, curr) => {
-      acc.totalSales    += curr.totalSales    || 0;
+      acc.totalSales += curr.totalSales || 0;
       acc.totalPurchase += curr.totalPurchase || 0;
-      acc.totalProfit   += curr.profitLoss    || 0;
+      acc.totalProfit += curr.profitLoss || 0;
       return acc;
     },
-    { totalSales: 0, totalPurchase: 0, totalProfit: 0 },
+    { totalSales: 0, totalPurchase: 0, totalProfit: 0 }
   );
 
   return {
     summary: {
-      totalSales:    parseFloat(overall.totalSales.toFixed(2)),
+      totalSales: parseFloat(overall.totalSales.toFixed(2)),
       totalPurchase: parseFloat(overall.totalPurchase.toFixed(2)),
-      totalProfit:   parseFloat(overall.totalProfit.toFixed(2)),
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-      
+      totalProfit: parseFloat(overall.totalProfit.toFixed(2)),
     },
     invoices: result,
   };

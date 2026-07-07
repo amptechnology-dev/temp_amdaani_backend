@@ -8,6 +8,7 @@ import { ApiError } from '../utils/responseHandler.js';
 import { StockTransaction } from '../models/stockTransaction.model.js';
 import { adjustProductStock ,forRemoveadjustProductStock} from '../services/product.service.js';
 import { StockTransactionType } from '../config/constants.js';
+import { User } from '../models/user.model.js';
 
 export const createPurchase = async (data) => {
   if (!data.items.length) {
@@ -512,7 +513,7 @@ export const cancelAfterPurchaseStock = async (purchaseId) => {
       if (isTransient && attempt < MAX_RETRIES - 1) {
         console.warn(`⚠️ TransientTransactionError on cancel, retrying... attempt ${attempt + 1}`);
         await new Promise((res) => setTimeout(res, 50 * (attempt + 1)));
-        continue; // ✅ retry with a fresh session
+        continue; 
       }
 
       console.error('❌ cancelAfterPurchaseStock error:', error.message);
@@ -521,8 +522,19 @@ export const cancelAfterPurchaseStock = async (purchaseId) => {
   }
 };
 
+const escapeRegex = (str = '') => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 export const queryPurchasesReport = async (filters = {}) => {
-  const { store, startDate, endDate, status } = filters;
+  const {
+    store,
+    startDate,
+    endDate,
+    status,
+    invoiceSearch = '',   // Invoice Number / Vendor Name / Vendor Mobile
+    staffName = '',       // Purchase entry kore user-er naam
+    paymentMethod = '',   // Payment mode search
+    paymentStatus = '',   // paid / unpaid / partial
+  } = filters;
 
   const matchStage = {
     status: { $ne: 'cancelled' },
@@ -544,6 +556,42 @@ export const queryPurchasesReport = async (filters = {}) => {
     matchStage.status = status;
   }
 
+  // ── Payment mode search ─────────────────────────────────────────────────
+  if (paymentMethod) {
+    matchStage.paymentMethod = { $regex: escapeRegex(paymentMethod), $options: 'i' };
+  }
+
+  // ── Payment status filter ───────────────────────────────────────────────
+  if (paymentStatus) {
+    matchStage.paymentStatus = paymentStatus;
+  }
+
+  // ── Search by Invoice Number / Vendor Name / Vendor Mobile ──────────────
+  if (invoiceSearch) {
+    const regex = new RegExp(escapeRegex(invoiceSearch), 'i');
+    matchStage.$or = [
+      { invoiceNumber: regex },
+      { vendorName: regex },
+      { vendorMobile: regex },
+    ];
+  }
+
+  // ── Staff/User wise report (resolve name -> userId(s)) ───────────────────
+  if (staffName) {
+    const matchedUsers = await User.find({
+      store: matchStage.store,
+      name: { $regex: escapeRegex(staffName), $options: 'i' },
+    })
+      .select('_id')
+      .lean();
+
+    if (matchedUsers.length === 0) {
+      return []; // kono user match korলে empty result — DB hit save
+    }
+
+    matchStage.userId = { $in: matchedUsers.map((u) => u._id) };
+  }
+
   const result = await Purchase.aggregate([
     { $match: matchStage },
 
@@ -559,20 +607,7 @@ export const queryPurchasesReport = async (filters = {}) => {
     { $unwind: { path: '$storeInfo', preserveNullAndEmptyArrays: true } },
 
     // ── STEP 1: per-item calculations ─────────────────────────────────────
-    // Mirrors generatePurchaseHTML exactly:
-    //
-    // purchaseDiscount is always stored as flat ₹ per unit
-    // (the HTML does: perUnitDiscount * qty — no percentage branching)
-    //
-    // discountAmt (line)  = purchaseDiscount × qty
-    //
-    // taxableValue:
-    //   gstRate == 0            → 0
-    //   isTaxInclusive + gst>0  → (rate / divisor - purchaseDiscount / divisor) × qty
-    //   else + gst>0            → (rate - purchaseDiscount) × qty
-    //
-    // gstAmount = taxableValue × (gstRate / 100)
-    // itemTotal = saved item.total  ← most reliable, matches invoice
+    // (কোনো change নেই — তোমার original calculation logic exactly same)
     {
       $addFields: {
         calcItems: {
@@ -585,27 +620,23 @@ export const queryPurchasesReport = async (filters = {}) => {
                   qty:          { $toDouble: { $ifNull: ['$$it.quantity', 0] } },
                   rate:         { $toDouble: { $ifNull: ['$$it.rate', 0] } },
                   gstRate:      { $toDouble: { $ifNull: ['$$it.gstRate', 0] } },
-                  // isTaxInclusive: check both field names (matches HTML logic)
                   isIncl: {
                     $ifNull: [
                       '$$it.isPurchaseTaxInclusive',
                       { $ifNull: ['$$it.isTaxInclusive', false] },
                     ],
                   },
-                  // purchaseDiscount is flat ₹ per unit — matches generatePurchaseHTML
                   discPerUnit:  { $toDouble: { $ifNull: ['$$it.purchaseDiscount', 0] } },
                   savedTotal:   { $toDouble: { $ifNull: ['$$it.total', 0] } },
                 },
                 in: {
                   $let: {
                     vars: {
-                      // GST divisor for tax-inclusive strip: 1 + gstRate/100
                       divisor: { $add: [1, { $divide: ['$$gstRate', 100] }] },
                     },
                     in: {
                       $let: {
                         vars: {
-                          // ── baseRate: ex-GST unit rate ──────────────────
                           baseRate: {
                             $cond: [
                               { $and: ['$$isIncl', { $gt: ['$$gstRate', 0] }] },
@@ -613,7 +644,6 @@ export const queryPurchasesReport = async (filters = {}) => {
                               '$$rate',
                             ],
                           },
-                          // ── discExcl: per-unit discount, ex-GST ─────────
                           discExcl: {
                             $cond: [
                               { $and: ['$$isIncl', { $gt: ['$$gstRate', 0] }] },
@@ -621,8 +651,6 @@ export const queryPurchasesReport = async (filters = {}) => {
                               '$$discPerUnit',
                             ],
                           },
-                          // ── line discount = discPerUnit × qty ────────────
-                          // matches HTML: perUnitDiscount * qty
                           lineDiscount: {
                             $round: [
                               { $multiply: ['$$discPerUnit', '$$qty'] },
@@ -633,9 +661,6 @@ export const queryPurchasesReport = async (filters = {}) => {
                         in: {
                           $let: {
                             vars: {
-                              // ── taxableValue ─────────────────────────────
-                              // gstRate == 0 → 0 (no taxable base, matches HTML)
-                              // else         → (baseRate - discExcl) × qty
                               taxableValue: {
                                 $cond: [
                                   { $eq: ['$$gstRate', 0] },
@@ -659,7 +684,6 @@ export const queryPurchasesReport = async (filters = {}) => {
                               gstRate:     '$$gstRate',
                               lineDiscount: '$$lineDiscount',
                               taxableValue: { $round: ['$$taxableValue', 2] },
-                              // gstAmount = taxableValue × gstRate%
                               gstAmount: {
                                 $round: [
                                   {
@@ -671,7 +695,6 @@ export const queryPurchasesReport = async (filters = {}) => {
                                   2,
                                 ],
                               },
-                              // itemTotal: use saved value — exact invoice match
                               itemTotal: {
                                 $cond: [
                                   { $gt: ['$$savedTotal', 0] },
@@ -694,28 +717,18 @@ export const queryPurchasesReport = async (filters = {}) => {
     },
 
     // ── STEP 2: invoice-level totals ──────────────────────────────────────
-    // discountTotal → Σ lineDiscount from items (matches HTML totalDiscount loop)
-    // taxableValue  → Σ item taxableValue
-    // gstTotal      → Σ item gstAmount
-    // netAmount     → saved grandTotal (exact invoice match)
     {
       $addFields: {
         totalItemsQty: { $sum: '$calcItems.qty' },
-
-        // ✅ Sum of (purchaseDiscount × qty) per item — matches HTML exactly
         discountTotal: {
           $round: [{ $sum: '$calcItems.lineDiscount' }, 2],
         },
-
         taxableValue: {
           $round: [{ $sum: '$calcItems.taxableValue' }, 2],
         },
-
         gstTotal: {
           $round: [{ $sum: '$calcItems.gstAmount' }, 2],
         },
-
-        // Use saved grandTotal for exact invoice match
         netAmount: {
           $round: [
             {

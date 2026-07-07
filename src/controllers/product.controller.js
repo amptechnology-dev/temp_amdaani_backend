@@ -99,3 +99,90 @@ export const getProductSuggestions = expressAsyncHandler(async (req, res) => {
 
   return new ApiResponse(200, data, 'Product suggestions fetched successfully!').send(res);
 });
+
+export const getSaleReport = expressAsyncHandler(async (req, res) => {
+  const {
+    range,
+    startDate,
+    endDate,
+    search = '',
+    invoiceSearch = '',
+    salesmanName = '',   // <-- changed from salesman(id) to salesmanName
+    paymentMethod = '',
+    paymentStatus = '',
+    billStatus = 'active',
+  } = req.query;
+
+  let start = null;
+  let end = null;
+  const now = new Date();
+
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+  const endOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+
+  if (range) {
+    switch (range) {
+      case 'today':
+        start = startOfDay(now);
+        end = endOfDay(now);
+        break;
+
+      case 'yesterday': {
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        start = startOfDay(yesterday);
+        end = endOfDay(yesterday);
+        break;
+      }
+
+      case 'thisWeek': {
+        const day = now.getDay();
+        const diffToMonday = day === 0 ? 6 : day - 1;
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - diffToMonday);
+        start = startOfDay(monday);
+        end = endOfDay(now);
+        break;
+      }
+
+      case 'thisMonth':
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+        end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        break;
+
+      case 'previousMonth':
+        start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+        break;
+
+      case 'year':
+        start = new Date(now.getFullYear(), 0, 1);
+        end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+        break;
+
+      case 'custom':
+        start = startDate ? new Date(startDate) : null;
+        end = endDate ? new Date(endDate) : null;
+        break;
+    }
+  } else {
+    start = startDate ? new Date(startDate) : null;
+    end = endDate ? new Date(endDate) : null;
+  }
+
+  if (start && isNaN(start.getTime())) start = null;
+  if (end && isNaN(end.getTime())) end = null;
+
+  const products = await productService.SaleReportService(req.user.store, {
+    startDate: start,
+    endDate: end,
+    search,
+    invoiceSearch,
+    salesmanName,
+    paymentMethod,
+    paymentStatus,
+    billStatus,
+  });
+
+  return new ApiResponse(200, products, 'Products fetched successfully!').send(res);
+});

@@ -21,5 +21,6 @@ router.route('/stock-transaction/:id').get(productController.getStockTransaction
 router.route('/sales').get(productController.getAllProductsWithSales);
 router.route('/carry-forward-stock').post(productController.carryForwardStock);
 router.route("/suggestions").get(productController.getProductSuggestions);
+router.route("/sale-report").get(productController.getSaleReport);
 
 export default router;

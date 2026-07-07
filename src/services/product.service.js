@@ -5,6 +5,7 @@ import { Invoice } from '../models/invoice.model.js';
 import { handleDuplicateKeyError } from '../utils/dbErrorHandler.js';
 import { StockTransactionType } from '../config/constants.js';
 import { StockTransaction } from '../models/stockTransaction.model.js';
+import {User} from '../models/user.model.js';
 import mongoose from 'mongoose';
 
 export const createProduct = async (data, session = null) => {
@@ -1115,4 +1116,129 @@ export const getProductSuggestions = async (storeId, search = '') => {
     })
     .limit(10)
     .lean();
+};
+
+const escapeRegex = (str = '') => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export const SaleReportService = async (storeId, filters = {}) => {
+  const {
+    startDate,
+    endDate,
+    search = '',
+    invoiceSearch = '',
+    salesmanName = '',    // <-- name diye search
+    paymentMethod = '',
+    paymentStatus = '',
+    billStatus = 'active',
+  } = filters;
+
+  const start = startDate instanceof Date && !isNaN(startDate) ? startDate : null;
+  const end = endDate instanceof Date && !isNaN(endDate) ? endDate : null;
+
+  if (end) {
+    end.setHours(23, 59, 59, 999);
+  }
+
+  const storeObjectId = new mongoose.Types.ObjectId(storeId);
+
+  const invoiceMatch = { store: storeObjectId };
+
+  if (billStatus && billStatus !== 'all') {
+    invoiceMatch.status = billStatus;
+  }
+
+  if (start && end) {
+    invoiceMatch.invoiceDate = { $gte: start, $lte: end };
+  } else if (start) {
+    invoiceMatch.invoiceDate = { $gte: start };
+  } else if (end) {
+    invoiceMatch.invoiceDate = { $lte: end };
+  }
+
+  // ---- Salesman name -> resolve to userId(s) first ----
+  if (salesmanName) {
+    const matchedUsers = await User.find({
+      store: storeObjectId,
+      name: { $regex: escapeRegex(salesmanName), $options: 'i' },
+    })
+      .select('_id')
+      .lean();
+
+    // Kono user match na korle, sathe sathe empty result return kore dao
+    // (invoiceMatch e userId: { $in: [] } dile aggregation nijei empty dibe,
+    // kintu explicit return kora beshi efficient - DB hit save hoy)
+    if (matchedUsers.length === 0) {
+      return [];
+    }
+
+    invoiceMatch.userId = { $in: matchedUsers.map((u) => u._id) };
+  }
+
+  if (paymentMethod) {
+    invoiceMatch.paymentMethod = { $regex: escapeRegex(paymentMethod), $options: 'i' };
+  }
+
+  if (paymentStatus) {
+    invoiceMatch.paymentStatus = paymentStatus;
+  }
+
+  if (invoiceSearch) {
+    const regex = new RegExp(escapeRegex(invoiceSearch), 'i');
+    invoiceMatch.$or = [
+      { invoiceNumber: regex },
+      { customerName: regex },
+      { customerMobile: regex },
+    ];
+  }
+
+  return Product.aggregate([
+    {
+      $match: {
+        store: storeObjectId,
+        name: { $regex: escapeRegex(search), $options: 'i' },
+      },
+    },
+
+    {
+      $lookup: {
+        from: 'invoices',
+        let: { productId: '$_id' },
+        pipeline: [
+          { $match: invoiceMatch },
+          { $unwind: '$items' },
+          {
+            $match: {
+              $expr: { $eq: ['$items.product', '$$productId'] },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalQuantity: { $sum: '$items.quantity' },
+              totalRevenue: {
+                $sum: { $multiply: ['$items.quantity', '$items.sellingPrice'] },
+              },
+            },
+          },
+        ],
+        as: 'salesData',
+      },
+    },
+
+    {
+      $project: {
+        name: 1,
+        sku: 1,
+        hsn: 1,
+        unit: 1,
+        sellingPrice: 1,
+        totalSold: { $ifNull: [{ $arrayElemAt: ['$salesData.totalQuantity', 0] }, 0] },
+        totalRevenue: { $ifNull: [{ $arrayElemAt: ['$salesData.totalRevenue', 0] }, 0] },
+      },
+    },
+
+    { $match: { totalSold: { $gt: 0 } } },
+
+    { $sort: { totalRevenue: -1 } },
+  ]);
 };

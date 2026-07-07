@@ -136,9 +136,15 @@ export const changePurchaseStatus = expressAsyncHandler(async (req, res) => {
 });
 
 export const getPurchasesReport = expressAsyncHandler(async (req, res) => {
-  const filters = pick(req.query, ['status', 'startDate', 'endDate']);
-
-  console.log('hsdfb', filters);
+  const filters = pick(req.query, [
+    'status',
+    'startDate',
+    'endDate',
+    'invoiceSearch',
+    'staffName',
+    'paymentMethod',
+    'paymentStatus',
+  ]);
 
   const { range } = req.query;
 
@@ -149,7 +155,6 @@ export const getPurchasesReport = expressAsyncHandler(async (req, res) => {
   let startDate;
   let endDate;
 
-  // ✅ First priority: custom date range (accepts timestamp OR ISO string)
   if (req.query.startDate && req.query.endDate) {
     const rawStart = req.query.startDate;
     const rawEnd = req.query.endDate;
@@ -163,34 +168,36 @@ export const getPurchasesReport = expressAsyncHandler(async (req, res) => {
         message: 'Invalid date format.',
       });
     }
-  }
-
-  // ✅ this month
-  else if (range === 'thisMonth') {
+  } else if (range === 'today') {
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  } else if (range === 'yesterday') {
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    startDate = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0, 0);
+    endDate = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
+  } else if (range === 'thisWeek') {
+    const day = now.getDay();
+    const diffToMonday = day === 0 ? 6 : day - 1;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - diffToMonday);
+    startDate = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate(), 0, 0, 0, 0);
+    endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  } else if (range === 'thisMonth') {
     startDate = new Date(now.getFullYear(), now.getMonth(), 1);
     endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-  }
-
-  // ✅ previous month
-  else if (range === 'previousMonth') {
+  } else if (range === 'previousMonth') {
     startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-  }
-
-  // ✅ current year
-  else if (range === 'year') {
+  } else if (range === 'year') {
     startDate = new Date(now.getFullYear(), 0, 1);
     endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
   }
 
-  // ✅ apply date filter
   if (startDate && endDate) {
     filters.startDate = startDate;
     filters.endDate = endDate;
   }
-
-  console.log('start date', startDate);
-  console.log('endDate', endDate);
 
   const purchases = await purchaseService.queryPurchasesReport(filters);
 

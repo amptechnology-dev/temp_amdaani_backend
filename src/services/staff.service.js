@@ -1,7 +1,7 @@
-import mongoose from "mongoose";
-import { Staff } from "../models/staff.model.js";
-import { Store } from "../models/store.model.js";
-import { ApiError } from "../utils/responseHandler.js";
+import mongoose from 'mongoose';
+import { Staff } from '../models/staff.model.js';
+import { Store } from '../models/store.model.js';
+import { ApiError } from '../utils/responseHandler.js';
 
 export const createStaff = async (data) => {
   return Staff.create(data);
@@ -12,21 +12,21 @@ export const getAllStaff = async () => {
     {
       $lookup: {
         from: Store.collection.name, // "stores"
-        localField: "_id",
-        foreignField: "registeredBy",
-        as: "registeredStores",
+        localField: '_id',
+        foreignField: 'registeredBy',
+        as: 'registeredStores',
       },
     },
     {
       $addFields: {
         totalStoreRegistrations: {
-          $size: "$registeredStores",
+          $size: '$registeredStores',
         },
       },
     },
     {
       $project: {
-        registeredStores: 0, 
+        registeredStores: 0,
       },
     },
     {
@@ -66,6 +66,8 @@ export const getStoresByStaff = async (staffId) => {
         registeredBy: new mongoose.Types.ObjectId(staffId),
       },
     },
+
+    // Get Store Owner(User)
     {
       $lookup: {
         from: "users",
@@ -74,6 +76,17 @@ export const getStoresByStaff = async (staffId) => {
         as: "user",
       },
     },
+
+    // Get Active Subscription
+    {
+      $lookup: {
+        from: "subscriptions",
+        localField: "_id",
+        foreignField: "store",
+        as: "subscriptions",
+      },
+    },
+
     {
       $addFields: {
         userId: {
@@ -84,14 +97,32 @@ export const getStoresByStaff = async (staffId) => {
             null,
           ],
         },
+
+        subscription: {
+          $arrayElemAt: [
+            {
+              $filter: {
+                input: "$subscriptions",
+                as: "sub",
+                cond: {
+                  $eq: ["$$sub.status", "active"],
+                },
+              },
+            },
+            0,
+          ],
+        },
       },
     },
+
     {
       $project: {
         user: 0,
+        subscriptions: 0,
         __v: 0,
       },
     },
+
     {
       $sort: {
         createdAt: -1,

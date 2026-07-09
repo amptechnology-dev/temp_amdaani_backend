@@ -24,6 +24,7 @@ router.get('/transactions', purchaseController.getAllVendorPaymentsByStore);
 //router.get('/product-wise', purchaseController.getProductWiseInvoices);
 //router.put('/status/:id', validate(purchaseSchema.changePurchaseStatus), purchaseController.changePurchaseStatus);
 router.put('/status/:id', validate(purchaseSchema.changePurchaseStatus), purchaseController.changePurchaseStatus);
+router.get('/report/suggestions', authenticate, purchaseController.getPurchaseSearchSuggestions);
 router.get('/report', purchaseController.getPurchasesReport);
 router.get('/vendor-wise-report', purchaseController.getVendorWisePurchaseReport);
 

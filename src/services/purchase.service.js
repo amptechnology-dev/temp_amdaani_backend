@@ -6,7 +6,7 @@ import { updateStockAfterPurchase } from '../services/product.service.js';
 import { createVendorPayment, getVendorPaymentsByPurchase, updateVendorPayment } from './vendorPayment.service.js';
 import { ApiError } from '../utils/responseHandler.js';
 import { StockTransaction } from '../models/stockTransaction.model.js';
-import { adjustProductStock ,forRemoveadjustProductStock} from '../services/product.service.js';
+import { adjustProductStock, forRemoveadjustProductStock } from '../services/product.service.js';
 import { StockTransactionType } from '../config/constants.js';
 import { User } from '../models/user.model.js';
 
@@ -513,7 +513,7 @@ export const cancelAfterPurchaseStock = async (purchaseId) => {
       if (isTransient && attempt < MAX_RETRIES - 1) {
         console.warn(`⚠️ TransientTransactionError on cancel, retrying... attempt ${attempt + 1}`);
         await new Promise((res) => setTimeout(res, 50 * (attempt + 1)));
-        continue; 
+        continue;
       }
 
       console.error('❌ cancelAfterPurchaseStock error:', error.message);
@@ -530,15 +530,19 @@ export const queryPurchasesReport = async (filters = {}) => {
     startDate,
     endDate,
     status,
-    invoiceSearch = '',   // Invoice Number / Vendor Name / Vendor Mobile
-    staffName = '',       // Purchase entry kore user-er naam
-    paymentMethod = '',   // Payment mode search
-    paymentStatus = '',   // paid / unpaid / partial
+    invoiceSearch = '', // Invoice Number / Vendor Name / Vendor Mobile
+    staffName = '', // Purchase entry kore user-er naam
+    paymentMethod = '', // Payment mode search
+    paymentStatus = '', // paid / unpaid / partial
   } = filters;
 
-  const matchStage = {
-    status: { $ne: 'cancelled' },
-  };
+  const matchStage = {};
+
+  if (status) {
+    matchStage.status = status; // explicit filter wins, whatever the value
+  } else {
+    matchStage.status = { $ne: 'cancelled' }; // default: hide cancelled when no filter chosen
+  }
 
   if (store) {
     matchStage.store = new mongoose.Types.ObjectId(String(store));
@@ -569,11 +573,7 @@ export const queryPurchasesReport = async (filters = {}) => {
   // ── Search by Invoice Number / Vendor Name / Vendor Mobile ──────────────
   if (invoiceSearch) {
     const regex = new RegExp(escapeRegex(invoiceSearch), 'i');
-    matchStage.$or = [
-      { invoiceNumber: regex },
-      { vendorName: regex },
-      { vendorMobile: regex },
-    ];
+    matchStage.$or = [{ invoiceNumber: regex }, { vendorName: regex }, { vendorMobile: regex }];
   }
 
   // ── Staff/User wise report (resolve name -> userId(s)) ───────────────────
@@ -617,17 +617,14 @@ export const queryPurchasesReport = async (filters = {}) => {
             in: {
               $let: {
                 vars: {
-                  qty:          { $toDouble: { $ifNull: ['$$it.quantity', 0] } },
-                  rate:         { $toDouble: { $ifNull: ['$$it.rate', 0] } },
-                  gstRate:      { $toDouble: { $ifNull: ['$$it.gstRate', 0] } },
+                  qty: { $toDouble: { $ifNull: ['$$it.quantity', 0] } },
+                  rate: { $toDouble: { $ifNull: ['$$it.rate', 0] } },
+                  gstRate: { $toDouble: { $ifNull: ['$$it.gstRate', 0] } },
                   isIncl: {
-                    $ifNull: [
-                      '$$it.isPurchaseTaxInclusive',
-                      { $ifNull: ['$$it.isTaxInclusive', false] },
-                    ],
+                    $ifNull: ['$$it.isPurchaseTaxInclusive', { $ifNull: ['$$it.isTaxInclusive', false] }],
                   },
-                  discPerUnit:  { $toDouble: { $ifNull: ['$$it.purchaseDiscount', 0] } },
-                  savedTotal:   { $toDouble: { $ifNull: ['$$it.total', 0] } },
+                  discPerUnit: { $toDouble: { $ifNull: ['$$it.purchaseDiscount', 0] } },
+                  savedTotal: { $toDouble: { $ifNull: ['$$it.total', 0] } },
                 },
                 in: {
                   $let: {
@@ -652,10 +649,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                             ],
                           },
                           lineDiscount: {
-                            $round: [
-                              { $multiply: ['$$discPerUnit', '$$qty'] },
-                              2,
-                            ],
+                            $round: [{ $multiply: ['$$discPerUnit', '$$qty'] }, 2],
                           },
                         },
                         in: {
@@ -669,10 +663,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                                     $max: [
                                       0,
                                       {
-                                        $multiply: [
-                                          { $subtract: ['$$baseRate', '$$discExcl'] },
-                                          '$$qty',
-                                        ],
+                                        $multiply: [{ $subtract: ['$$baseRate', '$$discExcl'] }, '$$qty'],
                                       },
                                     ],
                                   },
@@ -680,27 +671,20 @@ export const queryPurchasesReport = async (filters = {}) => {
                               },
                             },
                             in: {
-                              qty:         '$$qty',
-                              gstRate:     '$$gstRate',
+                              qty: '$$qty',
+                              gstRate: '$$gstRate',
                               lineDiscount: '$$lineDiscount',
                               taxableValue: { $round: ['$$taxableValue', 2] },
                               gstAmount: {
                                 $round: [
                                   {
-                                    $multiply: [
-                                      '$$taxableValue',
-                                      { $divide: ['$$gstRate', 100] },
-                                    ],
+                                    $multiply: ['$$taxableValue', { $divide: ['$$gstRate', 100] }],
                                   },
                                   2,
                                 ],
                               },
                               itemTotal: {
-                                $cond: [
-                                  { $gt: ['$$savedTotal', 0] },
-                                  { $round: ['$$savedTotal', 2] },
-                                  0,
-                                ],
+                                $cond: [{ $gt: ['$$savedTotal', 0] }, { $round: ['$$savedTotal', 2] }, 0],
                               },
                             },
                           },
@@ -732,11 +716,7 @@ export const queryPurchasesReport = async (filters = {}) => {
         netAmount: {
           $round: [
             {
-              $cond: [
-                { $gt: [{ $ifNull: ['$grandTotal', 0] }, 0] },
-                '$grandTotal',
-                { $sum: '$calcItems.itemTotal' },
-              ],
+              $cond: [{ $gt: [{ $ifNull: ['$grandTotal', 0] }, 0] }, '$grandTotal', { $sum: '$calcItems.itemTotal' }],
             },
             2,
           ],
@@ -757,22 +737,13 @@ export const queryPurchasesReport = async (filters = {}) => {
     {
       $addFields: {
         cgstTotal: {
-          $round: [
-            { $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }] },
-            2,
-          ],
+          $round: [{ $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }] }, 2],
         },
         sgstTotal: {
-          $round: [
-            { $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }] },
-            2,
-          ],
+          $round: [{ $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }] }, 2],
         },
         igstTotal: {
-          $round: [
-            { $cond: [{ $eq: ['$isIgst', true] }, '$gstTotal', 0] },
-            2,
-          ],
+          $round: [{ $cond: [{ $eq: ['$isIgst', true] }, '$gstTotal', 0] }, 2],
         },
       },
     },
@@ -784,6 +755,52 @@ export const queryPurchasesReport = async (filters = {}) => {
   ]);
 
   return result;
+};
+
+
+
+export const getSearchSuggestions = async ({ store, q }) => {
+  const regex = new RegExp(escapeRegex(q), 'i');
+  const storeId = new mongoose.Types.ObjectId(String(store));
+
+  const [result] = await Purchase.aggregate([
+    {
+      $match: {
+        store: storeId,
+        status: { $ne: 'cancelled' },
+        $or: [{ invoiceNumber: regex }, { vendorName: regex }, { vendorMobile: regex }],
+      },
+    },
+    { $sort: { date: -1 } },
+    { $limit: 300 }, // cap the scan so this stays fast on large collections
+    {
+      $facet: {
+        invoiceNumbers: [
+          { $match: { invoiceNumber: regex } },
+          { $group: { _id: '$invoiceNumber' } },
+          { $limit: 5 },
+        ],
+        vendorNames: [
+          { $match: { vendorName: regex } },
+          { $group: { _id: '$vendorName' } },
+          { $limit: 5 },
+        ],
+        vendorMobiles: [
+          { $match: { vendorMobile: regex } },
+          { $group: { _id: '$vendorMobile' } },
+          { $limit: 5 },
+        ],
+      },
+    },
+  ]);
+
+  const { invoiceNumbers = [], vendorNames = [], vendorMobiles = [] } = result || {};
+
+  return [
+    ...invoiceNumbers.filter((d) => d._id).map((d) => ({ type: 'invoice', label: d._id, value: d._id })),
+    ...vendorNames.filter((d) => d._id).map((d) => ({ type: 'vendor', label: d._id, value: d._id })),
+    ...vendorMobiles.filter((d) => d._id).map((d) => ({ type: 'mobile', label: d._id, value: d._id })),
+  ];
 };
 
 export const getVendorWisePurchaseReport = async (filters = {}) => {

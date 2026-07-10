@@ -3,12 +3,12 @@ import app from './app.js';
 import config from './config/config.js';
 import logger from './config/logger.js';
 import cronJobs from './jobs/cron.jobs.js';
-//import dns from 'dns';
+import dns from 'dns';
 
 let server;
 // Force Node.js to use Google DNS
-//dns.setDefaultResultOrder('ipv4first');
-//dns.setServers(['8.8.8.8', '1.1.1.1']);
+dns.setDefaultResultOrder('ipv4first');
+dns.setServers(['8.8.8.8', '1.1.1.1']);
 mongoose.connect(config.mongoose.url).then(() => {
   logger.info(`Env: ${config.env}`);
   logger.info(`Connected to MongoDB at ${mongoose.connection.host}`);

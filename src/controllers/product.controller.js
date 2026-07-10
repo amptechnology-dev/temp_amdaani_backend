@@ -101,13 +101,14 @@ export const getProductSuggestions = expressAsyncHandler(async (req, res) => {
 });
 
 export const getSaleReport = expressAsyncHandler(async (req, res) => {
+  const options = pick(req.query, ['page', 'limit', 'sortBy', 'order']);
+
   const {
     range,
     startDate,
     endDate,
-    search = '',
     invoiceSearch = '',
-    salesmanName = '',   // <-- changed from salesman(id) to salesmanName
+    salesmanName = '',
     paymentMethod = '',
     paymentStatus = '',
     billStatus = 'active',
@@ -173,16 +174,19 @@ export const getSaleReport = expressAsyncHandler(async (req, res) => {
   if (start && isNaN(start.getTime())) start = null;
   if (end && isNaN(end.getTime())) end = null;
 
-  const products = await productService.SaleReportService(req.user.store, {
-    startDate: start,
-    endDate: end,
-    search,
-    invoiceSearch,
-    salesmanName,
-    paymentMethod,
-    paymentStatus,
-    billStatus,
-  });
+  const result = await productService.SaleReportService(
+    req.user.store,
+    {
+      startDate: start,
+      endDate: end,
+      invoiceSearch,
+      salesmanName,
+      paymentMethod,
+      paymentStatus,
+      billStatus,
+    },
+    options
+  );
 
-  return new ApiResponse(200, products, 'Products fetched successfully!').send(res);
+  return new ApiResponse(200, result, 'Sale report fetched successfully').send(res);
 });

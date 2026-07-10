@@ -7,6 +7,7 @@ import { StockTransactionType } from '../config/constants.js';
 import { StockTransaction } from '../models/stockTransaction.model.js';
 import {User} from '../models/user.model.js';
 import mongoose from 'mongoose';
+import { queryInvoices } from '../services/invoice.service.js';
 
 export const createProduct = async (data, session = null) => {
   try {
@@ -1126,32 +1127,30 @@ export const getProductSuggestions = async (storeId, search = "") => {
 
 const escapeRegex = (str = '') => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-export const SaleReportService = async (storeId, filters = {}) => {
+export const SaleReportService = async (storeId, filters = {}, options = {}) => {
   const {
     startDate,
     endDate,
-    search = '',
     invoiceSearch = '',
-    salesmanName = '',    // <-- name diye search
+    salesmanName = '',
     paymentMethod = '',
     paymentStatus = '',
     billStatus = 'active',
   } = filters;
 
-  const start = startDate instanceof Date && !isNaN(startDate) ? startDate : null;
-  const end = endDate instanceof Date && !isNaN(endDate) ? endDate : null;
-
-  if (end) {
-    end.setHours(23, 59, 59, 999);
-  }
-
-  const storeObjectId = new mongoose.Types.ObjectId(storeId);
+  const storeObjectId = new mongoose.Types.ObjectId(String(storeId));
 
   const invoiceMatch = { store: storeObjectId };
 
+  // ── Bill status ──────────────────────────────────────────────────────
   if (billStatus && billStatus !== 'all') {
     invoiceMatch.status = billStatus;
   }
+
+  // ── Date range ────────────────────────────────────────────────────────
+  const start = startDate instanceof Date && !isNaN(startDate) ? startDate : null;
+  const end = endDate instanceof Date && !isNaN(endDate) ? endDate : null;
+  if (end) end.setHours(23, 59, 59, 999);
 
   if (start && end) {
     invoiceMatch.invoiceDate = { $gte: start, $lte: end };
@@ -1161,7 +1160,7 @@ export const SaleReportService = async (storeId, filters = {}) => {
     invoiceMatch.invoiceDate = { $lte: end };
   }
 
-  // ---- Salesman name -> resolve to userId(s) first ----
+  // ── Salesman name -> userId $in ──────────────────────────────────────
   if (salesmanName) {
     const matchedUsers = await User.find({
       store: storeObjectId,
@@ -1170,24 +1169,25 @@ export const SaleReportService = async (storeId, filters = {}) => {
       .select('_id')
       .lean();
 
-    // Kono user match na korle, sathe sathe empty result return kore dao
-    // (invoiceMatch e userId: { $in: [] } dile aggregation nijei empty dibe,
-    // kintu explicit return kora beshi efficient - DB hit save hoy)
     if (matchedUsers.length === 0) {
-      return [];
+      // queryInvoices-er response shape mimic korte hobe empty case-eo
+      return { docs: [], totalDocs: 0, page: 1, limit: Number(options.limit) || 20, totalPages: 0 };
     }
 
     invoiceMatch.userId = { $in: matchedUsers.map((u) => u._id) };
   }
 
+  // ── Payment mode ──────────────────────────────────────────────────────
   if (paymentMethod) {
     invoiceMatch.paymentMethod = { $regex: escapeRegex(paymentMethod), $options: 'i' };
   }
 
+  // ── Payment status ────────────────────────────────────────────────────
   if (paymentStatus) {
     invoiceMatch.paymentStatus = paymentStatus;
   }
 
+  // ── Invoice Number / Customer Name / Customer Mobile ─────────────────
   if (invoiceSearch) {
     const regex = new RegExp(escapeRegex(invoiceSearch), 'i');
     invoiceMatch.$or = [
@@ -1197,54 +1197,9 @@ export const SaleReportService = async (storeId, filters = {}) => {
     ];
   }
 
-  return Product.aggregate([
-    {
-      $match: {
-        store: storeObjectId,
-        name: { $regex: escapeRegex(search), $options: 'i' },
-      },
-    },
-
-    {
-      $lookup: {
-        from: 'invoices',
-        let: { productId: '$_id' },
-        pipeline: [
-          { $match: invoiceMatch },
-          { $unwind: '$items' },
-          {
-            $match: {
-              $expr: { $eq: ['$items.product', '$$productId'] },
-            },
-          },
-          {
-            $group: {
-              _id: null,
-              totalQuantity: { $sum: '$items.quantity' },
-              totalRevenue: {
-                $sum: { $multiply: ['$items.quantity', '$items.sellingPrice'] },
-              },
-            },
-          },
-        ],
-        as: 'salesData',
-      },
-    },
-
-    {
-      $project: {
-        name: 1,
-        sku: 1,
-        hsn: 1,
-        unit: 1,
-        sellingPrice: 1,
-        totalSold: { $ifNull: [{ $arrayElemAt: ['$salesData.totalQuantity', 0] }, 0] },
-        totalRevenue: { $ifNull: [{ $arrayElemAt: ['$salesData.totalRevenue', 0] }, 0] },
-      },
-    },
-
-    { $match: { totalSold: { $gt: 0 } } },
-
-    { $sort: { totalRevenue: -1 } },
-  ]);
+  // ── Reuse the EXACT same aggregation/calculation as queryInvoices ─────
+  // Eta guarantee kore je response shape ar sob calculation
+  // (discountTotal, taxableValue, gstTotal, cgst/sgst/igst, totalAmount)
+  // queryInvoices er sathe 100% match korবে।
+  return queryInvoices(invoiceMatch, options);
 };

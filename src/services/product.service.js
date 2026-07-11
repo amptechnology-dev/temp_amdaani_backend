@@ -8,7 +8,7 @@ import { StockTransaction } from '../models/stockTransaction.model.js';
 import { User } from '../models/user.model.js';
 import mongoose from 'mongoose';
 import { queryInvoices } from '../services/invoice.service.js';
-import { Invoice } from '../models/invoice.model.js';
+//import { Invoice } from "../models/invoice.model.js"
 
 export const createProduct = async (data, session = null) => {
   try {

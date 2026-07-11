@@ -1113,9 +1113,21 @@ export const getSaleSearchSuggestions = async ({ store, q }) => {
     { $limit: 300 }, // cap the scan so this stays fast on large collections
     {
       $facet: {
-        invoiceNumbers: [{ $match: { invoiceNumber: regex } }, { $group: { _id: '$invoiceNumber' } }, { $limit: 5 }],
-        customerNames: [{ $match: { customerName: regex } }, { $group: { _id: '$customerName' } }, { $limit: 5 }],
-        customerMobiles: [{ $match: { customerMobile: regex } }, { $group: { _id: '$customerMobile' } }, { $limit: 5 }],
+        invoiceNumbers: [
+          { $match: { invoiceNumber: regex } },
+          { $group: { _id: '$invoiceNumber' } },
+          { $limit: 5 },
+        ],
+        customerNames: [
+          { $match: { customerName: regex } },
+          { $group: { _id: '$customerName' } },
+          { $limit: 5 },
+        ],
+        customerMobiles: [
+          { $match: { customerMobile: regex } },
+          { $group: { _id: '$customerMobile' } },
+          { $limit: 5 },
+        ],
       },
     },
   ]);

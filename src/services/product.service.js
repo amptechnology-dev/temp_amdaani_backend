@@ -1106,37 +1106,16 @@ export const getSaleSearchSuggestions = async ({ store, q }) => {
       $match: {
         store: storeId,
         status: { $ne: 'cancelled' },
+        $or: [{ invoiceNumber: regex }, { customerName: regex }, { customerMobile: regex }],
       },
     },
-    { $sort: { date: -1 } },
+    { $sort: { invoiceDate: -1 } },
     { $limit: 300 }, // cap the scan so this stays fast on large collections
-    {
-      $lookup: {
-        from: 'customers',
-        localField: 'customer',
-        foreignField: '_id',
-        as: 'customerInfo',
-      },
-    },
-    { $unwind: { path: '$customerInfo', preserveNullAndEmptyArrays: true } },
-    {
-      $match: {
-        $or: [{ invoiceNumber: regex }, { 'customerInfo.name': regex }, { 'customerInfo.mobile': regex }],
-      },
-    },
     {
       $facet: {
         invoiceNumbers: [{ $match: { invoiceNumber: regex } }, { $group: { _id: '$invoiceNumber' } }, { $limit: 5 }],
-        customerNames: [
-          { $match: { 'customerInfo.name': regex } },
-          { $group: { _id: '$customerInfo.name' } },
-          { $limit: 5 },
-        ],
-        customerMobiles: [
-          { $match: { 'customerInfo.mobile': regex } },
-          { $group: { _id: '$customerInfo.mobile' } },
-          { $limit: 5 },
-        ],
+        customerNames: [{ $match: { customerName: regex } }, { $group: { _id: '$customerName' } }, { $limit: 5 }],
+        customerMobiles: [{ $match: { customerMobile: regex } }, { $group: { _id: '$customerMobile' } }, { $limit: 5 }],
       },
     },
   ]);

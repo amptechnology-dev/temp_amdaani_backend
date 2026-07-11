@@ -8,6 +8,7 @@ import { StockTransaction } from '../models/stockTransaction.model.js';
 import { User } from '../models/user.model.js';
 import mongoose from 'mongoose';
 import { queryInvoices } from '../services/invoice.service.js';
+import { Invoice } from '../models/invoice.model.js';
 
 export const createProduct = async (data, session = null) => {
   try {
@@ -1100,7 +1101,7 @@ export const getSaleSearchSuggestions = async ({ store, q }) => {
   const regex = new RegExp(escapeRegex(q), 'i');
   const storeId = new mongoose.Types.ObjectId(String(store));
 
-  const [result] = await Sale.aggregate([
+  const [result] = await Invoice.aggregate([
     {
       $match: {
         store: storeId,

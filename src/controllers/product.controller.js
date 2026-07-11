@@ -100,6 +100,21 @@ export const getProductSuggestions = expressAsyncHandler(async (req, res) => {
   return new ApiResponse(200, data, 'Product suggestions fetched successfully!').send(res);
 });
 
+export const getSaleSearchSuggestions = expressAsyncHandler(async (req, res) => {
+  const { q } = req.query;
+
+  if (!q || q.trim().length < 2) {
+    return new ApiResponse(200, [], 'Query too short').send(res);
+  }
+
+  const suggestions = await productService.getSaleSearchSuggestions({
+    store: req.user.store,
+    q: q.trim(),
+  });
+
+  return new ApiResponse(200, suggestions, 'Suggestions fetched successfully').send(res);
+});
+
 export const getSaleReport = expressAsyncHandler(async (req, res) => {
   const options = pick(req.query, ['page', 'limit', 'sortBy', 'order']);
 

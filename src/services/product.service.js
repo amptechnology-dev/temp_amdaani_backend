@@ -5,7 +5,7 @@ import { Invoice } from '../models/invoice.model.js';
 import { handleDuplicateKeyError } from '../utils/dbErrorHandler.js';
 import { StockTransactionType } from '../config/constants.js';
 import { StockTransaction } from '../models/stockTransaction.model.js';
-import {User} from '../models/user.model.js';
+import { User } from '../models/user.model.js';
 import mongoose from 'mongoose';
 import { queryInvoices } from '../services/invoice.service.js';
 
@@ -1096,19 +1096,68 @@ export const carryForwardStockToNextFinancialYear = async (storeId) => {
   };
 };
 
-export const getProductSuggestions = async (storeId, search = "") => {
+export const getSaleSearchSuggestions = async ({ store, q }) => {
+  const regex = new RegExp(escapeRegex(q), 'i');
+  const storeId = new mongoose.Types.ObjectId(String(store));
+
+  const [result] = await Sale.aggregate([
+    {
+      $match: {
+        store: storeId,
+        status: { $ne: 'cancelled' },
+      },
+    },
+    { $sort: { date: -1 } },
+    { $limit: 300 }, // cap the scan so this stays fast on large collections
+    {
+      $lookup: {
+        from: 'customers',
+        localField: 'customer',
+        foreignField: '_id',
+        as: 'customerInfo',
+      },
+    },
+    { $unwind: { path: '$customerInfo', preserveNullAndEmptyArrays: true } },
+    {
+      $match: {
+        $or: [{ invoiceNumber: regex }, { 'customerInfo.name': regex }, { 'customerInfo.mobile': regex }],
+      },
+    },
+    {
+      $facet: {
+        invoiceNumbers: [{ $match: { invoiceNumber: regex } }, { $group: { _id: '$invoiceNumber' } }, { $limit: 5 }],
+        customerNames: [
+          { $match: { 'customerInfo.name': regex } },
+          { $group: { _id: '$customerInfo.name' } },
+          { $limit: 5 },
+        ],
+        customerMobiles: [
+          { $match: { 'customerInfo.mobile': regex } },
+          { $group: { _id: '$customerInfo.mobile' } },
+          { $limit: 5 },
+        ],
+      },
+    },
+  ]);
+
+  const { invoiceNumbers = [], customerNames = [], customerMobiles = [] } = result || {};
+
+  return [
+    ...invoiceNumbers.filter((d) => d._id).map((d) => ({ type: 'invoice', label: d._id, value: d._id })),
+    ...customerNames.filter((d) => d._id).map((d) => ({ type: 'customer', label: d._id, value: d._id })),
+    ...customerMobiles.filter((d) => d._id).map((d) => ({ type: 'mobile', label: d._id, value: d._id })),
+  ];
+};
+
+export const getProductSuggestions = async (storeId, search = '') => {
   const query = {
     store: new mongoose.Types.ObjectId(storeId),
-    status: "active",
+    status: 'active',
   };
 
   // If no search query, return latest 4 products
   if (!search || !search.trim()) {
-    return Product.find(query)
-      .select("_id name sku currentStock sellingPrice")
-      .sort({ createdAt: -1 })
-      .limit(4)
-      .lean();
+    return Product.find(query).select('_id name sku currentStock sellingPrice').sort({ createdAt: -1 }).limit(4).lean();
   }
 
   // Search products by name
@@ -1116,10 +1165,10 @@ export const getProductSuggestions = async (storeId, search = "") => {
     ...query,
     name: {
       $regex: search.trim(),
-      $options: "i",
+      $options: 'i',
     },
   })
-    .select("_id name sku currentStock sellingPrice")
+    .select('_id name sku currentStock sellingPrice')
     .sort({ name: 1 })
     .limit(10)
     .lean();
@@ -1190,11 +1239,7 @@ export const SaleReportService = async (storeId, filters = {}, options = {}) => 
   // ── Invoice Number / Customer Name / Customer Mobile ─────────────────
   if (invoiceSearch) {
     const regex = new RegExp(escapeRegex(invoiceSearch), 'i');
-    invoiceMatch.$or = [
-      { invoiceNumber: regex },
-      { customerName: regex },
-      { customerMobile: regex },
-    ];
+    invoiceMatch.$or = [{ invoiceNumber: regex }, { customerName: regex }, { customerMobile: regex }];
   }
 
   // ── Reuse the EXACT same aggregation/calculation as queryInvoices ─────

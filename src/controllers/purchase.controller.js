@@ -207,18 +207,13 @@ export const getPurchasesReport = expressAsyncHandler(async (req, res) => {
 export const getPurchaseSearchSuggestions = expressAsyncHandler(async (req, res) => {
   const { q } = req.query;
 
-  if (!q || q.trim().length < 2) {
-    return new ApiResponse(200, [], 'Query too short').send(res);
-  }
-
   const suggestions = await purchaseService.getSearchSuggestions({
     store: req.user.store,
-    q: q.trim(),
+    q: (q || '').trim(),
   });
 
   return new ApiResponse(200, suggestions, 'Suggestions fetched successfully').send(res);
 });
-
 export const getVendorWisePurchaseReport = expressAsyncHandler(async (req, res) => {
   const filters = pick(req.query, ['startDate', 'endDate']);
 

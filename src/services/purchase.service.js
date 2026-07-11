@@ -760,8 +760,36 @@ export const queryPurchasesReport = async (filters = {}) => {
 
 
 export const getSearchSuggestions = async ({ store, q }) => {
-  const regex = new RegExp(escapeRegex(q), 'i');
   const storeId = new mongoose.Types.ObjectId(String(store));
+
+  // ✅ No query yet (e.g. input just focused) — show recent vendors as defaults
+  if (!q || q.trim().length < 2) {
+    const recentVendors = await Purchase.aggregate([
+      {
+        $match: {
+          store: storeId,
+          status: { $ne: 'cancelled' },
+          vendorName: { $nin: [null, ''] },
+        },
+      },
+      { $sort: { date: -1 } },
+      { $limit: 100 }, // scan recent purchases only
+      {
+        $group: {
+          _id: '$vendorName',
+          lastDate: { $first: '$date' }, // first hit per group = most recent, since already sorted desc
+        },
+      },
+      { $sort: { lastDate: -1 } },
+      { $limit: 4 },
+    ]);
+
+    return recentVendors
+      .filter((d) => d._id)
+      .map((d) => ({ type: 'vendor', label: d._id, value: d._id }));
+  }
+
+  const regex = new RegExp(escapeRegex(q), 'i');
 
   const [result] = await Purchase.aggregate([
     {
@@ -772,7 +800,7 @@ export const getSearchSuggestions = async ({ store, q }) => {
       },
     },
     { $sort: { date: -1 } },
-    { $limit: 300 }, // cap the scan so this stays fast on large collections
+    { $limit: 300 },
     {
       $facet: {
         invoiceNumbers: [

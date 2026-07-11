@@ -1098,8 +1098,34 @@ export const carryForwardStockToNextFinancialYear = async (storeId) => {
 };
 
 export const getSaleSearchSuggestions = async ({ store, q }) => {
-  const regex = new RegExp(escapeRegex(q), 'i');
   const storeId = new mongoose.Types.ObjectId(String(store));
+
+  // ✅ No query yet (e.g. input just focused) — show recent customers as defaults
+  if (!q || q.trim().length < 2) {
+    const recentCustomers = await Invoice.aggregate([
+      {
+        $match: {
+          store: storeId,
+          status: { $ne: 'cancelled' },
+          customerName: { $nin: [null, ''] },
+        },
+      },
+      { $sort: { invoiceDate: -1 } },
+      { $limit: 100 }, // scan recent invoices only
+      {
+        $group: {
+          _id: '$customerName',
+          lastDate: { $first: '$invoiceDate' }, // first hit per group = most recent, since already sorted desc
+        },
+      },
+      { $sort: { lastDate: -1 } },
+      { $limit: 4 },
+    ]);
+
+    return recentCustomers.filter((d) => d._id).map((d) => ({ type: 'customer', label: d._id, value: d._id }));
+  }
+
+  const regex = new RegExp(escapeRegex(q), 'i');
 
   const [result] = await Invoice.aggregate([
     {
@@ -1110,24 +1136,12 @@ export const getSaleSearchSuggestions = async ({ store, q }) => {
       },
     },
     { $sort: { invoiceDate: -1 } },
-    { $limit: 300 }, // cap the scan so this stays fast on large collections
+    { $limit: 300 },
     {
       $facet: {
-        invoiceNumbers: [
-          { $match: { invoiceNumber: regex } },
-          { $group: { _id: '$invoiceNumber' } },
-          { $limit: 5 },
-        ],
-        customerNames: [
-          { $match: { customerName: regex } },
-          { $group: { _id: '$customerName' } },
-          { $limit: 5 },
-        ],
-        customerMobiles: [
-          { $match: { customerMobile: regex } },
-          { $group: { _id: '$customerMobile' } },
-          { $limit: 5 },
-        ],
+        invoiceNumbers: [{ $match: { invoiceNumber: regex } }, { $group: { _id: '$invoiceNumber' } }, { $limit: 5 }],
+        customerNames: [{ $match: { customerName: regex } }, { $group: { _id: '$customerName' } }, { $limit: 5 }],
+        customerMobiles: [{ $match: { customerMobile: regex } }, { $group: { _id: '$customerMobile' } }, { $limit: 5 }],
       },
     },
   ]);
@@ -1140,7 +1154,6 @@ export const getSaleSearchSuggestions = async ({ store, q }) => {
     ...customerMobiles.filter((d) => d._id).map((d) => ({ type: 'mobile', label: d._id, value: d._id })),
   ];
 };
-
 export const getProductSuggestions = async (storeId, search = '') => {
   const query = {
     store: new mongoose.Types.ObjectId(storeId),

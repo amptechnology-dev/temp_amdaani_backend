@@ -195,6 +195,10 @@ export const getStoreUsers = async (store) => {
   return User.find({ store }).populate('role', 'name');
 };
 
+export const getStoreByStoreId = async (store) =>{
+  return Store.findById(store);
+}
+
 export const deleteStoreUser = async (userId, storeId) => {
   return User.findOneAndDelete({ _id: userId, store: storeId });
 };

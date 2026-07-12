@@ -28,4 +28,6 @@ router.route('/all').get(authorizeRoles('super-admin'), storeController.getAllSt
 
 router.route('/financial-years').get(storeController.getStoreFinancialYears);
 
+router.route('/').get(storeController.getSingleStoreById);
+
 export default router;

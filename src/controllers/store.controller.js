@@ -33,6 +33,11 @@ export const getAllStoreUsers = expressAsyncHandler(async (req, res) => {
   return new ApiResponse(200, storeUsers, 'Store users fetched successfully!').send(res);
 });
 
+export const getSingleStoreById = expressAsyncHandler(async (req, res) => {
+  const stores = await storeService.getStoreById(req.user.store);
+  return new ApiResponse(200, stores, 'Store fetched successfully!').send(res);
+})
+
 export const deleteStoreUserById = expressAsyncHandler(async (req, res) => {
   const storeUser = await deleteStoreUser(req.params.id, req.user.store);
   if (!storeUser) {

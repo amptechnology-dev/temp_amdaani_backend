@@ -529,20 +529,25 @@ export const queryPurchasesReport = async (filters = {}) => {
     store,
     startDate,
     endDate,
-    status,
+    status = '',
     invoiceSearch = '', // Invoice Number / Vendor Name / Vendor Mobile
-    staffName = '', // Purchase entry kore user-er naam
-    paymentMethod = '', // Payment mode search
-    paymentStatus = '', // paid / unpaid / partial
+    staffName = '',
+    paymentMethod = '',
+    paymentStatus = '',
   } = filters;
 
   const matchStage = {};
 
-  if (status) {
-    matchStage.status = status; // explicit filter wins, whatever the value
-  } else {
-    matchStage.status = { $ne: 'cancelled' }; // default: hide cancelled when no filter chosen
+  // ── Purchase status ──────────────────────────────────────────────────
+  // All (no filter)  → active + cancelled together
+  // Active            → All minus Cancelled (anything not literally 'cancelled')
+  // Cancelled         → only status === 'cancelled'
+  if (status === 'cancelled') {
+    matchStage.status = 'cancelled';
+  } else if (status === 'active') {
+    matchStage.status = { $ne: 'cancelled' };
   }
+  // else (All / no status param): no status filter added at all
 
   if (store) {
     matchStage.store = new mongoose.Types.ObjectId(String(store));
@@ -554,10 +559,6 @@ export const queryPurchasesReport = async (filters = {}) => {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
     matchStage.date = { $gte: start, $lte: end };
-  }
-
-  if (status && status !== 'cancelled') {
-    matchStage.status = status;
   }
 
   // ── Payment mode search ─────────────────────────────────────────────────
@@ -607,7 +608,6 @@ export const queryPurchasesReport = async (filters = {}) => {
     { $unwind: { path: '$storeInfo', preserveNullAndEmptyArrays: true } },
 
     // ── STEP 1: per-item calculations ─────────────────────────────────────
-    // (কোনো change নেই — তোমার original calculation logic exactly same)
     {
       $addFields: {
         calcItems: {
@@ -704,15 +704,9 @@ export const queryPurchasesReport = async (filters = {}) => {
     {
       $addFields: {
         totalItemsQty: { $sum: '$calcItems.qty' },
-        discountTotal: {
-          $round: [{ $sum: '$calcItems.lineDiscount' }, 2],
-        },
-        taxableValue: {
-          $round: [{ $sum: '$calcItems.taxableValue' }, 2],
-        },
-        gstTotal: {
-          $round: [{ $sum: '$calcItems.gstAmount' }, 2],
-        },
+        discountTotal: { $round: [{ $sum: '$calcItems.lineDiscount' }, 2] },
+        taxableValue: { $round: [{ $sum: '$calcItems.taxableValue' }, 2] },
+        gstTotal: { $round: [{ $sum: '$calcItems.gstAmount' }, 2] },
         netAmount: {
           $round: [
             {
@@ -727,24 +721,16 @@ export const queryPurchasesReport = async (filters = {}) => {
     // ── STEP 3: subTotal = netAmount − gstTotal ───────────────────────────
     {
       $addFields: {
-        subTotal: {
-          $round: [{ $subtract: ['$netAmount', '$gstTotal'] }, 2],
-        },
+        subTotal: { $round: [{ $subtract: ['$netAmount', '$gstTotal'] }, 2] },
       },
     },
 
     // ── STEP 4: CGST / SGST / IGST split ─────────────────────────────────
     {
       $addFields: {
-        cgstTotal: {
-          $round: [{ $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }] }, 2],
-        },
-        sgstTotal: {
-          $round: [{ $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }] }, 2],
-        },
-        igstTotal: {
-          $round: [{ $cond: [{ $eq: ['$isIgst', true] }, '$gstTotal', 0] }, 2],
-        },
+        cgstTotal: { $round: [{ $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }] }, 2] },
+        sgstTotal: { $round: [{ $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }] }, 2] },
+        igstTotal: { $round: [{ $cond: [{ $eq: ['$isIgst', true] }, '$gstTotal', 0] }, 2] },
       },
     },
 
@@ -756,8 +742,6 @@ export const queryPurchasesReport = async (filters = {}) => {
 
   return result;
 };
-
-
 
 export const getSearchSuggestions = async ({ store, q }) => {
   const storeId = new mongoose.Types.ObjectId(String(store));
@@ -784,9 +768,7 @@ export const getSearchSuggestions = async ({ store, q }) => {
       { $limit: 4 },
     ]);
 
-    return recentVendors
-      .filter((d) => d._id)
-      .map((d) => ({ type: 'vendor', label: d._id, value: d._id }));
+    return recentVendors.filter((d) => d._id).map((d) => ({ type: 'vendor', label: d._id, value: d._id }));
   }
 
   const regex = new RegExp(escapeRegex(q), 'i');
@@ -803,21 +785,9 @@ export const getSearchSuggestions = async ({ store, q }) => {
     { $limit: 300 },
     {
       $facet: {
-        invoiceNumbers: [
-          { $match: { invoiceNumber: regex } },
-          { $group: { _id: '$invoiceNumber' } },
-          { $limit: 5 },
-        ],
-        vendorNames: [
-          { $match: { vendorName: regex } },
-          { $group: { _id: '$vendorName' } },
-          { $limit: 5 },
-        ],
-        vendorMobiles: [
-          { $match: { vendorMobile: regex } },
-          { $group: { _id: '$vendorMobile' } },
-          { $limit: 5 },
-        ],
+        invoiceNumbers: [{ $match: { invoiceNumber: regex } }, { $group: { _id: '$invoiceNumber' } }, { $limit: 5 }],
+        vendorNames: [{ $match: { vendorName: regex } }, { $group: { _id: '$vendorName' } }, { $limit: 5 }],
+        vendorMobiles: [{ $match: { vendorMobile: regex } }, { $group: { _id: '$vendorMobile' } }, { $limit: 5 }],
       },
     },
   ]);

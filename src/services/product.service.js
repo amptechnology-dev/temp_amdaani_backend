@@ -1181,75 +1181,66 @@ export const getProductSuggestions = async (storeId, search = '') => {
 
 const escapeRegex = (str = '') => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-export const SaleReportService = async (storeId, filters = {}, options = {}) => {
+// service — accept (store, filters, options) to match how the controller calls it
+export const querySalesReport = async (store, filters = {}, options = {}) => {
   const {
     startDate,
     endDate,
+    status = '',
     invoiceSearch = '',
     salesmanName = '',
     paymentMethod = '',
     paymentStatus = '',
-    billStatus = 'active',
   } = filters;
 
-  const storeObjectId = new mongoose.Types.ObjectId(String(storeId));
+  const matchStage = {};
 
-  const invoiceMatch = { store: storeObjectId };
+  // ── Sale status ────────────────────────────────────────────────────────
+  // All (no filter)  → active + cancelled together
+  // Active            → All minus Cancelled  (anything not literally 'cancelled')
+  // Cancelled         → only status === 'cancelled'
+  if (status === 'cancelled') {
+    matchStage.status = 'cancelled';
+  } else if (status === 'active') {
+    matchStage.status = { $ne: 'cancelled' };
+  }
+  // else (All / no status param): no filter added at all — every invoice included
 
-  // ── Bill status ──────────────────────────────────────────────────────
-  if (billStatus && billStatus !== 'all') {
-    invoiceMatch.status = billStatus;
+  if (store) {
+    matchStage.store = new mongoose.Types.ObjectId(String(store));
   }
 
-  // ── Date range ────────────────────────────────────────────────────────
-  const start = startDate instanceof Date && !isNaN(startDate) ? startDate : null;
-  const end = endDate instanceof Date && !isNaN(endDate) ? endDate : null;
-  if (end) end.setHours(23, 59, 59, 999);
-
-  if (start && end) {
-    invoiceMatch.invoiceDate = { $gte: start, $lte: end };
-  } else if (start) {
-    invoiceMatch.invoiceDate = { $gte: start };
-  } else if (end) {
-    invoiceMatch.invoiceDate = { $lte: end };
+  if (startDate && endDate) {
+    matchStage.invoiceDate = { $gte: startDate, $lte: endDate };
   }
 
-  // ── Salesman name -> userId $in ──────────────────────────────────────
+  const VALID_PAYMENT_METHODS = ['cash', 'card', 'upi', 'bank_transfer', 'cheque'];
+  if (paymentMethod && VALID_PAYMENT_METHODS.includes(paymentMethod)) {
+    matchStage.paymentMethod = paymentMethod;
+  }
+
+  if (paymentStatus) {
+    matchStage.paymentStatus = paymentStatus;
+  }
+
+  if (invoiceSearch) {
+    const regex = new RegExp(escapeRegex(invoiceSearch), 'i');
+    matchStage.$or = [{ invoiceNumber: regex }, { customerName: regex }, { customerMobile: regex }];
+  }
+
   if (salesmanName) {
     const matchedUsers = await User.find({
-      store: storeObjectId,
+      store: matchStage.store,
       name: { $regex: escapeRegex(salesmanName), $options: 'i' },
     })
       .select('_id')
       .lean();
 
-    if (matchedUsers.length === 0) {
-      // queryInvoices-er response shape mimic korte hobe empty case-eo
-      return { docs: [], totalDocs: 0, page: 1, limit: Number(options.limit) || 20, totalPages: 0 };
-    }
-
-    invoiceMatch.userId = { $in: matchedUsers.map((u) => u._id) };
+    if (matchedUsers.length === 0) return [];
+    matchStage.userId = { $in: matchedUsers.map((u) => u._id) };
   }
 
-  // ── Payment mode ──────────────────────────────────────────────────────
-  if (paymentMethod) {
-    invoiceMatch.paymentMethod = { $regex: escapeRegex(paymentMethod), $options: 'i' };
-  }
+  const result = await Invoice.aggregate([{ $match: matchStage }, { $sort: { invoiceDate: -1 } }]);
 
-  // ── Payment status ────────────────────────────────────────────────────
-  if (paymentStatus) {
-    invoiceMatch.paymentStatus = paymentStatus;
-  }
-
-  // ── Invoice Number / Customer Name / Customer Mobile ─────────────────
-  if (invoiceSearch) {
-    const regex = new RegExp(escapeRegex(invoiceSearch), 'i');
-    invoiceMatch.$or = [{ invoiceNumber: regex }, { customerName: regex }, { customerMobile: regex }];
-  }
-
-  // ── Reuse the EXACT same aggregation/calculation as queryInvoices ─────
-  // Eta guarantee kore je response shape ar sob calculation
-  // (discountTotal, taxableValue, gstTotal, cgst/sgst/igst, totalAmount)
-  // queryInvoices er sathe 100% match korবে।
-  return queryInvoices(invoiceMatch, options);
+  return result;
 };

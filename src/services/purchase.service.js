@@ -539,15 +539,12 @@ export const queryPurchasesReport = async (filters = {}) => {
   const matchStage = {};
 
   // ── Purchase status ──────────────────────────────────────────────────
-  // All (no filter)  → active + cancelled together
-  // Active            → All minus Cancelled (anything not literally 'cancelled')
-  // Cancelled         → only status === 'cancelled'
   if (status === 'cancelled') {
     matchStage.status = 'cancelled';
   } else if (status === 'active') {
     matchStage.status = { $ne: 'cancelled' };
   }
-  // else (All / no status param): no status filter added at all
+  // else (All): no status filter
 
   if (store) {
     matchStage.store = new mongoose.Types.ObjectId(String(store));
@@ -561,9 +558,10 @@ export const queryPurchasesReport = async (filters = {}) => {
     matchStage.date = { $gte: start, $lte: end };
   }
 
-  // ── Payment mode search ─────────────────────────────────────────────────
-  if (paymentMethod) {
-    matchStage.paymentMethod = { $regex: escapeRegex(paymentMethod), $options: 'i' };
+  // ── Payment mode filter — exact match against the schema enum ──────────
+  const VALID_PAYMENT_METHODS = ['cash', 'card', 'upi', 'bank_transfer', 'cheque'];
+  if (paymentMethod && VALID_PAYMENT_METHODS.includes(paymentMethod)) {
+    matchStage.paymentMethod = paymentMethod;
   }
 
   // ── Payment status filter ───────────────────────────────────────────────
@@ -587,7 +585,7 @@ export const queryPurchasesReport = async (filters = {}) => {
       .lean();
 
     if (matchedUsers.length === 0) {
-      return []; // kono user match korলে empty result — DB hit save
+      return [];
     }
 
     matchStage.userId = { $in: matchedUsers.map((u) => u._id) };
@@ -596,7 +594,6 @@ export const queryPurchasesReport = async (filters = {}) => {
   const result = await Purchase.aggregate([
     { $match: matchStage },
 
-    // ── store lookup ──────────────────────────────────────────────────────
     {
       $lookup: {
         from: 'stores',
@@ -607,7 +604,6 @@ export const queryPurchasesReport = async (filters = {}) => {
     },
     { $unwind: { path: '$storeInfo', preserveNullAndEmptyArrays: true } },
 
-    // ── STEP 1: per-item calculations ─────────────────────────────────────
     {
       $addFields: {
         calcItems: {
@@ -660,12 +656,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                                   { $eq: ['$$gstRate', 0] },
                                   0,
                                   {
-                                    $max: [
-                                      0,
-                                      {
-                                        $multiply: [{ $subtract: ['$$baseRate', '$$discExcl'] }, '$$qty'],
-                                      },
-                                    ],
+                                    $max: [0, { $multiply: [{ $subtract: ['$$baseRate', '$$discExcl'] }, '$$qty'] }],
                                   },
                                 ],
                               },
@@ -676,12 +667,7 @@ export const queryPurchasesReport = async (filters = {}) => {
                               lineDiscount: '$$lineDiscount',
                               taxableValue: { $round: ['$$taxableValue', 2] },
                               gstAmount: {
-                                $round: [
-                                  {
-                                    $multiply: ['$$taxableValue', { $divide: ['$$gstRate', 100] }],
-                                  },
-                                  2,
-                                ],
+                                $round: [{ $multiply: ['$$taxableValue', { $divide: ['$$gstRate', 100] }] }, 2],
                               },
                               itemTotal: {
                                 $cond: [{ $gt: ['$$savedTotal', 0] }, { $round: ['$$savedTotal', 2] }, 0],
@@ -700,7 +686,6 @@ export const queryPurchasesReport = async (filters = {}) => {
       },
     },
 
-    // ── STEP 2: invoice-level totals ──────────────────────────────────────
     {
       $addFields: {
         totalItemsQty: { $sum: '$calcItems.qty' },
@@ -718,14 +703,12 @@ export const queryPurchasesReport = async (filters = {}) => {
       },
     },
 
-    // ── STEP 3: subTotal = netAmount − gstTotal ───────────────────────────
     {
       $addFields: {
         subTotal: { $round: [{ $subtract: ['$netAmount', '$gstTotal'] }, 2] },
       },
     },
 
-    // ── STEP 4: CGST / SGST / IGST split ─────────────────────────────────
     {
       $addFields: {
         cgstTotal: { $round: [{ $cond: [{ $eq: ['$isIgst', true] }, 0, { $divide: ['$gstTotal', 2] }] }, 2] },
@@ -734,7 +717,6 @@ export const queryPurchasesReport = async (filters = {}) => {
       },
     },
 
-    // ── STEP 5: clean up ──────────────────────────────────────────────────
     { $project: { calcItems: 0, items: 0 } },
 
     { $sort: { date: -1 } },

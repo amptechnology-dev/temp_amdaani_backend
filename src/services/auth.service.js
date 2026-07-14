@@ -66,7 +66,7 @@ export const sendOtp = async (phone) => {
   await redis.set(`otp:${phone}`, hash, 'EX', 60 * 5);
 
   // SMS message
-  const message = `<#> ${otp} is your OTP to login into AMDANI. Please do not share this OTP with anyone.- AMPTECH\nFA9JMduyUv0`;
+  const message = `${otp} is your OTP to login into AMDANI. Please do not share this OTP with anyone.- AMPTECH`;
 
   const params = {
     username: 'MTECHTRANS',

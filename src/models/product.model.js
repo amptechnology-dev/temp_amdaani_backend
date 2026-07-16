@@ -1,28 +1,27 @@
 import mongoose from 'mongoose';
 import mongooseAggregatePaginate from 'mongoose-aggregate-paginate-v2';
 
-const financialYearStockSchema =
-  new mongoose.Schema(
-    {
-      financialYear: {
-        type: String,
-        required: true,
-      },
-
-      stock: {
-        type: Number,
-        default: 0,
-        // min: 0,
-      },
-      value:{
-        type: Number,
-        default: 0,
-      }
+const financialYearStockSchema = new mongoose.Schema(
+  {
+    financialYear: {
+      type: String,
+      required: true,
     },
-    {
-      _id: false,
-    }
-  );
+
+    stock: {
+      type: Number,
+      default: 0,
+      // min: 0,
+    },
+    value: {
+      type: Number,
+      default: 0,
+    },
+  },
+  {
+    _id: false,
+  }
+);
 
 const productSchema = new mongoose.Schema(
   {
@@ -50,16 +49,13 @@ const productSchema = new mongoose.Schema(
 
     gstRate: Number,
     purchaseGstRate: Number,
-    mrp: Number,
+    mrp: { type: Number, default: 0 },
     weight: Number,
     currentStock: {
       type: Number,
       default: 0,
     },
-    financialYearStocks:
-      [
-        financialYearStockSchema,
-      ],
+    financialYearStocks: [financialYearStockSchema],
     tags: [String],
     status: { type: String, enum: ['active', 'inactive', 'cancelled'], default: 'active' },
   },

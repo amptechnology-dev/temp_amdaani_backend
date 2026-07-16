@@ -40,6 +40,7 @@ const storeSchema = new mongoose.Schema(
       invoiceStartNumber: { type: Number, default: 1 },
       taxRates: [{ name: String, rate: Number }],
       invoiceTerms: String,
+      mrpManagement: { type: Boolean, default: false },
       stockManagement: { type: Boolean, default: false },
       purchaseOrderManagement: { type: Boolean, default: false },
     },

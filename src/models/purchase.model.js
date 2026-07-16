@@ -25,7 +25,7 @@ const purchaseItemSchema = new mongoose.Schema({
     default: false,
   },
   isTaxInclusive: { type: Boolean, default: false },
-  mrp: Number,
+  mrp: { type: Number, default: 0 },
   quantity: {
     type: Number,
     required: true,

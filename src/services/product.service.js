@@ -524,6 +524,7 @@ export const adjustProductStock = async (data, session = null) => {
     purchaseDiscount,
     purchaseDiscountType,
     purchaseDiscountPercentage,
+    mrp,
 
     remarks = '',
 
@@ -555,6 +556,10 @@ export const adjustProductStock = async (data, session = null) => {
   // ==========================
   if (purchasePrice !== undefined) {
     product.costPrice = purchasePrice;
+  }
+
+  if(mrp !== undefined) {
+    product.mrp = mrp;
   }
 
   if (salePrice !== undefined) {
@@ -856,6 +861,7 @@ export const updateStockAfterPurchase = async (purchase, session = null) => {
         transactionType: StockTransactionType.PURCHASE,
         quantity: item.quantity,
         rate: item.rate,
+        mrp: item.mrp,
         batchId: item.batch,
         purchaseId: purchase._id,
         purchasePrice: item.rate,

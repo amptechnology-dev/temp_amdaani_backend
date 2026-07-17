@@ -266,6 +266,7 @@ export const reverseStockAfterPurchase = async (purchase, session = null) => {
         transactionType: StockTransactionType.PURCHASE_REVERSE,
         quantity: item.previousQuantity <= item.quantity ? -item.previousQuantity : -item.previousQuantity, // 👈 negative to subtract stock
         rate: item.rate,
+        mrp: item.mrp,
         batchId: item.batch,
         purchaseId,
         purchasePrice: item.rate,
@@ -303,6 +304,8 @@ export const reverseStockAfterPurchaseDelete = async (purchase, session = null) 
         date: date || new Date(),
         transactionType: StockTransactionType.PURCHASE_REVERSE,
         quantity: -item.quantity, // 👈 negative to subtract stock
+        rate: item.rate,
+        mrp: item.mrp,
         rate: item.rate,
         batchId: item.batch,
         purchaseId,

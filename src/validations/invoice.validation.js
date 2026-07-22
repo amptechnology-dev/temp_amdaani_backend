@@ -10,7 +10,7 @@ const invoiceItemSchema = yup.object().shape({
   hsn: yup.string().nullable(),
   unit: yup.string().nullable(),
   sellingPrice: yup.number().required('Price is required').min(0, 'Price must be >= 0'),
-  mrp: yup.number().nullable().positive('MRP must be positive').typeError('MRP must be a valid number'),
+  mrp: yup.number().nullable().min(0, 'MRP must be 0 or greater').typeError('MRP must be a valid number'),
   gstRate: yup.number().min(0).default(0),
   isTaxInclusive: yup.boolean().default(false),
   quantity: yup.number().required('Quantity is required').min(1, 'Quantity must be at least 1'),

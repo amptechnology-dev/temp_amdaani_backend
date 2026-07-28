@@ -5,15 +5,45 @@ import * as chatbotService from '../services/chatbot.service.js';
 import { ApiResponse, ApiError } from '../utils/responseHandler.js';
 
 export const chat = asyncHandler(async (req, res) => {
-  const { message } = req.body;
+  const {
+    sessionId,
+    message,
+    name,
+    phoneNumber,
+  } = req.body;
 
-  if (!message) {
-    throw new ApiError(400, 'Message is required');
+  if (!sessionId) {
+    throw new ApiError(400, "sessionId is required");
   }
 
-  const result = await chatbotService.getChatReply(message);
+  if (!message) {
+    throw new ApiError(400, "Message is required");
+  }
 
-  return new ApiResponse(200, result, 'Reply generated successfully').send(res);
+  const result = await chatbotService.getChatReply(
+    sessionId,
+    message,
+    name,
+    phoneNumber
+  );
+
+  return new ApiResponse(
+    200,
+    result,
+    "Reply generated successfully"
+  ).send(res);
+});
+
+export const getConversationHistory = asyncHandler(async (req, res) => {
+  const { sessionId } = req.params;
+
+  const history = await chatbotService.getConversationHistory(sessionId);
+
+  return new ApiResponse(
+    200,
+    history,
+    "Conversation history fetched successfully"
+  ).send(res);
 });
 
 export const createChatbot = asyncHandler(async (req, res) => {

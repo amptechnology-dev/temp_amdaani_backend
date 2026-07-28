@@ -9,6 +9,8 @@ const router = Router();
 // Public Chat API
 router.post('/chat', chatbotController.chat);
 
+router.get('/history/:sessionId', chatbotController.getConversationHistory);
+
 // Public FAQ List
 router.get('/', chatbotController.getAllChatbots);
 

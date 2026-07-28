@@ -1,6 +1,6 @@
 import expressAsyncHandler from "express-async-handler";
 import * as appVersionService from "../services/appVersion.service.js";
-import { ApiResponse } from "../utils/responseHandler.js";
+import { ApiResponse, ApiError } from "../utils/responseHandler.js";
 
 export const uploadApk = expressAsyncHandler(async (req, res) => {
 

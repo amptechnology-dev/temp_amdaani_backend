@@ -100,6 +100,17 @@ export const getProductSuggestions = expressAsyncHandler(async (req, res) => {
   return new ApiResponse(200, data, 'Product suggestions fetched successfully!').send(res);
 });
 
+export const getSaleSearchSuggestions = expressAsyncHandler(async (req, res) => {
+  const { q } = req.query;
+
+  const suggestions = await productService.getSaleSearchSuggestions({
+    store: req.user.store,
+    q: (q || '').trim(),
+  });
+
+  return new ApiResponse(200, suggestions, 'Suggestions fetched successfully').send(res);
+});
+
 export const getSaleReport = expressAsyncHandler(async (req, res) => {
   const options = pick(req.query, ['page', 'limit', 'sortBy', 'order']);
 
@@ -111,7 +122,7 @@ export const getSaleReport = expressAsyncHandler(async (req, res) => {
     salesmanName = '',
     paymentMethod = '',
     paymentStatus = '',
-    billStatus = 'active',
+    status = '', // ✅ matches what the frontend actually sends (?status=active|cancelled)
   } = req.query;
 
   let start = null;
@@ -127,7 +138,6 @@ export const getSaleReport = expressAsyncHandler(async (req, res) => {
         start = startOfDay(now);
         end = endOfDay(now);
         break;
-
       case 'yesterday': {
         const yesterday = new Date(now);
         yesterday.setDate(yesterday.getDate() - 1);
@@ -135,7 +145,6 @@ export const getSaleReport = expressAsyncHandler(async (req, res) => {
         end = endOfDay(yesterday);
         break;
       }
-
       case 'thisWeek': {
         const day = now.getDay();
         const diffToMonday = day === 0 ? 6 : day - 1;
@@ -145,22 +154,18 @@ export const getSaleReport = expressAsyncHandler(async (req, res) => {
         end = endOfDay(now);
         break;
       }
-
       case 'thisMonth':
         start = new Date(now.getFullYear(), now.getMonth(), 1);
         end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
         break;
-
       case 'previousMonth':
         start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
         break;
-
       case 'year':
         start = new Date(now.getFullYear(), 0, 1);
         end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
         break;
-
       case 'custom':
         start = startDate ? new Date(startDate) : null;
         end = endDate ? new Date(endDate) : null;
@@ -174,7 +179,7 @@ export const getSaleReport = expressAsyncHandler(async (req, res) => {
   if (start && isNaN(start.getTime())) start = null;
   if (end && isNaN(end.getTime())) end = null;
 
-  const result = await productService.SaleReportService(
+  const result = await productService.querySalesReport(
     req.user.store,
     {
       startDate: start,
@@ -183,7 +188,7 @@ export const getSaleReport = expressAsyncHandler(async (req, res) => {
       salesmanName,
       paymentMethod,
       paymentStatus,
-      billStatus,
+      status, // ✅ pass the real sale-status filter through
     },
     options
   );

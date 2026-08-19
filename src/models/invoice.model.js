@@ -4,6 +4,7 @@ import mongooseAggregatePaginate from 'mongoose-aggregate-paginate-v2';
 const invoiceItemSchema = new mongoose.Schema({
   product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
   name: { type: String, required: true },
+  mrp: { type: Number, default: 0 },
   hsn: { type: String },
   unit: { type: String },
   sellingPrice: { type: Number, required: true },

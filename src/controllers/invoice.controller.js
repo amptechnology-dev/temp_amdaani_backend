@@ -16,7 +16,7 @@ export const createInvoice = expressAsyncHandler(async (req, res) => {
 
   req.body.userId = req.user.id;
 
-  console.log('Request to create invoice with data:', JSON.stringify(req.body));
+  //console.log('Request to create invoice with data:', JSON.stringify(req.body));
 
   const invoice = await invoiceService.createInvoice(req.body);
 
@@ -219,7 +219,7 @@ export const exportGstSalesReportExcel = expressAsyncHandler(async (req, res) =>
   const report = await invoiceService.getGstSalesReport({
     startDate,
     endDate,
-    store: req.user.store, 
+    store: req.user.store,
   });
 
   const workbook = new ExcelJS.Workbook();

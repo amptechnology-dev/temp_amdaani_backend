@@ -5,9 +5,10 @@ import { Invoice } from '../models/invoice.model.js';
 import { handleDuplicateKeyError } from '../utils/dbErrorHandler.js';
 import { StockTransactionType } from '../config/constants.js';
 import { StockTransaction } from '../models/stockTransaction.model.js';
-import {User} from '../models/user.model.js';
+import { User } from '../models/user.model.js';
 import mongoose from 'mongoose';
 import { queryInvoices } from '../services/invoice.service.js';
+//import { Invoice } from "../models/invoice.model.js"
 
 export const createProduct = async (data, session = null) => {
   try {
@@ -523,6 +524,7 @@ export const adjustProductStock = async (data, session = null) => {
     purchaseDiscount,
     purchaseDiscountType,
     purchaseDiscountPercentage,
+    mrp,
 
     remarks = '',
 
@@ -554,6 +556,10 @@ export const adjustProductStock = async (data, session = null) => {
   // ==========================
   if (purchasePrice !== undefined) {
     product.costPrice = purchasePrice;
+  }
+
+  if(mrp !== undefined) {
+    product.mrp = mrp;
   }
 
   if (salePrice !== undefined) {
@@ -855,6 +861,7 @@ export const updateStockAfterPurchase = async (purchase, session = null) => {
         transactionType: StockTransactionType.PURCHASE,
         quantity: item.quantity,
         rate: item.rate,
+        mrp: item.mrp,
         batchId: item.batch,
         purchaseId: purchase._id,
         purchasePrice: item.rate,
@@ -1096,19 +1103,72 @@ export const carryForwardStockToNextFinancialYear = async (storeId) => {
   };
 };
 
-export const getProductSuggestions = async (storeId, search = "") => {
+export const getSaleSearchSuggestions = async ({ store, q }) => {
+  const storeId = new mongoose.Types.ObjectId(String(store));
+
+  // ✅ No query yet (e.g. input just focused) — show recent customers as defaults
+  if (!q || q.trim().length < 2) {
+    const recentCustomers = await Invoice.aggregate([
+      {
+        $match: {
+          store: storeId,
+          status: { $ne: 'cancelled' },
+          customerName: { $nin: [null, ''] },
+        },
+      },
+      { $sort: { invoiceDate: -1 } },
+      { $limit: 100 }, // scan recent invoices only
+      {
+        $group: {
+          _id: '$customerName',
+          lastDate: { $first: '$invoiceDate' }, // first hit per group = most recent, since already sorted desc
+        },
+      },
+      { $sort: { lastDate: -1 } },
+      { $limit: 4 },
+    ]);
+
+    return recentCustomers.filter((d) => d._id).map((d) => ({ type: 'customer', label: d._id, value: d._id }));
+  }
+
+  const regex = new RegExp(escapeRegex(q), 'i');
+
+  const [result] = await Invoice.aggregate([
+    {
+      $match: {
+        store: storeId,
+        status: { $ne: 'cancelled' },
+        $or: [{ invoiceNumber: regex }, { customerName: regex }, { customerMobile: regex }],
+      },
+    },
+    { $sort: { invoiceDate: -1 } },
+    { $limit: 300 },
+    {
+      $facet: {
+        invoiceNumbers: [{ $match: { invoiceNumber: regex } }, { $group: { _id: '$invoiceNumber' } }, { $limit: 5 }],
+        customerNames: [{ $match: { customerName: regex } }, { $group: { _id: '$customerName' } }, { $limit: 5 }],
+        customerMobiles: [{ $match: { customerMobile: regex } }, { $group: { _id: '$customerMobile' } }, { $limit: 5 }],
+      },
+    },
+  ]);
+
+  const { invoiceNumbers = [], customerNames = [], customerMobiles = [] } = result || {};
+
+  return [
+    ...invoiceNumbers.filter((d) => d._id).map((d) => ({ type: 'invoice', label: d._id, value: d._id })),
+    ...customerNames.filter((d) => d._id).map((d) => ({ type: 'customer', label: d._id, value: d._id })),
+    ...customerMobiles.filter((d) => d._id).map((d) => ({ type: 'mobile', label: d._id, value: d._id })),
+  ];
+};
+export const getProductSuggestions = async (storeId, search = '') => {
   const query = {
     store: new mongoose.Types.ObjectId(storeId),
-    status: "active",
+    status: 'active',
   };
 
   // If no search query, return latest 4 products
   if (!search || !search.trim()) {
-    return Product.find(query)
-      .select("_id name sku currentStock sellingPrice")
-      .sort({ createdAt: -1 })
-      .limit(4)
-      .lean();
+    return Product.find(query).select('_id name sku currentStock sellingPrice').sort({ createdAt: -1 }).limit(4).lean();
   }
 
   // Search products by name
@@ -1116,10 +1176,10 @@ export const getProductSuggestions = async (storeId, search = "") => {
     ...query,
     name: {
       $regex: search.trim(),
-      $options: "i",
+      $options: 'i',
     },
   })
-    .select("_id name sku currentStock sellingPrice")
+    .select('_id name sku currentStock sellingPrice')
     .sort({ name: 1 })
     .limit(10)
     .lean();
@@ -1127,79 +1187,66 @@ export const getProductSuggestions = async (storeId, search = "") => {
 
 const escapeRegex = (str = '') => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-export const SaleReportService = async (storeId, filters = {}, options = {}) => {
+// service — accept (store, filters, options) to match how the controller calls it
+export const querySalesReport = async (store, filters = {}, options = {}) => {
   const {
     startDate,
     endDate,
+    status = '',
     invoiceSearch = '',
     salesmanName = '',
     paymentMethod = '',
     paymentStatus = '',
-    billStatus = 'active',
   } = filters;
 
-  const storeObjectId = new mongoose.Types.ObjectId(String(storeId));
+  const matchStage = {};
 
-  const invoiceMatch = { store: storeObjectId };
+  // ── Sale status ────────────────────────────────────────────────────────
+  // All (no filter)  → active + cancelled together
+  // Active            → All minus Cancelled  (anything not literally 'cancelled')
+  // Cancelled         → only status === 'cancelled'
+  if (status === 'cancelled') {
+    matchStage.status = 'cancelled';
+  } else if (status === 'active') {
+    matchStage.status = { $ne: 'cancelled' };
+  }
+  // else (All / no status param): no filter added at all — every invoice included
 
-  // ── Bill status ──────────────────────────────────────────────────────
-  if (billStatus && billStatus !== 'all') {
-    invoiceMatch.status = billStatus;
+  if (store) {
+    matchStage.store = new mongoose.Types.ObjectId(String(store));
   }
 
-  // ── Date range ────────────────────────────────────────────────────────
-  const start = startDate instanceof Date && !isNaN(startDate) ? startDate : null;
-  const end = endDate instanceof Date && !isNaN(endDate) ? endDate : null;
-  if (end) end.setHours(23, 59, 59, 999);
-
-  if (start && end) {
-    invoiceMatch.invoiceDate = { $gte: start, $lte: end };
-  } else if (start) {
-    invoiceMatch.invoiceDate = { $gte: start };
-  } else if (end) {
-    invoiceMatch.invoiceDate = { $lte: end };
+  if (startDate && endDate) {
+    matchStage.invoiceDate = { $gte: startDate, $lte: endDate };
   }
 
-  // ── Salesman name -> userId $in ──────────────────────────────────────
+  const VALID_PAYMENT_METHODS = ['cash', 'card', 'upi', 'bank_transfer', 'cheque'];
+  if (paymentMethod && VALID_PAYMENT_METHODS.includes(paymentMethod)) {
+    matchStage.paymentMethod = paymentMethod;
+  }
+
+  if (paymentStatus) {
+    matchStage.paymentStatus = paymentStatus;
+  }
+
+  if (invoiceSearch) {
+    const regex = new RegExp(escapeRegex(invoiceSearch), 'i');
+    matchStage.$or = [{ invoiceNumber: regex }, { customerName: regex }, { customerMobile: regex }];
+  }
+
   if (salesmanName) {
     const matchedUsers = await User.find({
-      store: storeObjectId,
+      store: matchStage.store,
       name: { $regex: escapeRegex(salesmanName), $options: 'i' },
     })
       .select('_id')
       .lean();
 
-    if (matchedUsers.length === 0) {
-      // queryInvoices-er response shape mimic korte hobe empty case-eo
-      return { docs: [], totalDocs: 0, page: 1, limit: Number(options.limit) || 20, totalPages: 0 };
-    }
-
-    invoiceMatch.userId = { $in: matchedUsers.map((u) => u._id) };
+    if (matchedUsers.length === 0) return [];
+    matchStage.userId = { $in: matchedUsers.map((u) => u._id) };
   }
 
-  // ── Payment mode ──────────────────────────────────────────────────────
-  if (paymentMethod) {
-    invoiceMatch.paymentMethod = { $regex: escapeRegex(paymentMethod), $options: 'i' };
-  }
+  const result = await Invoice.aggregate([{ $match: matchStage }, { $sort: { invoiceDate: -1 } }]);
 
-  // ── Payment status ────────────────────────────────────────────────────
-  if (paymentStatus) {
-    invoiceMatch.paymentStatus = paymentStatus;
-  }
-
-  // ── Invoice Number / Customer Name / Customer Mobile ─────────────────
-  if (invoiceSearch) {
-    const regex = new RegExp(escapeRegex(invoiceSearch), 'i');
-    invoiceMatch.$or = [
-      { invoiceNumber: regex },
-      { customerName: regex },
-      { customerMobile: regex },
-    ];
-  }
-
-  // ── Reuse the EXACT same aggregation/calculation as queryInvoices ─────
-  // Eta guarantee kore je response shape ar sob calculation
-  // (discountTotal, taxableValue, gstTotal, cgst/sgst/igst, totalAmount)
-  // queryInvoices er sathe 100% match korবে।
-  return queryInvoices(invoiceMatch, options);
+  return result;
 };

@@ -92,6 +92,7 @@ export const updateStore = {
       // invoicePrefix: yup.string().trim().default('INV'),
       // invoiceStartNumber: yup.number().min(1).default(1),
       // taxRates: yup.array().of(taxRateSchema),
+      mrpManagement: yup.boolean().default(false),
       invoiceTerms: yup.string(),
       stockManagement: yup.boolean().default(false),
       purchaseOrderManagement: yup.boolean().default(false),

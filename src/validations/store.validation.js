@@ -74,29 +74,65 @@ export const updateStore = {
     registrationNo: yup.string().trim().nullable(),
     contactNo: yup.string().trim(),
     email: yup.string().trim().lowercase().email(),
-    address: yup.object().shape({
-      street: yup.string().trim(),
-      city: yup.string().trim(),
-      state: yup.string().trim(),
-      postalCode: yup.string().trim(),
-    }),
-    bankDetails: yup.object().shape({
-      bankName: yup.string().trim(),
-      accountNo: yup.string().trim(),
-      holderName: yup.string().trim(),
-      ifsc: yup.string().trim(),
-      branch: yup.string().trim(),
-      upiId: yup.string().trim(),
-    }),
-    settings: yup.object().shape({
-      // invoicePrefix: yup.string().trim().default('INV'),
-      // invoiceStartNumber: yup.number().min(1).default(1),
-      // taxRates: yup.array().of(taxRateSchema),
-      mrpManagement: yup.boolean().default(false),
-      invoiceTerms: yup.string(),
-      stockManagement: yup.boolean().default(false),
-      purchaseOrderManagement: yup.boolean().default(false),
-    }),
+    address: yup
+      .object()
+      .transform((value, originalValue) => {
+        if (typeof originalValue === 'string') {
+          try {
+            return JSON.parse(originalValue);
+          } catch (e) {
+            return originalValue; // let yup's type check produce the real error
+          }
+        }
+        return value;
+      })
+      .shape({
+        street: yup.string().trim(),
+        city: yup.string().trim(),
+        state: yup.string().trim(),
+        postalCode: yup.string().trim(),
+      }),
+    bankDetails: yup
+      .object()
+      .transform((value, originalValue) => {
+        if (typeof originalValue === 'string') {
+          try {
+            return JSON.parse(originalValue);
+          } catch (e) {
+            return originalValue;
+          }
+        }
+        return value;
+      })
+      .shape({
+        bankName: yup.string().trim(),
+        accountNo: yup.string().trim(),
+        holderName: yup.string().trim(),
+        ifsc: yup.string().trim(),
+        branch: yup.string().trim(),
+        upiId: yup.string().trim(),
+      }),
+    settings: yup
+      .object()
+      .transform((value, originalValue) => {
+        if (typeof originalValue === 'string') {
+          try {
+            return JSON.parse(originalValue);
+          } catch (e) {
+            return originalValue;
+          }
+        }
+        return value;
+      })
+      .shape({
+        invoicePrefix: yup.string().trim(),
+        invoiceStartNumber: yup.number().min(1),
+        mrpManagement: yup.boolean(),
+        invoiceTerms: yup.string(),
+        stockManagement: yup.boolean(),
+        purchaseOrderManagement: yup.boolean(),
+        printMode: yup.string().trim().oneOf(['a4', 'a5', 'thermal'], 'Invalid print mode'),
+      }),
   }),
 };
 

@@ -43,6 +43,11 @@ const storeSchema = new mongoose.Schema(
       mrpManagement: { type: Boolean, default: false },
       stockManagement: { type: Boolean, default: false },
       purchaseOrderManagement: { type: Boolean, default: false },
+      printMode: {
+        type: String,
+        enum: ['a4', 'a5', 'thermal'],
+        default: 'a4',
+      },
     },
     currentSubscription: {
       type: mongoose.SchemaTypes.ObjectId,

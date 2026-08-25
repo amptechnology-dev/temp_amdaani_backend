@@ -6,8 +6,8 @@ import { authenticate, authorizeRoles } from '../middlewares/auth.middleware.js'
 
 const router = Router();
 
-router.use(authenticate);
 router.get('/active', howToVideoController.getActiveHowToVideos);
+router.use(authenticate);
 router.get('/tag/:tag', howToVideoController.getHowToVideosByTag);
 router.get('/:id', howToVideoController.getHowToVideoById);
 

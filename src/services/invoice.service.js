@@ -1669,6 +1669,22 @@ export const getStockBalance = async (filters = {}) => {
     };
   }
 
+  // Transaction types that already have their own dedicated report column.
+  // Everything else logged in `stocktransactions` (ADJUSTMENT, STOCK_CORRECTION,
+  // NEW_PURCHASE, FREE_STOCK, INTERNAL_USE, STOCK_REDUCE, or any future/unknown
+  // reason type) is treated as a generic adjustment, signed by its `direction`
+  // field. This avoids the old bug where a hardcoded whitelist silently dropped
+  // any type it didn't explicitly know about (e.g. plain "ADJUSTMENT").
+  const NON_ADJUSTMENT_TYPES = [
+    'DAMAGE',
+    'EXPIRED',
+    'SALE_RETURN',
+    'PURCHASE_RETURN',
+    'PURCHASE',
+    'SALE',
+    'OPENINGSTOCK',
+  ];
+
   const data = await Product.aggregate([
     { $match: productMatch },
 
@@ -1866,54 +1882,33 @@ export const getStockBalance = async (filters = {}) => {
           },
         },
 
-        // adjustmentQty = (IN adjustments) − (OUT adjustments)
-        // IN  types : NEW_PURCHASE, STOCK_CORRECTION (direction=IN), FREE_STOCK (direction=IN)
-        // OUT types : INTERNAL_USE, STOCK_REDUCE, STOCK_CORRECTION (direction=OUT), FREE_STOCK (direction=OUT)
+        // ✅ FIXED: adjustmentQty now = sum of (direction=IN ? +qty : -qty)
+        // for ALL transaction types EXCEPT the ones already shown in their own
+        // dedicated columns (DAMAGE, EXPIRED, SALE_RETURN, PURCHASE_RETURN,
+        // PURCHASE, SALE, OPENINGSTOCK). This means generic "ADJUSTMENT",
+        // "STOCK_CORRECTION", "NEW_PURCHASE", "FREE_STOCK", "INTERNAL_USE",
+        // "STOCK_REDUCE" — or any brand-new reason type added later — is
+        // automatically picked up correctly, with no whitelist to maintain.
         adjustmentQty: {
-          $subtract: [
-            // IN side
-            {
-              $sum: {
-                $map: {
-                  input: '$transactions',
-                  as: 'tx',
-                  in: {
+          $sum: {
+            $map: {
+              input: '$transactions',
+              as: 'tx',
+              in: {
+                $cond: [
+                  { $in: ['$$tx.transactionType', NON_ADJUSTMENT_TYPES] },
+                  0,
+                  {
                     $cond: [
-                      {
-                        $in: ['$$tx.transactionType', ['NEW_PURCHASE', 'STOCK_CORRECTION', 'FREE_STOCK']],
-                      },
-                      {
-                        $cond: [
-                          { $eq: ['$$tx.direction', 'IN'] },
-                          '$$tx.quantity',
-                          { $multiply: ['$$tx.quantity', -1] },
-                        ],
-                      },
-                      0,
-                    ],
-                  },
-                },
-              },
-            },
-            // OUT side
-            {
-              $sum: {
-                $map: {
-                  input: '$transactions',
-                  as: 'tx',
-                  in: {
-                    $cond: [
-                      {
-                        $in: ['$$tx.transactionType', ['INTERNAL_USE', 'STOCK_REDUCE']],
-                      },
+                      { $eq: ['$$tx.direction', 'IN'] },
                       '$$tx.quantity',
-                      0,
+                      { $multiply: ['$$tx.quantity', -1] },
                     ],
                   },
-                },
+                ],
               },
             },
-          ],
+          },
         },
 
         closingStock: '$currentStock',

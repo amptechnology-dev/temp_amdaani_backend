@@ -24,17 +24,17 @@ const jwtOptions = {
 const jwtVerify = async (payload, done) => {
   try {
     let user;
+
+    // payload.sub হলো userId (ObjectId) অথবা phone (registration token এর ক্ষেত্রে)
     if (/^[0-9a-fA-F]{24}$/.test(payload.sub)) {
-      user = await User.findById(payload.sub).populate('role');
-      console.log('User found by ID:', user);
+      user = await User.findById(payload.sub); // ⚠️ .populate('role') সরিয়ে দিলাম — User এ আর role field নাই
     } else {
-      user = await User.findOne({ phone: payload.sub }).populate('role');
-      console.log('User found by phone:', user);
+      user = await User.findOne({ phone: payload.sub });
     }
 
-    console.log('JWT Payload:', payload);
-
     if (!user) return done(null, false);
+
+    if (!user.isActive) return done(null, false);
 
     done(null, user);
   } catch (error) {

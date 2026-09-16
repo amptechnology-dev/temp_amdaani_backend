@@ -1,8 +1,14 @@
 import expressAsyncHandler from 'express-async-handler';
 import * as storeService from '../services/store.services.js';
 import { ApiResponse, ApiError } from '../utils/responseHandler.js';
-import { checkUserExists, createUser, getStoreUsers, deleteStoreUser } from '../services/user.services.js';
-// import pick from "../utils/pick.js";
+import {
+  checkUserExists,
+  createUser,
+  getStoreUsers,
+  deleteStoreUser,
+  addUserToStore,
+} from '../services/user.services.js';
+import { roles } from '../config/roles.js';
 
 export const updateStore = expressAsyncHandler(async (req, res) => {
   console.log('store-->', JSON.stringify(req.user.store));
@@ -17,15 +23,18 @@ export const getAllStoresWithSubscription = expressAsyncHandler(async (req, res)
 });
 
 export const addNewStoreUser = expressAsyncHandler(async (req, res) => {
-  if (await checkUserExists(req.body.phone)) {
-    throw new ApiError(400, 'User already exists!', {
-      source: 'body',
-      field: 'phone',
-      message: 'User with this mobile number already exists!',
-    });
-  }
-  const storeUser = await createUser({ store: req.user.store, ...req.body });
-  return new ApiResponse(200, storeUser, 'Store user created successfully!').send(res);
+  const { user, membership } = await addUserToStore(req.user.store, {
+    name: req.body.name,
+    phone: req.body.phone,
+    email: req.body.email,
+    roleId: req.body.role,
+    roleName: !req.body.role ? roles.STAFF : undefined,
+  });
+  return new ApiResponse(
+    200,
+    { ...user.toObject(), membershipId: membership._id, role: membership.role },
+    'Store user created successfully!'
+  ).send(res);
 });
 
 export const getAllStoreUsers = expressAsyncHandler(async (req, res) => {
@@ -36,7 +45,7 @@ export const getAllStoreUsers = expressAsyncHandler(async (req, res) => {
 export const getSingleStoreById = expressAsyncHandler(async (req, res) => {
   const stores = await storeService.getStoreById(req.user.store);
   return new ApiResponse(200, stores, 'Store fetched successfully!').send(res);
-})
+});
 
 export const deleteStoreUserById = expressAsyncHandler(async (req, res) => {
   const storeUser = await deleteStoreUser(req.params.id, req.user.store);
@@ -50,21 +59,8 @@ export const deleteStoreUserById = expressAsyncHandler(async (req, res) => {
   return new ApiResponse(200, storeUser, 'Store user deleted successfully!').send(res);
 });
 
-export const getStoreFinancialYears =
-  expressAsyncHandler(
-    async (
-      req,
-      res
-    ) => {
-      const data =
-        await storeService.getStoreFinancialYears(
-          req.user.store
-        );
+export const getStoreFinancialYears = expressAsyncHandler(async (req, res) => {
+  const data = await storeService.getStoreFinancialYears(req.user.store);
 
-      return new ApiResponse(
-        200,
-        data,
-        'Financial years fetched successfully!'
-      ).send(res);
-    }
-  );
+  return new ApiResponse(200, data, 'Financial years fetched successfully!').send(res);
+});

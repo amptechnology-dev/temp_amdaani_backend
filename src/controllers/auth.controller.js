@@ -7,6 +7,9 @@ import {
   logout,
   refreshAuth,
   verifySuperAdminLogin,
+  selectStoreAndLogin,
+  switchStore,
+  createAdditionalStore,
 } from '../services/auth.service.js';
 import { verifyRegistrationToken, generateAuthTokens } from '../services/token.service.js';
 import {
@@ -22,6 +25,8 @@ import {
   getOnlyUserByEmail,
   updateUserEmail,
   toggleStoreAndUsersStatus,
+  getMyStores,
+  getUserProfileWithMemberships,
 } from '../services/user.services.js';
 import { createOrRenewFreePlan } from '../services/subscription.services.js';
 import jwt from 'jsonwebtoken';
@@ -31,7 +36,7 @@ import crypto from 'crypto';
 import redis from '../config/redis.js';
 import { get } from 'https';
 import { logoutOtherDevices } from '../services/userSession.service.js';
-import { assignAgentCodeToStore } from '../services/auth.service.js';
+import { assignAgentCodeToStore, getStoresByStoreSelectionToken } from '../services/auth.service.js';
 
 export const createSuperAdminUser = asyncHandler(async (req, res) => {
   const { phone, name, email } = req.body;
@@ -116,22 +121,57 @@ export const verifyAuthOtp = asyncHandler(async (req, res) => {
   const { phone, otp } = req.body;
   try {
     const result = await verifyOtp(phone, otp, req);
+
     if (result.status === 'logged_in') {
-      return new ApiResponse(200, { user: result.user, tokens: result.tokens }, 'Logged in successfully!').send(res);
+      return new ApiResponse(
+        200,
+        { user: result.user, store: result.store, role: result.role, tokens: result.tokens },
+        'Logged in successfully!'
+      ).send(res);
     }
+
+    if (result.status === 'select_store') {
+      return new ApiResponse(
+        200,
+        { storeSelectionToken: result.storeSelectionToken, stores: result.stores },
+        'Please select a store to continue'
+      ).send(res);
+    }
+
+    // status === 'new_user'
     return new ApiResponse(201, { tempToken: result.tempToken }, 'User not found! Registration started.').send(res);
   } catch (err) {
     console.log('OTP verification error:', err);
-    throw new ApiError(400, 'Invalid OTP', [{ source: 'body', field: 'otp', message: 'Invalid OTP' }]);
+    throw new ApiError(400, err.message || 'Invalid OTP', [{ source: 'body', field: 'otp', message: 'Invalid OTP' }]);
   }
+});
+
+export const selectStore = asyncHandler(async (req, res) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new ApiError(400, 'storeSelectionToken is required in Authorization header');
+  }
+
+  const storeSelectionToken = authHeader.split(' ')[1];
+  const { storeId } = req.body;
+
+  if (!storeSelectionToken || !storeId) {
+    throw new ApiError(400, 'storeSelectionToken and storeId are required');
+  }
+
+  const result = await selectStoreAndLogin(storeSelectionToken, storeId, req);
+
+  return new ApiResponse(
+    200,
+    { user: result.user, store: result.store, role: result.role, tokens: result.tokens },
+    'Logged in successfully!'
+  ).send(res);
 });
 
 export const register = asyncHandler(async (req, res) => {
   const { storeData, userData } = req.body;
   const regToken = req.headers.authorization?.split(' ')[1];
-
-  console.log('RAW HEADER:', JSON.stringify(req.headers.authorization));
-  console.log('TOKEN USED:', JSON.stringify(regToken));
 
   if (!regToken) {
     throw new ApiError(400, 'Invalid token', [{ source: 'headers', field: 'authorization', message: 'Invalid token' }]);
@@ -140,9 +180,10 @@ export const register = asyncHandler(async (req, res) => {
   if (!phone || phone.sub !== userData?.phone) {
     throw new ApiError(400, 'Invalid token', [{ source: 'headers', field: 'authorization', message: 'Invalid token' }]);
   }
-  const { user, store } = await registerUserWithStore(storeData, userData, req.files, req);
-  const tokens = await generateAuthTokens(user);
-  // await createOrRenewFreePlan(store._id);
+
+  // registerUserWithStore এখন নিজেই membership তৈরি করে ও token generate করে
+  const { user, store, tokens } = await registerUserWithStore(storeData, userData, req.files, req);
+
   return new ApiResponse(201, { user, store, tokens }, 'Registered successfully!').send(res);
 });
 
@@ -163,7 +204,7 @@ export const refreshTokens = asyncHandler(async (req, res) => {
 });
 
 export const getProfile = asyncHandler(async (req, res) => {
-  const user = await getUserById(req.user.id);
+  const user = await getUserProfileWithMemberships(req.user.id, req.user.store);
   return new ApiResponse(200, user, 'Profile fetched successfully').send(res);
 });
 
@@ -555,4 +596,56 @@ export const updateStoreAgentCode = asyncHandler(async (req, res) => {
   const store = await assignAgentCodeToStore(storeId, agentCode);
 
   return new ApiResponse(200, store, 'Agent code assigned successfully').send(res);
+});
+
+export const getMyStoreList = asyncHandler(async (req, res) => {
+  const stores = await getMyStores(req.user.id);
+  return new ApiResponse(200, stores, 'Store list fetched successfully').send(res);
+});
+
+export const switchMyStore = asyncHandler(async (req, res) => {
+  const { storeId } = req.body;
+  if (!storeId) {
+    throw new ApiError(400, 'storeId is required');
+  }
+  const result = await switchStore(req.user.id, storeId, req);
+  return new ApiResponse(
+    200,
+    { user: result.user, store: result.store, role: result.role, tokens: result.tokens },
+    'Store switched successfully'
+  ).send(res);
+});
+
+export const createNewStoreForMe = asyncHandler(async (req, res) => {
+  const storeData = req.body;
+
+  if (!storeData?.name || !storeData?.type) {
+    throw new ApiError(400, 'Store name and type are required');
+  }
+
+  const { store, membership } = await createAdditionalStore(req.user.id, storeData, req.files);
+
+  return new ApiResponse(
+    201,
+    { store, membershipId: membership._id, isDefault: membership.isDefault },
+    'New store created successfully!'
+  ).send(res);
+});
+
+export const getStoresForSelection = asyncHandler(async (req, res) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new ApiError(400, 'storeSelectionToken is required in Authorization header');
+  }
+
+  const storeSelectionToken = authHeader.split(' ')[1];
+
+  if (!storeSelectionToken) {
+    throw new ApiError(400, 'storeSelectionToken is required');
+  }
+
+  const stores = await getStoresByStoreSelectionToken(storeSelectionToken);
+
+  return new ApiResponse(200, stores, 'Store list fetched successfully').send(res);
 });

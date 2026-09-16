@@ -28,8 +28,10 @@ import { Store } from '../models/store.model.js';
 import { Referral } from '../models/referral.model.js';
 import { saveLoginActivity } from './loginActivity.service.js';
 import { createUserSession } from './userSession.service.js';
-import { UserTracking } from '../models/UserTracking.model.js';
+import { UserTracking } from '../models/userTracking.model.js';
+import { UserStore } from '../models/UserStore.model.js';
 import { Staff } from '../models/staff.model.js';
+import jwt from 'jsonwebtoken';
 
 export const sendOtp = async (phone) => {
   if (!phone) {
@@ -98,110 +100,69 @@ export const sendOtp = async (phone) => {
 };
 
 export const verifyOtp = async (phone, otp, req) => {
-  // Get OTP hash from Redis
   const storedHash = await redis.get(`otp:${phone}`);
 
   if (!storedHash) {
     throw new ApiError(400, 'OTP expired or not found', [
-      {
-        source: 'body',
-        field: 'otp',
-        message: 'OTP not found or expired',
-      },
+      { source: 'body', field: 'otp', message: 'OTP not found or expired' },
     ]);
   }
 
-  // Hash incoming OTP
   const incomingHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
 
-  // Compare OTP
   if (incomingHash !== storedHash) {
-    throw new ApiError(400, 'Invalid OTP!', [
-      {
-        source: 'body',
-        field: 'otp',
-        message: 'Incorrect OTP',
-      },
-    ]);
+    throw new ApiError(400, 'Invalid OTP!', [{ source: 'body', field: 'otp', message: 'Incorrect OTP' }]);
   }
 
-  /**
-   * STEP 1:
-   * OTP VERIFIED TRACKING
-   */
   await UserTracking.findOneAndUpdate(
-    {
-      contactNo: phone,
-    },
-    {
-      contactNo: phone,
-      otpVerified: true,
-      otpVerifiedAt: new Date(),
-      currentStage: 'otp_verified',
-    },
-    {
-      upsert: true,
-      new: true,
-    }
+    { contactNo: phone },
+    { contactNo: phone, otpVerified: true, otpVerifiedAt: new Date(), currentStage: 'otp_verified' },
+    { upsert: true, new: true }
   );
 
-  // Check user exists
-  const user = await getUserByPhone(phone);
+  const user = await User.findOne({ phone });
 
-  // Existing user login
-  if (user) {
-    // Generate auth tokens
-    const tokens = await generateAuthTokens(user);
-
-    console.log('Generated Tokens:', tokens);
-
-    // Save login activity
-    const loginInfo = await saveLoginActivity(user._id, req);
-
-    // Support multiple token structures
-    const accessToken = tokens?.accessToken || tokens?.access?.token;
-
-    const refreshToken = tokens?.refreshToken || tokens?.refresh?.token;
-
-    // Validate token existence
-    if (!accessToken || !refreshToken) {
-      throw new ApiError(500, 'Token generation failed');
-    }
-
-    // Save session
-    await createUserSession({
-      userId: user._id,
-      accessToken,
-      refreshToken,
-
-      device: loginInfo?.device || 'Unknown',
-
-      browser: loginInfo?.browser || 'Unknown',
-
-      os: loginInfo?.os || 'Unknown',
-
-      ipAddress: loginInfo?.ipAddress || 'Unknown',
-    });
-
-    // Delete OTP only after success
+  // নতুন user — registration flow
+  if (!user) {
+    const tempToken = await generateRegistrationToken(phone);
     await redis.del(`otp:${phone}`);
-
-    return {
-      status: 'logged_in',
-      user,
-      tokens,
-    };
+    return { status: 'new_user', tempToken };
   }
 
-  // New user registration
-  const tempToken = await generateRegistrationToken(phone);
+  // existing user — এখন কয়টা store membership আছে চেক করো
+  const memberships = await UserStore.find({ user: user._id, isActive: true })
+    .populate('store', 'name logoUrl isActive')
+    .populate('role', 'name');
 
-  // Delete OTP after success
+  const activeMemberships = memberships.filter((m) => m.store?.isActive);
+
+  // কোনো membership নাই (edge case — data inconsistency বা owner removed হয়ে গেছে)
+  if (activeMemberships.length === 0) {
+    throw new ApiError(403, 'No active store membership found for this account');
+  }
+
   await redis.del(`otp:${phone}`);
 
+  // একটাই store — সরাসরি login করিয়ে দাও, extra click লাগবে না
+  if (activeMemberships.length === 1) {
+    const membership = activeMemberships[0];
+    return await loginToStore(user, membership, req);
+  }
+
+  // একাধিক store — selection ধাপ
+  const storeSelectionToken = jwt.sign({ sub: user._id, purpose: 'store-selection' }, config.jwt.secret, {
+    expiresIn: '5m',
+  });
+
   return {
-    status: 'new_user',
-    tempToken,
+    status: 'select_store',
+    storeSelectionToken,
+    stores: activeMemberships.map((m) => ({
+      storeId: m.store._id,
+      name: m.store.name,
+      logoUrl: m.store.logoUrl,
+      role: m.role?.name,
+    })),
   };
 };
 
@@ -358,10 +319,7 @@ export const registerUserWithStore = async (storeData, userData, files, req) => 
       ]);
     }
 
-    const ownerRole = await Role.findOne({
-      name: roles.OWNER,
-    });
-
+    const ownerRole = await Role.findOne({ name: roles.OWNER });
     if (!ownerRole) {
       throw new ApiError(500, 'Owner role not found');
     }
@@ -369,81 +327,61 @@ export const registerUserWithStore = async (storeData, userData, files, req) => 
     const store = await createStore(storeData);
 
     if (referrerStore) {
-      await Referral.create({
-        referrerStore: referrerStore._id,
-        referredStore: store._id,
-      });
+      await Referral.create({ referrerStore: referrerStore._id, referredStore: store._id });
     }
 
     const amdaaniId = await generateAmdaaniId();
 
+    // এখন createUser এ আর store/role পাস করার দরকার নাই (User model এ ওই field নাই)
     const user = await createUser({
       ...userData,
       amdaaniId,
+    });
+
+    // নতুন — UserStore membership তৈরি করো
+    await UserStore.create({
+      user: user._id,
       store: store._id,
       role: ownerRole._id,
+      isDefault: true,
+      isActive: true,
     });
 
     await UserTracking.findOneAndUpdate(
+      { contactNo: userData.phone },
       {
         contactNo: userData.phone,
-      },
-      {
-        contactNo: userData.phone,
-
         userId: user._id,
-
         storeId: store._id,
-
         registered: true,
-
         registeredAt: new Date(),
-
         currentStage: 'registered',
       },
-      {
-        upsert: true,
-        new: true,
-      }
+      { upsert: true, new: true }
     );
 
-    // Generate auth tokens
-    const tokens = await generateAuthTokens(user);
+    const tokens = await generateAuthTokens(user, store._id, ownerRole._id, ownerRole.name);
 
-    // Save login activity
     const loginInfo = await saveLoginActivity(user._id, req);
 
-    // Support multiple token structures
-    const accessToken = tokens?.accessToken || tokens?.access?.token;
+    const accessToken = tokens?.accessToken;
+    const refreshToken = tokens?.refreshToken;
 
-    const refreshToken = tokens?.refreshToken || tokens?.refresh?.token;
-
-    // Validate token existence
     if (!accessToken || !refreshToken) {
       throw new ApiError(500, 'Token generation failed');
     }
 
-    // Save session
     await createUserSession({
       userId: user._id,
-
       accessToken,
       refreshToken,
-
       device: loginInfo?.device || 'Unknown',
-
       browser: loginInfo?.browser || 'Unknown',
-
       os: loginInfo?.os || 'Unknown',
-
       ipAddress: loginInfo?.ipAddress || 'Unknown',
     });
 
-    return {
-      user,
-      store,
-      tokens,
-    };
+    return { user, store, tokens };
   } catch (error) {
     for (const key of uploadedKeys) {
       try {
@@ -452,7 +390,6 @@ export const registerUserWithStore = async (storeData, userData, files, req) => 
         logger.error(cleanupErr, 'Error deleting file from R2.');
       }
     }
-
     throw error;
   }
 };
@@ -484,31 +421,29 @@ export const logout = async (refreshToken) => {
 export const refreshAuth = async (refreshToken) => {
   try {
     const refreshTokenDoc = await verifyToken(refreshToken, tokenTypes.REFRESH);
-    console.log('refreshTokenDoc:', refreshTokenDoc);
-    const user = await getUserById(refreshTokenDoc.user);
+
+    // পুরনো refresh token এর payload থেকে store/role বের করো
+    const decoded = jwt.verify(refreshToken, config.jwt.secret);
+
+    const user = await User.findById(refreshTokenDoc.user);
     if (!user) {
       throw new ApiError(401, 'Invalid token');
     }
-    const tokens = await generateAuthTokens(user);
+
+    const tokens = await generateAuthTokens(user, decoded.store, decoded.role, decoded.roleName);
 
     await UserSession.findOneAndUpdate(
-      {
-        refreshToken,
-        isActive: true,
-      },
+      { refreshToken, isActive: true },
       {
         $set: {
           accessToken: tokens?.accessToken,
-
           refreshToken: tokens?.refreshToken,
-
           lastSeenAt: new Date(),
         },
       },
-      {
-        new: true,
-      }
+      { new: true }
     );
+
     await refreshTokenDoc.deleteOne();
     return tokens;
   } catch (error) {
@@ -548,4 +483,212 @@ export const assignAgentCodeToStore = async (storeId, agentCode) => {
   }
 
   return updatedStore;
+};
+
+const loginToStore = async (user, membership, req) => {
+  const tokens = await generateAuthTokens(user, membership.store._id, membership.role._id, membership.role.name);
+
+  const loginInfo = await saveLoginActivity(user._id, req);
+
+  const accessToken = tokens?.accessToken;
+  const refreshToken = tokens?.refreshToken;
+
+  if (!accessToken || !refreshToken) {
+    throw new ApiError(500, 'Token generation failed');
+  }
+
+  await createUserSession({
+    userId: user._id,
+    accessToken,
+    refreshToken,
+    device: loginInfo?.device || 'Unknown',
+    browser: loginInfo?.browser || 'Unknown',
+    os: loginInfo?.os || 'Unknown',
+    ipAddress: loginInfo?.ipAddress || 'Unknown',
+  });
+
+  return {
+    status: 'logged_in',
+    user,
+    store: membership.store,
+    role: membership.role,
+    tokens,
+  };
+};
+
+export const selectStoreAndLogin = async (storeSelectionToken, storeId, req) => {
+  let decoded;
+  try {
+    decoded = jwt.verify(storeSelectionToken, config.jwt.secret);
+  } catch (err) {
+    logger.error({ name: err.name, message: err.message }, 'Store selection token verify failed');
+
+    if (err.name === 'TokenExpiredError') {
+      throw new ApiError(401, 'Store selection session expired. Please login again.');
+    }
+    throw new ApiError(401, 'Invalid store selection token');
+  }
+
+  if (decoded.purpose !== 'store-selection') {
+    throw new ApiError(400, 'Invalid token');
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(storeId)) {
+    throw new ApiError(400, 'Invalid storeId');
+  }
+
+  const membership = await UserStore.findOne({
+    user: decoded.sub,
+    store: storeId,
+    isActive: true,
+  })
+    .populate('store', 'name logoUrl isActive')
+    .populate('role', 'name');
+
+  if (!membership || !membership.store?.isActive) {
+    throw new ApiError(403, 'You do not have access to this store');
+  }
+
+  const user = await User.findById(decoded.sub);
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  return await loginToStore(user, membership, req);
+};
+
+export const switchStore = async (userId, storeId, req) => {
+  const membership = await UserStore.findOne({
+    user: userId,
+    store: storeId,
+    isActive: true,
+  })
+    .populate('store', 'name logoUrl isActive')
+    .populate('role', 'name');
+
+  if (!membership || !membership.store?.isActive) {
+    throw new ApiError(403, 'You do not have access to this store');
+  }
+
+  const user = await User.findById(userId);
+  return await loginToStore(user, membership, req);
+};
+
+export const createAdditionalStore = async (userId, storeData, files) => {
+  const uploadedKeys = [];
+
+  try {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new ApiError(404, 'User not found');
+    }
+
+    let referredBy = null;
+    let referrerStore = null;
+
+    if (storeData.usedReferralCode) {
+      referrerStore = await Store.findOne({ referralCode: storeData.usedReferralCode });
+      if (!referrerStore) {
+        throw new ApiError(400, 'Invalid referral code', [
+          { source: 'body', field: 'usedReferralCode', message: 'Invalid referral code' },
+        ]);
+      }
+      referredBy = referrerStore._id;
+    }
+
+    const newReferralCode = await generateReferralCode(Store);
+    storeData.referralCode = newReferralCode;
+    storeData.referredBy = referredBy;
+
+    if (files?.logo) {
+      const logoKey = await compressAndUpload(files.logo[0]?.buffer, { isPublic: true, height: 500, width: 500 });
+      storeData.logoUrl = `${config.r2.publicEndpoint}/${logoKey}`;
+      uploadedKeys.push(logoKey);
+    }
+
+    if (files?.signature) {
+      const signatureKey = await compressAndUpload(files.signature[0]?.buffer, {
+        isPublic: true,
+        height: 200,
+        width: 600,
+      });
+      storeData.signatureUrl = `${config.r2.publicEndpoint}/${signatureKey}`;
+      uploadedKeys.push(signatureKey);
+    }
+
+    const ownerRole = await Role.findOne({ name: roles.OWNER });
+    if (!ownerRole) {
+      throw new ApiError(500, 'Owner role not found');
+    }
+
+    const store = await createStore(storeData);
+
+    if (referrerStore) {
+      await Referral.create({ referrerStore: referrerStore._id, referredStore: store._id });
+    }
+
+    // এই user এর কি আগে থেকে কোনো store আছে? থাকলে এটা default হবে না
+    const existingMembershipCount = await UserStore.countDocuments({ user: userId, isActive: true });
+
+    const membership = await UserStore.create({
+      user: userId,
+      store: store._id,
+      role: ownerRole._id,
+      isDefault: existingMembershipCount === 0, // প্রথম store হলে default, নাহলে না
+      isActive: true,
+    });
+
+    return { store, membership };
+  } catch (error) {
+    for (const key of uploadedKeys) {
+      try {
+        await deleteFileFromR2(true, key);
+      } catch (cleanupErr) {
+        logger.error(cleanupErr, 'Error deleting file from R2.');
+      }
+    }
+    throw error;
+  }
+};
+
+export const getStoresByStoreSelectionToken = async (storeSelectionToken) => {
+  let decoded;
+  try {
+    decoded = jwt.verify(storeSelectionToken, config.jwt.secret);
+  } catch (err) {
+    throw new ApiError(401, 'Store selection token expired or invalid');
+  }
+
+  if (decoded.purpose !== 'store-selection') {
+    throw new ApiError(400, 'Invalid token');
+  }
+
+  const user = await User.findById(decoded.sub);
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  const memberships = await UserStore.find({
+    user: decoded.sub,
+    isActive: true,
+  })
+    .populate('store', 'name logoUrl isActive type')
+    .populate('role', 'name')
+    .sort({ isDefault: -1, createdAt: 1 });
+
+  const activeStores = memberships.filter((m) => m.store?.isActive);
+
+  if (activeStores.length === 0) {
+    throw new ApiError(403, 'No active store membership found for this account');
+  }
+
+  return activeStores.map((m) => ({
+    storeId: m.store._id,
+    name: m.store.name,
+    logoUrl: m.store.logoUrl,
+    type: m.store.type,
+    role: m.role?.name,
+    isDefault: m.isDefault,
+    membershipId: m._id,
+  }));
 };

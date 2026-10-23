@@ -741,7 +741,7 @@ export const getDueCollectionReport = expressAsyncHandler(async (req, res) => {
   // STAFF hole always nijer userId, OWNER hole query theke (optional)
   const userId = isStaff ? req.user._id : queryUserId;
 
-  const report = await invoiceService.getDueCollectionReport({
+  const report = await invoiceService.getDueCollectionReport({  
     store: req.user.store,
     startDate,
     endDate,

@@ -10,6 +10,8 @@ import * as purchaseService from '../services/purchase.service.js';
 import mongoose from 'mongoose';
 import { Role } from '../models/role.model.js';
 import { roles } from '../config/roles.js';
+import {Invoice} from "../models/invoice.model.js";
+import {Purchase} from "../models/purchase.model.js"
 
 export const createInvoice = expressAsyncHandler(async (req, res) => {
   req.body.store = req.user.store;
@@ -379,48 +381,69 @@ export const exportGstPurchaseReportExcel = expressAsyncHandler(async (req, res)
   res.end();
 });
 
+const parseQueryDate = (raw) => {
+  if (raw === undefined || raw === null) return null;
+
+  // duplicate query param hole array ashe, prothom ta nao
+  let value = Array.isArray(raw) ? raw[0] : raw;
+  value = String(value).trim();
+
+  if (!value || value === 'null' || value === 'undefined') return null;
+
+  try {
+    value = decodeURIComponent(value);
+  } catch {
+    /* already decoded */
+  }
+
+  // URL-e "+" space hoye jay (jemon +05:30), seta thik kora
+  if (/^\d{4}-\d{2}-\d{2}T/.test(value)) {
+    value = value.replace(' ', '+');
+  }
+
+  const d = new Date(/^\d+$/.test(value) ? Number(value) : value);
+  return isNaN(d.getTime()) ? undefined : d;
+};
+
 export const getProfitLossReport = expressAsyncHandler(async (req, res) => {
-  const filters = pick(req.query, ['startDate', 'endDate']);
-  const { range } = req.query;
+  const { range, startDate: startRaw, endDate: endRaw, productId } = req.query;
 
   const now = new Date();
   let startDate;
   let endDate;
 
-  if (range === 'thisMonth') {
+  const parsedStart = parseQueryDate(startRaw);
+  const parsedEnd = parseQueryDate(endRaw);
+
+  if (parsedStart === undefined || parsedEnd === undefined) {
+    throw new ApiError(
+      400,
+      `Invalid date format. Received startDate=${JSON.stringify(startRaw)}, endDate=${JSON.stringify(endRaw)}`
+    );
+  }
+
+  if (parsedStart && parsedEnd) {
+    startDate = parsedStart;
+    endDate = parsedEnd;
+  } else if (range === 'thisMonth') {
     startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-  }
-
-  if (range === 'previousMonth') {
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  } else if (range === 'previousMonth') {
     startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-  }
-
-  if (range === 'year') {
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+  } else if (range === 'year') {
     startDate = new Date(now.getFullYear(), 0, 1);
-    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
   }
 
-  if (req.query.startDate && req.query.endDate) {
-    // Decode in case of URL encoding issues
-    const rawStart = decodeURIComponent(req.query.startDate);
-    const rawEnd = decodeURIComponent(req.query.endDate);
-
-    startDate = new Date(rawStart);
-    endDate = new Date(rawEnd);
-
-    // Guard against Invalid Date
-    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid date format. Please provide valid ISO dates.',
-      });
-    }
+  if (productId && !mongoose.Types.ObjectId.isValid(productId)) {
+    throw new ApiError(400, 'Invalid product id.');
   }
 
   const report = await invoiceService.getProfitLossReport({
-    ...filters,
+    startDate,
+    endDate,
+    productId,
     store: req.user.store,
   });
 
@@ -569,9 +592,13 @@ export const getItemStockReport = expressAsyncHandler(async (req, res) => {
 
 export const addPayment = expressAsyncHandler(async (req, res) => {
   const { invoiceId } = req.params;
-  const invoice = await invoiceService.addPaymentToInvoice(invoiceId, req.body);
+  const invoice = await invoiceService.addPaymentToInvoice(invoiceId, {
+    ...req.body,
+    userId: req.user._id,
+  });
   return new ApiResponse(200, invoice, 'Payment added successfully').send(res);
 });
+
 export const changeInvoiceStatus = expressAsyncHandler(async (req, res) => {
   const { id } = req.params;
   const status = req.body.status;
@@ -674,4 +701,53 @@ export const getCustomerReport = expressAsyncHandler(async (req, res) => {
   const report = await invoiceService.getCustomerReport(filters);
 
   return new ApiResponse(200, report, 'Customer report fetched successfully').send(res);
+});
+
+export const getDueCollectionReport = expressAsyncHandler(async (req, res) => {
+  const { range, startDate: startRaw, endDate: endRaw, userId: queryUserId, paymentMethod } = req.query;
+
+  const now = new Date();
+  let startDate;
+  let endDate;
+
+  if (range === 'today') {
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  } else if (range === 'yesterday') {
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0);
+    endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999);
+  } else if (range === 'thisWeek') {
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay(), 0, 0, 0, 0);
+    endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  } else if (range === 'thisMonth') {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  } else if (range === 'previousMonth') {
+    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+  } else if (range === 'year') {
+    startDate = new Date(now.getFullYear(), 0, 1);
+    endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+  } else if (startRaw && endRaw) {
+    startDate = new Date(/^\d+$/.test(startRaw) ? Number(startRaw) : startRaw);
+    endDate = new Date(/^\d+$/.test(endRaw) ? Number(endRaw) : endRaw);
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      throw new ApiError(400, 'Invalid date format.');
+    }
+  }
+
+  const isStaff = req.user?.role?.name === 'staff';
+
+  // STAFF hole always nijer userId, OWNER hole query theke (optional)
+  const userId = isStaff ? req.user._id : queryUserId;
+
+  const report = await invoiceService.getDueCollectionReport({
+    store: req.user.store,
+    startDate,
+    endDate,
+    userId,
+    paymentMethod,
+  });
+
+  return new ApiResponse(200, report, 'Due collection report fetched successfully').send(res);
 });

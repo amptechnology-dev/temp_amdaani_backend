@@ -37,11 +37,6 @@ export const createOrder = async (body) => {
       throw new ApiError(400, 'Order number already exists');
     }
 
-    body.customerName = customer.name;
-    body.customerMobile = customer.mobile;
-    body.customerAddress = customer.address;
-    body.customerGstNumber = customer.gstNumber;
-
     const orderItems = [];
 
     for (const item of body.items) {
@@ -51,7 +46,7 @@ export const createOrder = async (body) => {
       }).session(session);
 
       if (!product) {
-        throw new ApiError(404, `Product not found`);
+        throw new ApiError(404, 'Product not found');
       }
 
       const total = item.quantity * item.sellingPrice;
@@ -80,6 +75,16 @@ export const createOrder = async (body) => {
       [
         {
           ...body,
+
+          // Customer snapshot
+          customerName: customer.name,
+          customerMobile: customer.mobile,
+          customerAddress: customer.address,
+          customerGstNumber: customer.gstNumber,
+
+          // Expected delivery date (empty / missing -> null)
+          deliveryDate: body.deliveryDate ? new Date(body.deliveryDate) : null,
+
           items: orderItems,
         },
       ],
@@ -130,7 +135,7 @@ export const updateOrder = async (orderId, data) => {
       throw new ApiError(404, 'Customer not found');
     }
 
-    // Duplicate Order Number Check (optional)
+    // Duplicate Order Number Check
     const existingOrder = await Order.findOne({
       _id: { $ne: orderId },
       store: order.store,
@@ -180,6 +185,11 @@ export const updateOrder = async (orderId, data) => {
       orderNumber: data.orderNumber,
       orderDate: data.orderDate,
 
+      // Client pathale update hobe (empty value clear kore), na pathale purono value thakbe
+      ...(Object.prototype.hasOwnProperty.call(data, 'deliveryDate') && {
+        deliveryDate: data.deliveryDate ? new Date(data.deliveryDate) : null,
+      }),
+
       customer: customer._id,
       customerName: customer.name,
       customerMobile: customer.mobile,
@@ -207,6 +217,19 @@ export const updateOrder = async (orderId, data) => {
 export const queryOrders = async (filter = {}, options = {}) => {
   const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;
 
+  // Only allow sorting on known fields
+  const allowedSortFields = [
+    'createdAt',
+    'updatedAt',
+    'orderDate',
+    'deliveryDate',
+    'orderNumber',
+    'status',
+  ];
+  const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
+  const sortDirection = order === 'asc' ? 1 : -1;
+
+  // aggregate() does not auto-cast ids like find() does
   if (filter.userId) {
     filter.userId = new mongoose.Types.ObjectId(String(filter.userId));
   }
@@ -215,10 +238,15 @@ export const queryOrders = async (filter = {}, options = {}) => {
     filter.store = new mongoose.Types.ObjectId(String(filter.store));
   }
 
+  if (filter.customer) {
+    filter.customer = new mongoose.Types.ObjectId(String(filter.customer));
+  }
+
   const aggregate = Order.aggregate([
-    {
-      $match: filter,
-    },
+    { $match: filter },
+
+    // Sort before lookups (cheaper, stable pagination with _id tie-breaker)
+    { $sort: { [safeSortBy]: sortDirection, _id: sortDirection } },
 
     // ==========================
     // Store Details
@@ -310,6 +338,25 @@ export const queryOrders = async (filter = {}, options = {}) => {
         status: 1,
         remarks: 1,
 
+        // Customer snapshot
+        customer: 1,
+        customerName: 1,
+        customerMobile: 1,
+        customerAddress: 1,
+        customerGstNumber: 1,
+
+        // Delivery
+        deliveryDate: 1,
+        actualDeliveryDate: 1,
+        deliveredBy: 1,
+        challanNo: 1,
+        challanDate: 1,
+        deliveryAddress: 1,
+
+        // Invoice
+        invoice: 1,
+        isInvoiceCreated: 1,
+
         items: 1,
         productDetails: 1,
 
@@ -319,12 +366,6 @@ export const queryOrders = async (filter = {}, options = {}) => {
 
         createdAt: 1,
         updatedAt: 1,
-      },
-    },
-
-    {
-      $sort: {
-        [sortBy]: order === 'desc' ? -1 : 1,
       },
     },
   ]);
@@ -476,6 +517,20 @@ export const getOrderById = async (id) => {
         customerGstNumber: 1,
 
         customerDetails: 1,
+
+        // Delivery
+        deliveryDate: 1,
+        actualDeliveryDate: 1,
+        deliveredBy: 1,
+        challanNo: 1,
+        challanDate: 1,
+        deliveryAddress: 1,
+
+        // Status timeline + invoice
+        approvedAt: 1,
+        invoicedAt: 1,
+        invoice: 1,
+        isInvoiceCreated: 1,
 
         items: 1,
         productDetails: 1,

@@ -26,6 +26,6 @@ router.put('/status/:id', validate(invoiceSchema.changeInvoiceStatus), invoiceCo
 router.get('/transactions', invoiceController.getTransactionsByStore);
 router.delete('/remove-payment/:paymentId', invoiceController.removePaymentFromInvoice);
 router.get('/customer-wise-report', invoiceController.getCustomerReport);
-router.get('/due-collection-report', invoiceController.getDueCollectionReport);
+router.get('/due-collection-report', invoiceController.getDueCollectionReport); 
 
 export default router;

@@ -54,14 +54,14 @@ export const createOrder = async (body) => {
       orderItems.push({
         product: product._id,
 
-        // Product Snapshot
         name: product.name,
         hsn: product.hsn,
         unit: product.unit,
         gstRate: product.gstRate,
         isTaxInclusive: product.isTaxInclusive,
 
-        // User Input
+        productPrice: Number(product.sellingPrice || 0),
+
         quantity: item.quantity,
         sellingPrice: item.sellingPrice,
 
@@ -124,6 +124,11 @@ export const updateOrder = async (orderId, data) => {
       throw new ApiError(404, 'Order not found');
     }
 
+    // Invoice hoye gele / deliver hoye gele order edit kora jabe na
+    if (['invoiced', 'delivered'].includes(order.status)) {
+      throw new ApiError(400, `Cannot edit an order that is already ${order.status}`);
+    }
+
     // Customer Validation
     const customer = await Customer.findOne({
       _id: data.customer,
@@ -170,6 +175,8 @@ export const updateOrder = async (orderId, data) => {
         unit: product.unit,
         gstRate: product.gstRate,
         isTaxInclusive: product.isTaxInclusive,
+
+        productPrice: Number(product.sellingPrice || 0),
 
         // User Input
         sellingPrice: item.sellingPrice,
@@ -218,14 +225,7 @@ export const queryOrders = async (filter = {}, options = {}) => {
   const { page = 1, limit = 20, sortBy = 'createdAt', order = 'desc' } = options;
 
   // Only allow sorting on known fields
-  const allowedSortFields = [
-    'createdAt',
-    'updatedAt',
-    'orderDate',
-    'deliveryDate',
-    'orderNumber',
-    'status',
-  ];
+  const allowedSortFields = ['createdAt', 'updatedAt', 'orderDate', 'deliveryDate', 'orderNumber', 'status'];
   const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
   const sortDirection = order === 'asc' ? 1 : -1;
 
@@ -559,25 +559,35 @@ export const changeOrderStatus = async (orderId, data, approvedBy) => {
     if (order.status === 'delivered') {
       throw new ApiError(400, 'Delivered order cannot be modified');
     }
+
     const { status } = data;
+
+    // "invoiced" kokhono manually set kora jabe na —
+    // sudhu approved order theke invoice create korle automatically hoy.
+    if (status === 'invoiced') {
+      throw new ApiError(
+        400,
+        'Status "invoiced" is set automatically when an invoice is created from an approved order'
+      );
+    }
+
     const statusFlow = {
       order_taken: ['approved'],
-      approved: ['invoiced'],
+      approved: [], // approved theke agaate hole invoice create korte hobe
       invoiced: ['delivered'],
       delivered: [],
     };
-    if (!statusFlow[order.status].includes(status)) {
+
+    if (!statusFlow[order.status]?.includes(status)) {
       throw new ApiError(400, `Cannot change status from "${order.status}" to "${status}"`);
     }
+
     order.status = status;
-    order.approvedBy = approvedBy;
+
     switch (status) {
       case 'approved':
+        order.approvedBy = approvedBy;
         order.approvedAt = new Date();
-        break;
-
-      case 'invoiced':
-        order.invoicedAt = new Date();
         break;
 
       case 'delivered':
@@ -589,7 +599,6 @@ export const changeOrderStatus = async (orderId, data, approvedBy) => {
 
         // Auto
         order.actualDeliveryDate = new Date();
-
         break;
     }
 

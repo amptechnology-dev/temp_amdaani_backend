@@ -7,13 +7,11 @@ const UserSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
-    store: { type: mongoose.SchemaTypes.ObjectId, ref: 'Store' },
     phone: { type: String, required: true, unique: true, trim: true },
     name: { type: String, trim: true },
     email: { type: String, trim: true, lowercase: true },
     isVerified: { type: Boolean, default: false },
     lastLoginAt: Date,
-    role: { type: mongoose.SchemaTypes.ObjectId, ref: 'Role', required: true },
     preferences: {
       language: { type: String, default: 'en' },
       notifications: {

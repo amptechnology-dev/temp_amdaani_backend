@@ -51,8 +51,21 @@ router.post('/phone-change-email/update-email', authController.updateChangeEmail
 // router.post('/reset-password', validate(authSchema.resetPassword), authController.resetPassword);
 router.patch('/toggle-store-status/:storeId', authenticate, authController.toggleStoreStatus);
 
-router.patch("/assign-agent-code",authenticate, authController.updateStoreAgentCode);
+router.patch('/assign-agent-code', authenticate, authController.updateStoreAgentCode);
 
-
+router.post('/verify-otp', authController.verifyAuthOtp);
+router.post('/select-store', authController.selectStore);
+router.get('/my-stores', authenticate, authController.getMyStoreList);
+router.post('/switch-store', authenticate, authController.switchMyStore);
+router.post(
+  '/create-store',
+  authenticate,
+  uploadImage.fields([
+    { name: 'logo', maxCount: 1 },
+    { name: 'signature', maxCount: 1 },
+  ]),
+  authController.createNewStoreForMe
+);
+router.get('/stores-for-selection', authController.getStoresForSelection);
 
 export default router;

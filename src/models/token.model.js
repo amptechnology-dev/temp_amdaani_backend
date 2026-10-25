@@ -14,6 +14,7 @@ const tokenSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    store: { type: mongoose.SchemaTypes.ObjectId, ref: 'Store' },
     type: {
       type: String,
       enum: [tokenTypes.REFRESH],

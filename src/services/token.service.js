@@ -3,29 +3,19 @@ import config from '../config/config.js';
 import { Token } from '../models/token.model.js';
 import tokenTypes from '../config/tokens.js';
 import ms from 'ms';
-import { json } from 'stream/consumers';
 
 /**
  * Generate token
- * @param {string} userId - The ID of the user
- * @param {number|string} expiresIn - Token expiration time in seconds or string (e.g., 60, '2 days')
- * @param {string} type - Type of the token (e.g., 'access', 'refresh')
- * @param {string} [secret=config.jwt.secret] - Secret key for signing the token
- * @returns {string} - Signed JWT
+ * @param {string} userId
+ * @param {number|string} expiresIn
+ * @param {string} type
+ * @param {Object} [extraPayload={}] - store, role, roleName ইত্যাদি এখানে যাবে
+ * @param {string} [secret=config.jwt.secret]
  */
-export const generateToken = (userId, expiresIn, type, secret = config.jwt.secret) => {
-  return jwt.sign({ sub: userId, type }, secret, { expiresIn });
+export const generateToken = (userId, expiresIn, type, extraPayload = {}, secret = config.jwt.secret) => {
+  return jwt.sign({ sub: userId, type, ...extraPayload }, secret, { expiresIn });
 };
 
-/**
- * Save a token
- * @param {string} token - The token to save
- * @param {ObjectId} user - The ID of the user
- * @param {Date} expires - Token expiration date-time
- * @param {string} type - Type of the token (e.g., 'access', 'refresh')
- * @param {boolean} [blacklisted] - Whether the token is blacklisted
- * @returns {Promise<Token>} - The saved token document
- */
 export const saveToken = async (token, user, expires, type, blacklisted = false) => {
   const tokenDoc = await Token.create({
     token,
@@ -37,12 +27,6 @@ export const saveToken = async (token, user, expires, type, blacklisted = false)
   return tokenDoc;
 };
 
-/**
- * Verify token and return token doc (or throw an error if it is not valid)
- * @param {string} token - The token to verify
- * @param {string} type - Type of the token (e.g., 'access', 'refresh')
- * @returns {Promise<Token>} - The token document
- */
 export const verifyToken = async (token, type) => {
   const payload = jwt.verify(token, config.jwt.secret);
   const tokenDoc = await Token.findOne({
@@ -58,13 +42,22 @@ export const verifyToken = async (token, type) => {
 };
 
 /**
- * Generate auth tokens
- * @param {User} user - The user object
- * @returns {Promise<Object>} - Object containing the access and refresh tokens
+ * Generate auth tokens — এখন store + role ও payload এ embed হবে
+ * @param {User} user
+ * @param {ObjectId} storeId
+ * @param {ObjectId} roleId
+ * @param {string} roleName - authorizeRoles middleware এ role.name দিয়ে check হয়, তাই এটা payload এ রাখা জরুরি
  */
-export const generateAuthTokens = async (user) => {
-  const accessToken = generateToken(user._id, config.jwt.accessExpiration, tokenTypes.ACCESS);
-  const refreshToken = generateToken(user._id, config.jwt.refreshExpiration, tokenTypes.REFRESH);
+export const generateAuthTokens = async (user, storeId = null, roleId = null, roleName = null) => {
+  const payload = {
+    ...(storeId && { store: storeId }),
+    ...(roleId && { role: roleId }),
+    ...(roleName && { roleName }),
+  };
+
+  const accessToken = generateToken(user._id, config.jwt.accessExpiration, tokenTypes.ACCESS, payload);
+  const refreshToken = generateToken(user._id, config.jwt.refreshExpiration, tokenTypes.REFRESH, payload);
+
   await saveToken(refreshToken, user._id, new Date(Date.now() + ms(config.jwt.refreshExpiration)), tokenTypes.REFRESH);
 
   return {
@@ -73,31 +66,18 @@ export const generateAuthTokens = async (user) => {
   };
 };
 
-/**
- * Generate temporary token for phone verification or registration
- * @param {string} phone - The phone number
- * @returns {Promise<string>} - The temporary token
- */
 export const generateRegistrationToken = async (phone) => {
-  const resetPasswordToken = generateToken(phone, `${config.jwt.registrationExpiration}m`, tokenTypes.REGISTER);
-  return resetPasswordToken;
+  return generateToken(phone, `${config.jwt.registrationExpiration}m`, tokenTypes.REGISTER);
 };
 
 export const verifyRegistrationToken = async (token) => {
-  console.log('ok==>', JSON.stringify(config.jwt.secret));
-  console.log('--->', JSON.stringify(token));
   return jwt.verify(token, config.jwt.secret);
 };
 
 export const generateSuperAdminToken = async (userId) => {
-  //NOTE:Hardcoded token expiry for now
-  const superAdminToken = generateToken(userId, 24 * 60 * 60 * 1000, tokenTypes.ACCESS);
-  return superAdminToken;
+  return generateToken(userId, 24 * 60 * 60 * 1000, tokenTypes.ACCESS);
 };
 
-/**
- * Remove a token from DB (logout)
- */
 export const revokeToken = async (token) => {
   return Token.findOneAndDelete({ token });
 };

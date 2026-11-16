@@ -1196,7 +1196,7 @@ export const getProfitLossReport = async (filters = {}) => {
 
   console.log(`[P&L] invoices fetched: ${invoices.length} in ${Date.now() - t0}ms`);
 
-  // ── Step 2: kon kon product-er purchase cost lagbe ────────────────────
+  // ── Step 2: which products need purchase cost ─────────────────────────
   const neededProducts = new Set();
   invoices.forEach((inv) => {
     (inv.items || []).forEach((it) => {
@@ -1206,10 +1206,11 @@ export const getProfitLossReport = async (filters = {}) => {
     });
   });
 
-  // ── Step 3: latest purchase cost ──────────────────────────────────────
+  // ── Step 3: latest purchase cost (both without GST and with GST) ──────
   const t1 = Date.now();
-  const purchaseCostMap = new Map();
+  const purchaseCostMap = new Map(); // productId -> { excl, incl }
 
+  // Returns purchase cost per unit: { excl: without GST, incl: with GST }
   const calcPurchasePerUnit = (item) => {
     const gst = Number(item.gstRate || 0);
     const qty = Math.max(1, Number(item.quantity || 1));
@@ -1221,10 +1222,13 @@ export const getProfitLossReport = async (filters = {}) => {
     const discRaw = Number(item.purchaseDiscount || 0);
     const divisor = 1 + gst / 100;
 
-    if (total > 0) return total / divisor / qty;
+    if (total > 0) {
+      return { excl: total / divisor / qty, incl: total / qty };
+    }
 
     const discPerUnit = discType === 'percentage' ? rate * (discPct / 100) : discRaw / qty;
-    return Math.max(0, isIncl && gst > 0 ? (rate - discPerUnit) / divisor : rate - discPerUnit);
+    const excl = Math.max(0, isIncl && gst > 0 ? (rate - discPerUnit) / divisor : rate - discPerUnit);
+    return { excl, incl: excl * divisor };
   };
 
   if (neededProducts.size > 0) {
@@ -1260,7 +1264,7 @@ export const getProfitLossReport = async (filters = {}) => {
     `[P&L] purchase costs: ${purchaseCostMap.size}/${neededProducts.size} products in ${Date.now() - t1}ms`
   );
 
-  // ── Step 4: hishab (JS) ───────────────────────────────────────────────
+  // ── Step 4: calculation (JS) ──────────────────────────────────────────
   const result = [];
 
   invoices.forEach((inv) => {
@@ -1268,6 +1272,9 @@ export const getProfitLossReport = async (filters = {}) => {
     let totalSales = 0;
     let totalPurchase = 0;
     let totalProfit = 0;
+    let totalSalesWithGst = 0;
+    let totalPurchaseWithGst = 0;
+    let totalProfitWithGst = 0;
 
     (inv.items || []).forEach((it) => {
       if (filterProductId && String(it.product) !== filterProductId) return;
@@ -1279,14 +1286,26 @@ export const getProfitLossReport = async (filters = {}) => {
       const isIncl = !!it.isTaxInclusive;
       const divisor = 1 + gst / 100;
 
+      // Sale per unit — without GST
       const saleTaxablePerUnit =
         total > 0 && qty > 0 ? total / divisor / qty : isIncl && gst > 0 ? sp / divisor : sp;
 
-      const purchaseTaxablePerUnit = it.product ? purchaseCostMap.get(String(it.product)) || 0 : 0;
+      // Sale per unit — with GST
+      const saleGrossPerUnit = total > 0 && qty > 0 ? total / qty : isIncl ? sp : sp * divisor;
 
+      const cost = it.product ? purchaseCostMap.get(String(it.product)) : null;
+      const purchaseTaxablePerUnit = cost?.excl || 0;
+      const purchaseGrossPerUnit = cost?.incl || 0;
+
+      // Without GST
       const invoiceAmount = round2(saleTaxablePerUnit * qty);
       const purchaseAmount = round2(purchaseTaxablePerUnit * qty);
       const itemProfit = round2(invoiceAmount - purchaseAmount);
+
+      // With GST
+      const invoiceAmountWithGst = round2(saleGrossPerUnit * qty);
+      const purchaseAmountWithGst = round2(purchaseGrossPerUnit * qty);
+      const itemProfitWithGst = round2(invoiceAmountWithGst - purchaseAmountWithGst);
 
       items.push({
         productId: it.product || null,
@@ -1295,11 +1314,17 @@ export const getProfitLossReport = async (filters = {}) => {
         invoiceAmount,
         purchaseAmount,
         itemProfit,
+        invoiceAmountWithGst,
+        purchaseAmountWithGst,
+        itemProfitWithGst,
       });
 
       totalSales += invoiceAmount;
       totalPurchase += purchaseAmount;
       totalProfit += itemProfit;
+      totalSalesWithGst += invoiceAmountWithGst;
+      totalPurchaseWithGst += purchaseAmountWithGst;
+      totalProfitWithGst += itemProfitWithGst;
     });
 
     if (!items.length) return;
@@ -1313,6 +1338,9 @@ export const getProfitLossReport = async (filters = {}) => {
       totalSales: round2(totalSales),
       totalPurchase: round2(totalPurchase),
       profitLoss: round2(totalProfit),
+      totalSalesWithGst: round2(totalSalesWithGst),
+      totalPurchaseWithGst: round2(totalPurchaseWithGst),
+      profitLossWithGst: round2(totalProfitWithGst),
     });
   });
 
@@ -1322,9 +1350,19 @@ export const getProfitLossReport = async (filters = {}) => {
       acc.totalSales += curr.totalSales;
       acc.totalPurchase += curr.totalPurchase;
       acc.totalProfit += curr.profitLoss;
+      acc.totalSalesWithGst += curr.totalSalesWithGst;
+      acc.totalPurchaseWithGst += curr.totalPurchaseWithGst;
+      acc.totalProfitWithGst += curr.profitLossWithGst;
       return acc;
     },
-    { totalSales: 0, totalPurchase: 0, totalProfit: 0 }
+    {
+      totalSales: 0,
+      totalPurchase: 0,
+      totalProfit: 0,
+      totalSalesWithGst: 0,
+      totalPurchaseWithGst: 0,
+      totalProfitWithGst: 0,
+    }
   );
 
   // ── Product-wise summary ──────────────────────────────────────────────
@@ -1342,6 +1380,9 @@ export const getProfitLossReport = async (filters = {}) => {
           totalSales: 0,
           totalPurchase: 0,
           totalProfit: 0,
+          totalSalesWithGst: 0,
+          totalPurchaseWithGst: 0,
+          totalProfitWithGst: 0,
           invoiceIds: new Set(),
         });
       }
@@ -1351,6 +1392,9 @@ export const getProfitLossReport = async (filters = {}) => {
       p.totalSales += it.invoiceAmount || 0;
       p.totalPurchase += it.purchaseAmount || 0;
       p.totalProfit += it.itemProfit || 0;
+      p.totalSalesWithGst += it.invoiceAmountWithGst || 0;
+      p.totalPurchaseWithGst += it.purchaseAmountWithGst || 0;
+      p.totalProfitWithGst += it.itemProfitWithGst || 0;
       p.invoiceIds.add(String(inv._id));
     });
   });
@@ -1359,6 +1403,8 @@ export const getProfitLossReport = async (filters = {}) => {
     .map((p) => {
       const ts = round2(p.totalSales);
       const tp = round2(p.totalProfit);
+      const tsg = round2(p.totalSalesWithGst);
+      const tpg = round2(p.totalProfitWithGst);
       return {
         productId: p.productId ? String(p.productId) : null,
         productName: p.productName,
@@ -1368,6 +1414,10 @@ export const getProfitLossReport = async (filters = {}) => {
         totalPurchase: round2(p.totalPurchase),
         profitLoss: tp,
         marginPercent: ts > 0 ? round2((tp / ts) * 100) : 0,
+        totalSalesWithGst: tsg,
+        totalPurchaseWithGst: round2(p.totalPurchaseWithGst),
+        profitLossWithGst: tpg,
+        marginPercentWithGst: tsg > 0 ? round2((tpg / tsg) * 100) : 0,
       };
     })
     .sort((a, b) => b.profitLoss - a.profitLoss);
@@ -1379,130 +1429,15 @@ export const getProfitLossReport = async (filters = {}) => {
       totalSales: round2(overall.totalSales),
       totalPurchase: round2(overall.totalPurchase),
       totalProfit: round2(overall.totalProfit),
+      totalSalesWithGst: round2(overall.totalSalesWithGst),
+      totalPurchaseWithGst: round2(overall.totalPurchaseWithGst),
+      totalProfitWithGst: round2(overall.totalProfitWithGst),
     },
     products,
-    // items bad: frontend invoice-wise table-e lagbe na, payload chhoto hobe
+    // items removed: frontend does not need them in the invoice-wise table
     invoices: result.map(({ items, ...rest }) => rest),
   };
 };
-// export async function getStockBalance(filters) {
-//   const { store, itemName, asOnDate, startDate, endDate } = filters;
-
-//   // Fix 1: For asOnDate, set time to end-of-day to include all transactions on that date.
-//   // For date range, startDate begins at 00:00:00 and endDate ends at 23:59:59.
-//   let dateFilter;
-//   if (asOnDate) {
-//     const endOfDay = new Date(asOnDate);
-//     endOfDay.setHours(23, 59, 59, 999);
-//     // No lower bound — asOnDate means "all stock up to and including this date"
-//     dateFilter = { $lte: endOfDay };
-//   } else {
-//     const start = new Date(startDate);
-//     start.setHours(0, 0, 0, 0);
-//     const end = new Date(endDate);
-//     end.setHours(23, 59, 59, 999);
-//     dateFilter = { $gte: start, $lte: end };
-//   }
-
-//   const baseMatch = {
-//     store: new mongoose.Types.ObjectId(store), // Fix 2: ensure ObjectId comparison
-//     date: dateFilter,
-//   };
-
-//   const pipeline = [
-//     { $match: baseMatch },
-
-//     // Join product to get item name
-//     {
-//       $lookup: {
-//         from: 'products',
-//         localField: 'product',
-//         foreignField: '_id',
-//         as: 'productInfo',
-//       },
-//     },
-//     { $unwind: '$productInfo' },
-
-//     // Optional item name filter
-//     ...(itemName ? [{ $match: { 'productInfo.name': { $regex: itemName, $options: 'i' } } }] : []),
-
-//     {
-//       $group: {
-//         _id: '$product',
-//         itemDescription: { $first: '$productInfo.name' },
-
-//         // Fix 3: Use abs(quantity) to guard against any negatively-stored OUT quantities
-//         totalIn: {
-//           $sum: {
-//             $cond: [
-//               { $eq: ['$direction', 'IN'] },
-//               { $abs: '$quantity' }, // always treat as positive
-//               0,
-//             ],
-//           },
-//         },
-//         totalOut: {
-//           $sum: {
-//             $cond: [
-//               { $eq: ['$direction', 'OUT'] },
-//               { $abs: '$quantity' }, // always treat as positive
-//               0,
-//             ],
-//           },
-//         },
-
-//         // Weighted average cost from IN transactions only
-//         totalInValue: {
-//           $sum: {
-//             $cond: [
-//               { $eq: ['$direction', 'IN'] },
-//               {
-//                 $multiply: [{ $abs: '$quantity' }, { $ifNull: ['$rate', 0] }],
-//               },
-//               0,
-//             ],
-//           },
-//         },
-//       },
-//     },
-
-//     {
-//       $project: {
-//         _id: 0,
-//         itemDescription: 1,
-//         totalIn: 1,
-//         totalOut: 1,
-//         // Fix 4: closing balance = IN - OUT (both are now positive sums)
-//         quantity: { $subtract: ['$totalIn', '$totalOut'] },
-//         avgRate: {
-//           $cond: [{ $gt: ['$totalIn', 0] }, { $divide: ['$totalInValue', '$totalIn'] }, 0],
-//         },
-//       },
-//     },
-
-//     {
-//       $addFields: {
-//         itemValue: {
-//           $round: [{ $multiply: ['$quantity', '$avgRate'] }, 2],
-//         },
-//       },
-//     },
-
-//     // Fix 5: allow negative balance to show (for audit trail), or keep $ne: 0 if preferred
-//     { $match: { quantity: { $ne: 0 } } },
-//     { $sort: { itemDescription: 1 } },
-//   ];
-
-//   const result = await StockTransaction.aggregate(pipeline);
-
-//   return result.map(({ itemDescription, quantity, itemValue, totalIn, totalOut }) => ({
-//     itemDescription,
-//     quantity,
-//     itemValue,
-//     totalIn,
-//     totalOut,
-//   }));
-// }
 
 export const getItemStockReport = async (filters = {}) => {
   const { store, itemName, asOnDate, startDate, endDate } = filters;

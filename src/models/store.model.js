@@ -42,6 +42,7 @@ const storeSchema = new mongoose.Schema(
       invoiceTerms: String,
       mrpManagement: { type: Boolean, default: false },
       stockManagement: { type: Boolean, default: false },
+      showGstPerUnit: { type: Boolean, default: false },
       purchaseOrderManagement: { type: Boolean, default: false },
       printMode: {
         type: String,

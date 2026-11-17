@@ -87,5 +87,6 @@ const purchaseSchema = new mongoose.Schema(
 purchaseSchema.index({ store: 1, invoiceNumber: 1, vendor: 1 });
 purchaseSchema.index({ store: 1, createdAt: -1 });
 purchaseSchema.plugin(mongooseAggregatePaginate);
+purchaseSchema.index({ store: 1, 'items.product': 1, createdAt: -1 });
 
 export const Purchase = mongoose.model('Purchase', purchaseSchema);

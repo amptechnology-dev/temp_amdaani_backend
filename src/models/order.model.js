@@ -24,6 +24,14 @@ const orderItemSchema = new mongoose.Schema(
       type: String,
     },
 
+    // Order-er somoy product master-er price (snapshot, user edit korte pare na)
+    productPrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    // Order price: user manually jeta set korche (product price theke alada hote pare)
     sellingPrice: {
       type: Number,
       required: true,

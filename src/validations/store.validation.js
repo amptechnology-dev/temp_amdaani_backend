@@ -131,6 +131,7 @@ export const updateStore = {
         invoiceTerms: yup.string(),
         stockManagement: yup.boolean(),
         purchaseOrderManagement: yup.boolean(),
+        showGstPerUnit: yup.boolean(),
         printMode: yup.string().trim().oneOf(['a4', 'a5', 'thermal'], 'Invalid print mode'),
       }),
   }),

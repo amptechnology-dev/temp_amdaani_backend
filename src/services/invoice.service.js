@@ -152,6 +152,7 @@ export const createInvoice = async (data) => {
     await createTransaction(
       {
         store: invoice.store,
+        userId: data.userId,
         invoice: invoice._id,
         amount: invoice.amountPaid,
         paymentMethod: invoice.paymentMethod,
@@ -247,10 +248,10 @@ export const updateInvoice = async (invoiceId, data) => {
     });
     await invoice.save({ session });
 
-    // --- Step 6: Recreate transaction ---
-    await createTransaction(
+       await createTransaction(
       {
         store: invoice.store,
+        userId: invoice.userId,
         invoice: invoice._id,
         amount: invoice.amountPaid,
         paymentMethod: invoice.paymentMethod,
@@ -1167,388 +1168,276 @@ export const getGstPurchaseReport = async (filters = {}) => {
 };
 
 export const getProfitLossReport = async (filters = {}) => {
-  const { store, startDate, endDate } = filters;
+  const { store, startDate, endDate, productId } = filters;
 
-  const matchStage = { status: { $ne: 'cancelled' } };
+  const t0 = Date.now();
+  const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
-  if (store) {
-    matchStage.store = new mongoose.Types.ObjectId(String(store));
-  }
+  const storeId = store ? new mongoose.Types.ObjectId(String(store)) : null;
+  const filterProductId = productId ? String(productId) : null;
 
+  // ── Step 1: Invoice fetch ─────────────────────────────────────────────
+  const invoiceQuery = { status: { $ne: 'cancelled' } };
+  if (storeId) invoiceQuery.store = storeId;
   if (startDate && endDate) {
-    const start = new Date(startDate);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-    matchStage.invoiceDate = { $gte: start, $lte: end };
+    invoiceQuery.invoiceDate = { $gte: new Date(startDate), $lte: new Date(endDate) };
+  }
+  if (filterProductId) {
+    invoiceQuery['items.product'] = new mongoose.Types.ObjectId(filterProductId);
   }
 
-  const result = await Invoice.aggregate([
-    { $match: matchStage },
-    { $unwind: '$items' },
+  const invoices = await Invoice.find(invoiceQuery)
+    .select(
+      'invoiceNumber invoiceDate customerName customerMobile items.product items.name items.quantity items.sellingPrice items.gstRate items.isTaxInclusive items.total'
+    )
+    .sort({ invoiceDate: 1 })
+    .maxTimeMS(30000)
+    .lean();
 
-    // ── Preserve invoice item fields ──────────────────────────────────────
-    {
-      $addFields: {
-        _invoiceQty: '$items.quantity',
-        _invoiceSellingPrice: '$items.sellingPrice',
-        _invoiceGstRate: { $ifNull: ['$items.gstRate', 0] },
-        _invoiceIsTaxInclusive: { $ifNull: ['$items.isTaxInclusive', false] },
-        _invoiceProductId: '$items.product',
-        _invoiceProductName: '$items.name',
-        _invoiceItemTotal: { $ifNull: ['$items.total', 0] },
-      },
-    },
+  console.log(`[P&L] invoices fetched: ${invoices.length} in ${Date.now() - t0}ms`);
 
-    // ── Step 1: sale taxable per unit ─────────────────────────────────────
-    // items.total includes GST always → taxable = total / (1 + gst/100) / qty
-    // e.g. 160 / 1.05 / 2 = 76.19
-    {
-      $addFields: {
-        _saleTaxablePerUnit: {
-          $cond: [
-            {
-              $and: [{ $gt: ['$_invoiceItemTotal', 0] }, { $gt: ['$_invoiceQty', 0] }],
-            },
-            {
-              $divide: [
-                {
-                  $divide: ['$_invoiceItemTotal', { $add: [1, { $divide: ['$_invoiceGstRate', 100] }] }],
-                },
-                '$_invoiceQty',
-              ],
-            },
-            // fallback: sellingPrice already ex-GST in non-inclusive mode
-            {
-              $cond: [
-                {
-                  $and: ['$_invoiceIsTaxInclusive', { $gt: ['$_invoiceGstRate', 0] }],
-                },
-                {
-                  $divide: ['$_invoiceSellingPrice', { $add: [1, { $divide: ['$_invoiceGstRate', 100] }] }],
-                },
-                '$_invoiceSellingPrice',
-              ],
-            },
-          ],
-        },
-      },
-    },
+  // ── Step 2: which products need purchase cost ─────────────────────────
+  const neededProducts = new Set();
+  invoices.forEach((inv) => {
+    (inv.items || []).forEach((it) => {
+      if (!it.product) return;
+      if (filterProductId && String(it.product) !== filterProductId) return;
+      neededProducts.add(String(it.product));
+    });
+  });
 
-    // ── Step 2: fetch latest purchase — compute taxablePerUnit INSIDE pipeline ──
-    // Computing inside $lookup avoids the null-field problem entirely
-    {
-      $lookup: {
-        from: 'purchases',
-        let: { productId: '$_invoiceProductId' },
-        pipeline: [
-          { $match: { status: { $ne: 'cancelled' } } },
-          { $unwind: '$items' },
-          {
-            $match: {
-              $expr: { $eq: ['$items.product', '$$productId'] },
-            },
-          },
-          { $sort: { createdAt: -1 } },
-          { $limit: 1 },
-          {
-            $addFields: {
-              _pGst: { $ifNull: ['$items.gstRate', 0] },
-              _pQty: { $max: [1, { $ifNull: ['$items.quantity', 1] }] },
-              _pTotal: { $ifNull: ['$items.total', 0] },
-              _pRate: { $ifNull: ['$items.rate', 0] },
-              _pIsIncl: {
-                $ifNull: ['$items.isPurchaseTaxInclusive', { $ifNull: ['$items.isTaxInclusive', false] }],
-              },
-              _pDiscRaw: { $ifNull: ['$items.purchaseDiscount', 0] },
-              _pDiscPct: { $ifNull: ['$items.purchaseDiscountPercentage', 0] },
-              _pDiscType: { $ifNull: ['$items.purchaseDiscountType', 'amount'] },
-            },
-          },
-          {
-            $addFields: {
-              // ── taxablePerUnit computed HERE inside lookup ──────────────
-              // PRIMARY: use items.total (GST-inclusive) → strip GST → divide by qty
-              // e.g. total=120, gst=5%, qty=3 → 120/1.05/3 = 38.10
-              purchaseTaxablePerUnit: {
-                $cond: [
-                  { $gt: ['$_pTotal', 0] },
-                  {
-                    $divide: [
-                      {
-                        $divide: ['$_pTotal', { $add: [1, { $divide: ['$_pGst', 100] }] }],
-                      },
-                      '$_pQty',
-                    ],
-                  },
-                  // FALLBACK: manual calc from rate - discPerUnit
-                  {
-                    $let: {
-                      vars: {
-                        discPerUnit: {
-                          $cond: [
-                            { $eq: ['$_pDiscType', 'percentage'] },
-                            { $multiply: ['$_pRate', { $divide: ['$_pDiscPct', 100] }] },
-                            // amount type: purchaseDiscount is TOTAL line ÷ qty
-                            { $divide: ['$_pDiscRaw', '$_pQty'] },
-                          ],
-                        },
-                        divisor: {
-                          $add: [1, { $divide: ['$_pGst', 100] }],
-                        },
-                      },
-                      in: {
-                        $max: [
-                          0,
-                          {
-                            $cond: [
-                              { $and: ['$_pIsIncl', { $gt: ['$_pGst', 0] }] },
-                              {
-                                $divide: [{ $subtract: ['$_pRate', '$$discPerUnit'] }, '$$divisor'],
-                              },
-                              { $subtract: ['$_pRate', '$$discPerUnit'] },
-                            ],
-                          },
-                        ],
-                      },
-                    },
-                  },
-                ],
-              },
-            },
-          },
-          {
-            $project: {
-              _id: 0,
-              purchaseTaxablePerUnit: 1,
-            },
-          },
-        ],
-        as: 'purchaseData',
-      },
-    },
+  // ── Step 3: latest purchase cost (both without GST and with GST) ──────
+  const t1 = Date.now();
+  const purchaseCostMap = new Map(); // productId -> { excl, incl }
 
-    // ── Step 3: extract purchase taxable per unit ─────────────────────────
-    {
-      $addFields: {
-        _purchaseTaxablePerUnit: {
-          $ifNull: [{ $arrayElemAt: ['$purchaseData.purchaseTaxablePerUnit', 0] }, 0],
-        },
-      },
-    },
+  // Returns purchase cost per unit: { excl: without GST, incl: with GST }
+  const calcPurchasePerUnit = (item) => {
+    const gst = Number(item.gstRate || 0);
+    const qty = Math.max(1, Number(item.quantity || 1));
+    const total = Number(item.total || 0);
+    const rate = Number(item.rate || 0);
+    const isIncl = item.isPurchaseTaxInclusive ?? item.isTaxInclusive ?? false;
+    const discType = item.purchaseDiscountType || 'amount';
+    const discPct = Number(item.purchaseDiscountPercentage || 0);
+    const discRaw = Number(item.purchaseDiscount || 0);
+    const divisor = 1 + gst / 100;
 
-    // ── Step 4: amounts and profit ────────────────────────────────────────
-    // profit = (saleTaxablePerUnit - purchaseTaxablePerUnit) × salesQty
-    {
-      $addFields: {
-        _itemSalesAmount: {
-          $round: [{ $multiply: ['$_saleTaxablePerUnit', '$_invoiceQty'] }, 2],
-        },
-        _itemPurchaseCost: {
-          $round: [{ $multiply: ['$_purchaseTaxablePerUnit', '$_invoiceQty'] }, 2],
-        },
-      },
-    },
+    if (total > 0) {
+      return { excl: total / divisor / qty, incl: total / qty };
+    }
 
-    {
-      $addFields: {
-        _itemProfit: {
-          $round: [{ $subtract: ['$_itemSalesAmount', '$_itemPurchaseCost'] }, 2],
-        },
-      },
-    },
+    const discPerUnit = discType === 'percentage' ? rate * (discPct / 100) : discRaw / qty;
+    const excl = Math.max(0, isIncl && gst > 0 ? (rate - discPerUnit) / divisor : rate - discPerUnit);
+    return { excl, incl: excl * divisor };
+  };
 
-    // ── Step 5: group back to invoice level ───────────────────────────────
-    {
-      $group: {
-        _id: '$_id',
+  if (neededProducts.size > 0) {
+    const neededObjectIds = Array.from(neededProducts).map((id) => new mongoose.Types.ObjectId(id));
 
-        invoiceDate: { $first: '$invoiceDate' },
-        invoiceNumber: { $first: '$invoiceNumber' },
-        customerName: { $first: '$customerName' },
-        customerMobile: { $first: '$customerMobile' },
+    const purchaseQuery = {
+      status: { $ne: 'cancelled' },
+      'items.product': { $in: neededObjectIds },
+    };
+    if (storeId) purchaseQuery.store = storeId;
 
-        items: {
-          $push: {
-            product: '$_invoiceProductName',
+    const cursor = Purchase.find(purchaseQuery)
+      .select(
+        'createdAt items.product items.rate items.gstRate items.quantity items.total items.isPurchaseTaxInclusive items.isTaxInclusive items.purchaseDiscount items.purchaseDiscountType items.purchaseDiscountPercentage'
+      )
+      .sort({ createdAt: -1 })
+      .allowDiskUse(true)
+      .maxTimeMS(30000)
+      .lean()
+      .cursor();
 
-            // Sale side
-            invoiceQuantity: '$_invoiceQty',
-            invoicePrice: '$_invoiceSellingPrice',
-            saleTaxablePerUnit: { $round: ['$_saleTaxablePerUnit', 2] },
-            invoiceAmount: '$_itemSalesAmount',
+    for await (const purchase of cursor) {
+      for (const item of purchase.items || []) {
+        const pid = item.product ? String(item.product) : null;
+        if (!pid || !neededProducts.has(pid) || purchaseCostMap.has(pid)) continue;
+        purchaseCostMap.set(pid, calcPurchasePerUnit(item));
+      }
+      if (purchaseCostMap.size >= neededProducts.size) break;
+    }
+  }
 
-            // Purchase side
-            purchaseTaxablePerUnit: { $round: ['$_purchaseTaxablePerUnit', 2] },
-            purchaseAmount: '$_itemPurchaseCost',
+  console.log(
+    `[P&L] purchase costs: ${purchaseCostMap.size}/${neededProducts.size} products in ${Date.now() - t1}ms`
+  );
 
-            // Profit
-            itemProfit: '$_itemProfit',
-          },
-        },
+  // ── Step 4: calculation (JS) ──────────────────────────────────────────
+  const result = [];
 
-        totalSales: { $sum: '$_itemSalesAmount' },
-        totalPurchase: { $sum: '$_itemPurchaseCost' },
-        totalProfit: { $sum: '$_itemProfit' },
-      },
-    },
+  invoices.forEach((inv) => {
+    const items = [];
+    let totalSales = 0;
+    let totalPurchase = 0;
+    let totalProfit = 0;
+    let totalSalesWithGst = 0;
+    let totalPurchaseWithGst = 0;
+    let totalProfitWithGst = 0;
 
-    // ── Step 6: final shape ───────────────────────────────────────────────
-    {
-      $project: {
-        invoiceDate: 1,
-        invoiceNumber: 1,
-        customerDescription: {
-          $concat: [{ $ifNull: ['$customerName', 'Cash Customer'] }, ' , ', { $ifNull: ['$customerMobile', '-'] }],
-        },
-        items: 1,
-        totalSales: { $round: ['$totalSales', 2] },
-        totalPurchase: { $round: ['$totalPurchase', 2] },
-        profitLoss: { $round: ['$totalProfit', 2] },
-      },
-    },
+    (inv.items || []).forEach((it) => {
+      if (filterProductId && String(it.product) !== filterProductId) return;
 
-    { $sort: { invoiceDate: 1 } },
-  ]);
+      const qty = Number(it.quantity || 0);
+      const gst = Number(it.gstRate || 0);
+      const total = Number(it.total || 0);
+      const sp = Number(it.sellingPrice || 0);
+      const isIncl = !!it.isTaxInclusive;
+      const divisor = 1 + gst / 100;
 
-  // ── Overall summary ───────────────────────────────────────────────────────
+      // Sale per unit — without GST
+      const saleTaxablePerUnit =
+        total > 0 && qty > 0 ? total / divisor / qty : isIncl && gst > 0 ? sp / divisor : sp;
+
+      // Sale per unit — with GST
+      const saleGrossPerUnit = total > 0 && qty > 0 ? total / qty : isIncl ? sp : sp * divisor;
+
+      const cost = it.product ? purchaseCostMap.get(String(it.product)) : null;
+      const purchaseTaxablePerUnit = cost?.excl || 0;
+      const purchaseGrossPerUnit = cost?.incl || 0;
+
+      // Without GST
+      const invoiceAmount = round2(saleTaxablePerUnit * qty);
+      const purchaseAmount = round2(purchaseTaxablePerUnit * qty);
+      const itemProfit = round2(invoiceAmount - purchaseAmount);
+
+      // With GST
+      const invoiceAmountWithGst = round2(saleGrossPerUnit * qty);
+      const purchaseAmountWithGst = round2(purchaseGrossPerUnit * qty);
+      const itemProfitWithGst = round2(invoiceAmountWithGst - purchaseAmountWithGst);
+
+      items.push({
+        productId: it.product || null,
+        product: it.name,
+        invoiceQuantity: qty,
+        invoiceAmount,
+        purchaseAmount,
+        itemProfit,
+        invoiceAmountWithGst,
+        purchaseAmountWithGst,
+        itemProfitWithGst,
+      });
+
+      totalSales += invoiceAmount;
+      totalPurchase += purchaseAmount;
+      totalProfit += itemProfit;
+      totalSalesWithGst += invoiceAmountWithGst;
+      totalPurchaseWithGst += purchaseAmountWithGst;
+      totalProfitWithGst += itemProfitWithGst;
+    });
+
+    if (!items.length) return;
+
+    result.push({
+      _id: inv._id,
+      invoiceDate: inv.invoiceDate,
+      invoiceNumber: inv.invoiceNumber,
+      customerDescription: `${inv.customerName || 'Cash Customer'} , ${inv.customerMobile || '-'}`,
+      items,
+      totalSales: round2(totalSales),
+      totalPurchase: round2(totalPurchase),
+      profitLoss: round2(totalProfit),
+      totalSalesWithGst: round2(totalSalesWithGst),
+      totalPurchaseWithGst: round2(totalPurchaseWithGst),
+      profitLossWithGst: round2(totalProfitWithGst),
+    });
+  });
+
+  // ── Overall summary ───────────────────────────────────────────────────
   const overall = result.reduce(
     (acc, curr) => {
-      acc.totalSales += curr.totalSales || 0;
-      acc.totalPurchase += curr.totalPurchase || 0;
-      acc.totalProfit += curr.profitLoss || 0;
+      acc.totalSales += curr.totalSales;
+      acc.totalPurchase += curr.totalPurchase;
+      acc.totalProfit += curr.profitLoss;
+      acc.totalSalesWithGst += curr.totalSalesWithGst;
+      acc.totalPurchaseWithGst += curr.totalPurchaseWithGst;
+      acc.totalProfitWithGst += curr.profitLossWithGst;
       return acc;
     },
-    { totalSales: 0, totalPurchase: 0, totalProfit: 0 }
+    {
+      totalSales: 0,
+      totalPurchase: 0,
+      totalProfit: 0,
+      totalSalesWithGst: 0,
+      totalPurchaseWithGst: 0,
+      totalProfitWithGst: 0,
+    }
   );
+
+  // ── Product-wise summary ──────────────────────────────────────────────
+  const productMap = new Map();
+
+  result.forEach((inv) => {
+    inv.items.forEach((it) => {
+      const key = it.productId ? String(it.productId) : `name:${it.product}`;
+
+      if (!productMap.has(key)) {
+        productMap.set(key, {
+          productId: it.productId || null,
+          productName: it.product || 'Unknown Item',
+          quantitySold: 0,
+          totalSales: 0,
+          totalPurchase: 0,
+          totalProfit: 0,
+          totalSalesWithGst: 0,
+          totalPurchaseWithGst: 0,
+          totalProfitWithGst: 0,
+          invoiceIds: new Set(),
+        });
+      }
+
+      const p = productMap.get(key);
+      p.quantitySold += it.invoiceQuantity || 0;
+      p.totalSales += it.invoiceAmount || 0;
+      p.totalPurchase += it.purchaseAmount || 0;
+      p.totalProfit += it.itemProfit || 0;
+      p.totalSalesWithGst += it.invoiceAmountWithGst || 0;
+      p.totalPurchaseWithGst += it.purchaseAmountWithGst || 0;
+      p.totalProfitWithGst += it.itemProfitWithGst || 0;
+      p.invoiceIds.add(String(inv._id));
+    });
+  });
+
+  const products = Array.from(productMap.values())
+    .map((p) => {
+      const ts = round2(p.totalSales);
+      const tp = round2(p.totalProfit);
+      const tsg = round2(p.totalSalesWithGst);
+      const tpg = round2(p.totalProfitWithGst);
+      return {
+        productId: p.productId ? String(p.productId) : null,
+        productName: p.productName,
+        quantitySold: parseFloat(p.quantitySold.toFixed(3)),
+        invoiceCount: p.invoiceIds.size,
+        totalSales: ts,
+        totalPurchase: round2(p.totalPurchase),
+        profitLoss: tp,
+        marginPercent: ts > 0 ? round2((tp / ts) * 100) : 0,
+        totalSalesWithGst: tsg,
+        totalPurchaseWithGst: round2(p.totalPurchaseWithGst),
+        profitLossWithGst: tpg,
+        marginPercentWithGst: tsg > 0 ? round2((tpg / tsg) * 100) : 0,
+      };
+    })
+    .sort((a, b) => b.profitLoss - a.profitLoss);
+
+  console.log(`[P&L] total time: ${Date.now() - t0}ms`);
 
   return {
     summary: {
-      totalSales: parseFloat(overall.totalSales.toFixed(2)),
-      totalPurchase: parseFloat(overall.totalPurchase.toFixed(2)),
-      totalProfit: parseFloat(overall.totalProfit.toFixed(2)),
+      totalSales: round2(overall.totalSales),
+      totalPurchase: round2(overall.totalPurchase),
+      totalProfit: round2(overall.totalProfit),
+      totalSalesWithGst: round2(overall.totalSalesWithGst),
+      totalPurchaseWithGst: round2(overall.totalPurchaseWithGst),
+      totalProfitWithGst: round2(overall.totalProfitWithGst),
     },
-    invoices: result,
+    products,
+    // items removed: frontend does not need them in the invoice-wise table
+    invoices: result.map(({ items, ...rest }) => rest),
   };
 };
-// export async function getStockBalance(filters) {
-//   const { store, itemName, asOnDate, startDate, endDate } = filters;
-
-//   // Fix 1: For asOnDate, set time to end-of-day to include all transactions on that date.
-//   // For date range, startDate begins at 00:00:00 and endDate ends at 23:59:59.
-//   let dateFilter;
-//   if (asOnDate) {
-//     const endOfDay = new Date(asOnDate);
-//     endOfDay.setHours(23, 59, 59, 999);
-//     // No lower bound — asOnDate means "all stock up to and including this date"
-//     dateFilter = { $lte: endOfDay };
-//   } else {
-//     const start = new Date(startDate);
-//     start.setHours(0, 0, 0, 0);
-//     const end = new Date(endDate);
-//     end.setHours(23, 59, 59, 999);
-//     dateFilter = { $gte: start, $lte: end };
-//   }
-
-//   const baseMatch = {
-//     store: new mongoose.Types.ObjectId(store), // Fix 2: ensure ObjectId comparison
-//     date: dateFilter,
-//   };
-
-//   const pipeline = [
-//     { $match: baseMatch },
-
-//     // Join product to get item name
-//     {
-//       $lookup: {
-//         from: 'products',
-//         localField: 'product',
-//         foreignField: '_id',
-//         as: 'productInfo',
-//       },
-//     },
-//     { $unwind: '$productInfo' },
-
-//     // Optional item name filter
-//     ...(itemName ? [{ $match: { 'productInfo.name': { $regex: itemName, $options: 'i' } } }] : []),
-
-//     {
-//       $group: {
-//         _id: '$product',
-//         itemDescription: { $first: '$productInfo.name' },
-
-//         // Fix 3: Use abs(quantity) to guard against any negatively-stored OUT quantities
-//         totalIn: {
-//           $sum: {
-//             $cond: [
-//               { $eq: ['$direction', 'IN'] },
-//               { $abs: '$quantity' }, // always treat as positive
-//               0,
-//             ],
-//           },
-//         },
-//         totalOut: {
-//           $sum: {
-//             $cond: [
-//               { $eq: ['$direction', 'OUT'] },
-//               { $abs: '$quantity' }, // always treat as positive
-//               0,
-//             ],
-//           },
-//         },
-
-//         // Weighted average cost from IN transactions only
-//         totalInValue: {
-//           $sum: {
-//             $cond: [
-//               { $eq: ['$direction', 'IN'] },
-//               {
-//                 $multiply: [{ $abs: '$quantity' }, { $ifNull: ['$rate', 0] }],
-//               },
-//               0,
-//             ],
-//           },
-//         },
-//       },
-//     },
-
-//     {
-//       $project: {
-//         _id: 0,
-//         itemDescription: 1,
-//         totalIn: 1,
-//         totalOut: 1,
-//         // Fix 4: closing balance = IN - OUT (both are now positive sums)
-//         quantity: { $subtract: ['$totalIn', '$totalOut'] },
-//         avgRate: {
-//           $cond: [{ $gt: ['$totalIn', 0] }, { $divide: ['$totalInValue', '$totalIn'] }, 0],
-//         },
-//       },
-//     },
-
-//     {
-//       $addFields: {
-//         itemValue: {
-//           $round: [{ $multiply: ['$quantity', '$avgRate'] }, 2],
-//         },
-//       },
-//     },
-
-//     // Fix 5: allow negative balance to show (for audit trail), or keep $ne: 0 if preferred
-//     { $match: { quantity: { $ne: 0 } } },
-//     { $sort: { itemDescription: 1 } },
-//   ];
-
-//   const result = await StockTransaction.aggregate(pipeline);
-
-//   return result.map(({ itemDescription, quantity, itemValue, totalIn, totalOut }) => ({
-//     itemDescription,
-//     quantity,
-//     itemValue,
-//     totalIn,
-//     totalOut,
-//   }));
-// }
 
 export const getItemStockReport = async (filters = {}) => {
   const { store, itemName, asOnDate, startDate, endDate } = filters;
@@ -1899,11 +1788,7 @@ export const getStockBalance = async (filters = {}) => {
                   { $in: ['$$tx.transactionType', NON_ADJUSTMENT_TYPES] },
                   0,
                   {
-                    $cond: [
-                      { $eq: ['$$tx.direction', 'IN'] },
-                      '$$tx.quantity',
-                      { $multiply: ['$$tx.quantity', -1] },
-                    ],
+                    $cond: [{ $eq: ['$$tx.direction', 'IN'] }, '$$tx.quantity', { $multiply: ['$$tx.quantity', -1] }],
                   },
                 ],
               },
@@ -2269,5 +2154,135 @@ export const getCustomerReport = async ({ store, startDate, endDate }) => {
         customerName: 1,
       },
     },
+  ]);
+};
+
+export const getDueCollectionReport = async ({ store, startDate, endDate, userId, paymentMethod }) => {
+  const match = {
+    store: new mongoose.Types.ObjectId(String(store)),
+    status: 'completed',
+    userId: { $ne: null },
+  };
+
+  if (userId) {
+    match.userId = new mongoose.Types.ObjectId(String(userId));
+  }
+
+  if (paymentMethod) {
+    match.paymentMethod = paymentMethod;
+  }
+
+  if (startDate && endDate) {
+    match.createdAt = { $gte: new Date(startDate), $lte: new Date(endDate) };
+  }
+
+  return Transaction.aggregate([
+    { $match: match },
+
+    // Invoice join
+    {
+      $lookup: {
+        from: 'invoices',
+        localField: 'invoice',
+        foreignField: '_id',
+        as: 'invoice',
+      },
+    },
+    { $unwind: '$invoice' },
+
+    // Cancelled invoice bad
+    { $match: { 'invoice.status': { $ne: 'cancelled' } } },
+
+    // Invoice creation-er somoy joto taka paid hoyechilo (same invoice, same user)
+    // oita "due collection" noy, tai bad dite hobe.
+    // Logic: invoice er prothom transaction (createdAt sob cheye purono) = initial payment
+    {
+      $lookup: {
+        from: 'transactions',
+        let: { invId: '$invoice._id' },
+        pipeline: [
+          { $match: { $expr: { $eq: ['$invoice', '$$invId'] } } },
+          { $sort: { createdAt: 1, _id: 1 } },
+          { $limit: 1 },
+          { $project: { _id: 1 } },
+        ],
+        as: 'firstTx',
+      },
+    },
+    {
+      $addFields: {
+        isInitialPayment: {
+          $eq: [{ $arrayElemAt: ['$firstTx._id', 0] }, '$_id'],
+        },
+      },
+    },
+    { $match: { isInitialPayment: false } },
+
+    // Customer join
+    {
+      $lookup: {
+        from: 'customers',
+        localField: 'invoice.customer',
+        foreignField: '_id',
+        as: 'customer',
+      },
+    },
+    { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
+
+    // User join
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'userId',
+        foreignField: '_id',
+        as: 'user',
+      },
+    },
+    { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+
+    { $sort: { createdAt: -1 } },
+
+    {
+      $group: {
+        _id: '$userId',
+        userName: { $first: { $ifNull: ['$user.name', 'Unknown User'] } },
+        userEmail: { $first: '$user.email' },
+        totalCollected: { $sum: '$amount' },
+        totalPayments: { $sum: 1 },
+        collections: {
+          $push: {
+            _id: '$_id',
+            date: '$createdAt',
+            amount: '$amount',
+            paymentMethod: '$paymentMethod',
+            note: '$note',
+            invoiceId: '$invoice._id',
+            invoiceNumber: '$invoice.invoiceNumber',
+            invoiceTotal: '$invoice.grandTotal',
+            invoiceDue: '$invoice.amountDue',
+            customerName: {
+              $ifNull: ['$customer.name', { $ifNull: ['$invoice.customerName', 'Cash Customer'] }],
+            },
+            customerMobile: {
+              $ifNull: ['$customer.mobile', '$invoice.customerMobile'],
+            },
+          },
+        },
+      },
+    },
+
+    {
+      $project: {
+        _id: 0,
+        userId: '$_id',
+        userName: 1,
+        userEmail: 1,
+        totalCollected: { $round: ['$totalCollected', 2] },
+        totalPayments: 1,
+        collections: 1,
+      },
+    },
+
+    { $sort: { userName: 1 } },
   ]);
 };

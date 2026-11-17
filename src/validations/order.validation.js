@@ -31,7 +31,24 @@ export const createOrder = {
       .default(() => new Date())
       .typeError('Order date must be a valid date'),
 
-    items: yup.array().of(orderItemSchema).required('Items are required').min(1, 'At least one item is required'),
+    // Optional expected delivery date ("" / null / missing -> null)
+    deliveryDate: yup
+      .date()
+      .nullable()
+      .transform((value, originalValue) =>
+        originalValue === '' || originalValue === null || originalValue === undefined
+          ? null
+          : value
+      )
+      .typeError('Delivery date must be a valid date')
+      .min(yup.ref('orderDate'), 'Delivery date cannot be before order date')
+      .default(null),
+
+    items: yup
+      .array()
+      .of(orderItemSchema)
+      .required('Items are required')
+      .min(1, 'At least one item is required'),
   }),
 };
 
@@ -93,8 +110,8 @@ export const createInvoiceFromOrder = {
   params: yup.object().shape({
     orderId: yup
       .string()
-      .required("Order ID is required")
-      .test("is-valid-id", "Invalid Order ID", (v) => isValidObjectId(v)),
+      .required('Order ID is required')
+      .test('is-valid-id', 'Invalid Order ID', (v) => isValidObjectId(v)),
   }),
 
   body: createInvoice.body,

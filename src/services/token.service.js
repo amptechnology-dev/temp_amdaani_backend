@@ -74,8 +74,13 @@ export const verifyRegistrationToken = async (token) => {
   return jwt.verify(token, config.jwt.secret);
 };
 
-export const generateSuperAdminToken = async (userId) => {
-  return generateToken(userId, 24 * 60 * 60 * 1000, tokenTypes.ACCESS);
+export const generateSuperAdminToken = async (userId, roleId = null, roleName = null) => {
+  const payload = {
+    ...(roleId && { role: roleId }),
+    ...(roleName && { roleName }),
+  };
+
+  return generateToken(userId, '24h', tokenTypes.ACCESS, payload);
 };
 
 export const revokeToken = async (token) => {

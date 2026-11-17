@@ -22,6 +22,13 @@ const PlanSchema = new mongoose.Schema({
       note: String,
     },
   ],
+  enabledFeatures: {
+    manageStaff: { type: Boolean, default: false },
+    stockManagement: { type: Boolean, default: false },
+    orders: { type: Boolean, default: false },
+    reports: { type: Boolean, default: false },
+    purchaseManagement: { type: Boolean, default: false },
+  },
   isActive: { type: Boolean, default: true },
 });
 

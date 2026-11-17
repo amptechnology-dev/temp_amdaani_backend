@@ -212,8 +212,7 @@ export const verifySuperAdminLogin = async (otp, req) => {
     ]);
   }
 
-  // Generate token
-  const token = await generateSuperAdminToken(user._id);
+  const token = await generateSuperAdminToken(user._id, role._id, role.name);
 
   console.log('SUPER ADMIN TOKEN:', token);
 

@@ -7,9 +7,9 @@ import { getStoreById } from './store.services.js';
 import config from '../config/config.js';
 import { validatePayuResponse } from '../utils/payu.js';
 import { resetUsage } from '../services/usage.service.js';
-import { Referral } from "../models/referral.model.js";
-import { ReferralSettings } from "../models/referralSettings.model.js";
-import { WalletTransaction } from "../models/wallettransaction.js";
+import { Referral } from '../models/referral.model.js';
+import { ReferralSettings } from '../models/referralSettings.model.js';
+import { WalletTransaction } from '../models/wallettransaction.js';
 import { UserTracking } from '../models/userTracking.model.js';
 import { User } from '../models/user.model.js';
 
@@ -48,6 +48,7 @@ export const createSubscription = async (data) => {
     price: plan.price,
     durationDays: plan.durationDays,
     baseUsageLimits: plan.usageLimits,
+    enabledFeatures: plan.enabledFeatures,
     startDate,
     endDate,
     status: 'active',
@@ -80,6 +81,7 @@ export const createOrRenewFreePlan = async (storeId) => {
       price: freePlan.price,
       durationDays: freePlan.durationDays,
       baseUsageLimits: freePlan.usageLimits,
+      enabledFeatures: freePlan.enabledFeatures,
       startDate,
       endDate,
       status: 'active',
@@ -99,14 +101,10 @@ export const createOrRenewFreePlan = async (storeId) => {
  * @throws {Error} If plan or store not found
  */
 export const initiatePayment = async (planId, storeId) => {
-
-  const [plan, store] = await Promise.all([
-    Plan.findById(planId),
-    getStoreById(storeId),
-  ]);
+  const [plan, store] = await Promise.all([Plan.findById(planId), getStoreById(storeId)]);
 
   if (!plan || !store) {
-    throw new Error("Plan or store not found");
+    throw new Error('Plan or store not found');
   }
 
   let discount = 0;
@@ -118,19 +116,14 @@ export const initiatePayment = async (planId, storeId) => {
   // -----------------------------
   referral = await Referral.findOne({
     referredStore: storeId,
-    rewardStatus: "pending",
+    rewardStatus: 'pending',
   });
 
   if (referral) {
-
     const settings = await ReferralSettings.findOne({ isActive: true });
 
     if (settings) {
-
-      const expiryDate = new Date(
-        referral.createdAt.getTime() +
-        settings.validityDays * 24 * 60 * 60 * 1000
-      );
+      const expiryDate = new Date(referral.createdAt.getTime() + settings.validityDays * 24 * 60 * 60 * 1000);
 
       if (new Date() <= expiryDate) {
         discount = settings.receiverAmount || 0;
@@ -144,7 +137,6 @@ export const initiatePayment = async (planId, storeId) => {
   // Wallet Balance (ONLY usable wallet)
   // -----------------------------
   const walletBalance = await WalletTransaction.aggregate([
-
     {
       $match: {
         store: store._id,
@@ -153,23 +145,17 @@ export const initiatePayment = async (planId, storeId) => {
 
     {
       $group: {
-        _id: "$store",
+        _id: '$store',
         balance: {
           $sum: {
             $cond: [
-
-              { $eq: ["$type", "credit"] },
+              { $eq: ['$type', 'credit'] },
 
               {
-                $cond: [
-                  { $eq: ["$isExpiry", false] },
-                  "$amount",
-                  0
-                ]
+                $cond: [{ $eq: ['$isExpiry', false] }, '$amount', 0],
               },
 
-              { $multiply: ["$amount", -1] }
-
+              { $multiply: ['$amount', -1] },
             ],
           },
         },
@@ -201,14 +187,12 @@ export const initiatePayment = async (planId, storeId) => {
 
   const gstAmount = payableAmount * gstRate;
 
-  const amountWithGst = parseFloat(
-    (payableAmount + gstAmount).toFixed(2)
-  );
+  const amountWithGst = parseFloat((payableAmount + gstAmount).toFixed(2));
 
   // -----------------------------
   // Transaction Setup
   // -----------------------------
-  const txnid = "txn_" + Date.now();
+  const txnid = 'txn_' + Date.now();
 
   const baseUrl = config.appBaseUrl;
 
@@ -221,9 +205,9 @@ export const initiatePayment = async (planId, storeId) => {
     phone: store.contactNo,
     surl: `${baseUrl}/api/subscription/verify-payment`,
     furl: `${baseUrl}/api/subscription/verify-payment`,
-    udf1: plan._id?.toString() || "",
-    udf2: store._id?.toString() || "",
-    udf3: referral ? "referral" : "normal",
+    udf1: plan._id?.toString() || '',
+    udf2: store._id?.toString() || '',
+    udf3: referral ? 'referral' : 'normal',
     udf4: walletUsed.toString(),
   });
 
@@ -234,15 +218,13 @@ export const initiatePayment = async (planId, storeId) => {
     store: storeId,
     amount: amountWithGst,
     walletUsed,
-    currency: "INR",
-    method: "PayU",
+    currency: 'INR',
+    method: 'PayU',
     transactionId: txnid,
-    status: "pending",
+    status: 'pending',
   });
 
-  const paymentUrl = config.payu.testMode
-    ? "https://test.payu.in/_payment"
-    : "https://secure.payu.in/_payment";
+  const paymentUrl = config.payu.testMode ? 'https://test.payu.in/_payment' : 'https://secure.payu.in/_payment';
 
   return {
     txnid,
@@ -262,14 +244,12 @@ export const initiatePayment = async (planId, storeId) => {
 
 export const verifyAndCreateSubscription = async (paymentResponse) => {
   try {
-
-    if (paymentResponse.status !== "success") {
-
+    if (paymentResponse.status !== 'success') {
       await Payment.findOneAndUpdate(
         { transactionId: paymentResponse.txnid },
         {
           $set: {
-            status: "failed",
+            status: 'failed',
             notes: paymentResponse.error_Message,
           },
         }
@@ -278,36 +258,28 @@ export const verifyAndCreateSubscription = async (paymentResponse) => {
       return null;
     }
 
-    const paymentType = paymentResponse.udf3 || "subscription";
+    const paymentType = paymentResponse.udf3 || 'subscription';
     let subscription;
 
     // -----------------------------
     // TOPUP FLOW
     // -----------------------------
-    if (paymentType === "topup") {
-
+    if (paymentType === 'topup') {
       const storeId = paymentResponse.udf2;
 
       const activeSubscription = await getCurrentSubscription(storeId);
 
       if (!activeSubscription || activeSubscription.price === 0) {
-        throw new ApiError(
-          400,
-          "Cannot topup without active subscription or free plan"
-        );
+        throw new ApiError(400, 'Cannot topup without active subscription or free plan');
       }
 
-      subscription = await applyTopUp(
-        activeSubscription._id,
-        paymentResponse.udf1
-      );
+      subscription = await applyTopUp(activeSubscription._id, paymentResponse.udf1);
     }
 
     // -----------------------------
     // NORMAL PLAN PURCHASE
     // -----------------------------
     else {
-
       const storeId = new mongoose.Types.ObjectId(paymentResponse.udf2);
 
       subscription = await createSubscription({
@@ -324,47 +296,42 @@ export const verifyAndCreateSubscription = async (paymentResponse) => {
         transactionId: paymentResponse.txnid,
       });
 
-      console.log("PAYMENT DOC:", paymentDoc);
+      console.log('PAYMENT DOC:', paymentDoc);
 
       const walletUsed = Number(paymentDoc?.walletUsed || 0);
 
-      console.log("Wallet Used:", walletUsed);
+      console.log('Wallet Used:', walletUsed);
 
       // -----------------------------
       // Wallet Deduction
       // -----------------------------
       if (walletUsed > 0) {
-
         await WalletTransaction.create({
           store: storeId,
           amount: walletUsed,
-          type: "debit",
-          source: "plan",
+          type: 'debit',
+          source: 'plan',
         });
 
         let remainingAmount = walletUsed;
 
         const credits = await WalletTransaction.find({
           store: storeId,
-          type: "credit",
+          type: 'credit',
           isExpiry: false,
         }).sort({ createdAt: 1 });
 
-        console.log("Wallet credits found:", credits.length);
+        console.log('Wallet credits found:', credits.length);
 
         for (const credit of credits) {
-
           if (remainingAmount <= 0) break;
 
           if (credit.amount <= remainingAmount) {
-
             remainingAmount -= credit.amount;
 
             credit.amount = 0;
             credit.isExpiry = true;
-
           } else {
-
             credit.amount -= remainingAmount;
             remainingAmount = 0;
           }
@@ -372,54 +339,43 @@ export const verifyAndCreateSubscription = async (paymentResponse) => {
           await credit.save();
         }
 
-        console.log(
-          "Wallet deduction completed. Remaining wallet:",
-          remainingAmount
-        );
+        console.log('Wallet deduction completed. Remaining wallet:', remainingAmount);
       }
 
-      console.log("Checking referral for store:", storeId);
+      console.log('Checking referral for store:', storeId);
 
       // -----------------------------
       // Referral Reward Logic
       // -----------------------------
       const referral = await Referral.findOne({
         referredStore: storeId,
-        rewardStatus: "pending",
+        rewardStatus: 'pending',
       });
 
       if (referral) {
-
         const settings = await ReferralSettings.findOne({ isActive: true });
 
         if (settings) {
-
-          const expiryDate = new Date(
-            referral.createdAt.getTime() +
-            settings.validityDays * 24 * 60 * 60 * 1000
-          );
+          const expiryDate = new Date(referral.createdAt.getTime() + settings.validityDays * 24 * 60 * 60 * 1000);
 
           if (new Date() <= expiryDate) {
-
             await WalletTransaction.create({
               store: referral.referrerStore,
               amount: settings.senderAmount,
-              type: "credit",
-              source: "referral",
+              type: 'credit',
+              source: 'referral',
               referralId: referral._id,
             });
 
             referral.senderReward = settings.senderAmount;
             referral.receiverReward = settings.receiverAmount;
             referral.planId = paymentResponse.udf1;
-            referral.rewardStatus = "completed";
+            referral.rewardStatus = 'completed';
             referral.rewardAppliedAt = new Date();
 
             await referral.save();
-
           } else {
-
-            referral.rewardStatus = "expired";
+            referral.rewardStatus = 'expired';
             await referral.save();
           }
         }
@@ -434,7 +390,7 @@ export const verifyAndCreateSubscription = async (paymentResponse) => {
       {
         $set: {
           subscription: subscription._id,
-          status: "success",
+          status: 'success',
           paidAt: new Date(),
           method: `PayU - ${paymentResponse.mode}`,
         },
@@ -443,29 +399,22 @@ export const verifyAndCreateSubscription = async (paymentResponse) => {
     );
 
     if (!payment) {
-
       await Subscription.findByIdAndDelete(subscription._id);
 
-      throw new ApiError(400, "Payment Verification Failed!", [
-        { message: "Payment not found with transaction ID." },
-      ]);
+      throw new ApiError(400, 'Payment Verification Failed!', [{ message: 'Payment not found with transaction ID.' }]);
     }
 
     await UserTracking.findOneAndUpdate(
       {
-        storeId:
-          subscription.store,
+        storeId: subscription.store,
       },
       {
         $set: {
-          planPurchased:
-            true,
+          planPurchased: true,
 
-          planPurchasedAt:
-            new Date(),
+          planPurchasedAt: new Date(),
 
-          currentStage:
-            'plan_purchased',
+          currentStage: 'plan_purchased',
         },
       },
       {
@@ -474,7 +423,6 @@ export const verifyAndCreateSubscription = async (paymentResponse) => {
     );
 
     return subscription;
-
   } catch (error) {
     throw error;
   }
@@ -558,6 +506,7 @@ const createUpcomingSubscription = async (data) => {
     price: plan.price,
     durationDays: plan.durationDays,
     baseUsageLimits: plan.usageLimits,
+    enabledFeatures: plan.enabledFeatures,
     startDate,
     endDate,
     status: 'upcoming',
@@ -573,55 +522,30 @@ export const getUpcomingSubscriptions = async (storeId) => {
 };
 
 export const getSubscriptionHistory = async (storeId) => {
+  const subscriptions = await Subscription.find({
+    store: storeId,
+  })
+    .populate('plan', 'name price durationDays usageLimits')
+    .sort({
+      createdAt: -1,
+    });
 
-  const subscriptions =
-    await Subscription.find({
-      store: storeId,
-    })
-      .populate(
-        'plan',
-        'name price durationDays usageLimits'
-      )
-      .sort({
-        createdAt: -1,
-      });
-
-  const payments =
-    await Payment.find({
-      store: storeId,
-      status: 'success',
-    })
-      .sort({
-        createdAt: -1,
-      });
+  const payments = await Payment.find({
+    store: storeId,
+    status: 'success',
+  }).sort({
+    createdAt: -1,
+  });
 
   // current active plan
   const currentPlan =
-    subscriptions.find(
-      (sub) =>
-        sub.status ===
-          'active' &&
-        new Date(sub.endDate) >=
-          new Date()
-    ) || null;
+    subscriptions.find((sub) => sub.status === 'active' && new Date(sub.endDate) >= new Date()) || null;
 
   // expired/cancelled plans
-  const previousPlans =
-    subscriptions.filter(
-      (sub) =>
-        sub.status ===
-          'expired' ||
-        sub.status ===
-          'canceled'
-    );
+  const previousPlans = subscriptions.filter((sub) => sub.status === 'expired' || sub.status === 'canceled');
 
   // upcoming plans
-  const upcomingPlans =
-    subscriptions.filter(
-      (sub) =>
-        sub.status ===
-        'upcoming'
-    );
+  const upcomingPlans = subscriptions.filter((sub) => sub.status === 'upcoming');
 
   return {
     currentPlan,
@@ -630,154 +554,108 @@ export const getSubscriptionHistory = async (storeId) => {
 
     upcomingPlans,
 
-    allPlans:
-      subscriptions,
+    allPlans: subscriptions,
 
     payments,
   };
 };
 
-export const getUserSubscriptionDetails =
-  async (userId) => {
+export const getUserSubscriptionDetails = async (userId) => {
+  const user = await User.findById(userId).populate('store').populate('role');
 
-    const user =
-      await User.findById(
-        userId
-      )
-        .populate(
-          'store'
-        )
-        .populate(
-          'role'
-        );
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
 
-    if (!user) {
-      throw new ApiError(
-        404,
-        'User not found'
-      );
-    }
+  const storeId = user.store?._id;
 
-    const storeId =
-      user.store?._id;
+  if (!storeId) {
+    throw new ApiError(404, 'Store not found for this user');
+  }
 
-    if (!storeId) {
-      throw new ApiError(
-        404,
-        'Store not found for this user'
-      );
-    }
+  // -------------------------
+  // Current Subscription
+  // -------------------------
+  const currentPlan = await Subscription.findOne({
+    store: storeId,
+    status: 'active',
+  })
+    .populate('plan')
+    .sort({
+      createdAt: -1,
+    });
 
-    // -------------------------
-    // Current Subscription
-    // -------------------------
-    const currentPlan =
-      await Subscription.findOne({
-        store:
-          storeId,
-        status:
-          'active',
-      })
-        .populate(
-          'plan'
-        )
-        .sort({
-          createdAt: -1,
-        });
+  // -------------------------
+  // Previous Subscription
+  // -------------------------
+  const previousPlan = await Subscription.findOne({
+    store: storeId,
+    status: {
+      $in: ['expired', 'canceled'],
+    },
+  })
+    .populate('plan')
+    .sort({
+      endDate: -1,
+    });
 
-    // -------------------------
-    // Previous Subscription
-    // -------------------------
-    const previousPlan =
-      await Subscription.findOne({
-        store:
-          storeId,
-        status: {
-          $in: [
-            'expired',
-            'canceled',
-          ],
-        },
-      })
-        .populate(
-          'plan'
-        )
-        .sort({
-          endDate:
-            -1,
-        });
+  // -------------------------
+  // Upcoming Subscription
+  // -------------------------
+  const upcomingPlans = await Subscription.find({
+    store: storeId,
+    status: 'upcoming',
+  })
+    .populate('plan')
+    .sort({
+      startDate: 1,
+    });
 
-    // -------------------------
-    // Upcoming Subscription
-    // -------------------------
-    const upcomingPlans =
-      await Subscription.find({
-        store:
-          storeId,
-        status:
-          'upcoming',
-      })
-        .populate(
-          'plan'
-        )
-        .sort({
-          startDate:
-            1,
-        });
+  // -------------------------
+  // All Payments
+  // -------------------------
+  const payments = await Payment.find({
+    store: storeId,
+  })
+    .populate({
+      path: 'subscription',
+      populate: {
+        path: 'plan',
+      },
+    })
+    .sort({
+      createdAt: -1,
+    });
 
-    // -------------------------
-    // All Payments
-    // -------------------------
-    const payments =
-      await Payment.find({
-        store:
-          storeId,
-      })
-        .populate({
-          path:
-            'subscription',
-          populate:
-          {
-            path:
-              'plan',
-          },
-        })
-        .sort({
-          createdAt:
-            -1,
-        });
+  // -------------------------
+  // Full Subscription History
+  // -------------------------
+  const allSubscriptions = await Subscription.find({
+    store: storeId,
+  })
+    .populate('plan')
+    .sort({
+      createdAt: -1,
+    });
 
-    // -------------------------
-    // Full Subscription History
-    // -------------------------
-    const allSubscriptions =
-      await Subscription.find({
-        store:
-          storeId,
-      })
-        .populate(
-          'plan'
-        )
-        .sort({
-          createdAt:
-            -1,
-        });
+  return {
+    user,
+    store: user.store,
 
-    return {
-      user,
-      store:
-        user.store,
+    currentPlan,
 
-      currentPlan,
+    previousPlan,
 
-      previousPlan,
+    upcomingPlans,
 
-      upcomingPlans,
+    subscriptions: allSubscriptions,
 
-      subscriptions:
-        allSubscriptions,
-
-      payments,
-    };
+    payments,
   };
+};
 
+export const storeHasFeature = async (storeId, featureKey) => {
+  const sub = await getCurrentSubscription(storeId); 
+  if (!sub) return false;
+  return Boolean(sub.enabledFeatures?.[featureKey] ?? sub.plan?.enabledFeatures?.[featureKey] ?? false);
+};

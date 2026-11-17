@@ -4,9 +4,10 @@ import { Product } from '../models/product.model.js';
 import { ApiError } from '../utils/responseHandler.js';
 import { compressAndUpload, deleteFileFromR2 } from '../services/image.service.js';
 import config from '../config/config.js';
-import { getCurrentSubscription } from './subscription.services.js';
 import { getUsage } from './usage.service.js';
 import { getCurrentFinancialYear } from '../utils/getCurrentFinancialYear.js';
+import logger from '../config/logger.js';
+import { getCurrentSubscription, storeHasFeature } from './subscription.services.js';
 
 export const createStore = async (data, session = null) => {
   const financialYear = getCurrentFinancialYear();
@@ -49,6 +50,30 @@ export const updateStore = async (storeId, data, files, session = null) => {
     const store = await Store.findById(storeId, {}, { session });
     if (!store) {
       throw new ApiError(404, 'Store not found', [{ source: 'params', field: 'id', message: 'Invalid store id.' }]);
+    }
+
+    // ---- Plan feature gating ----
+    // Shudhu tokhon block korbe jokhon feature notun kore OFF theke ON hocche.
+    // Already ON thakle (ba onno setting jemon MRP change korle) kono check hobe na.
+    if (data?.settings) {
+      const currentSettings = store.settings || {};
+
+      const turningOnStock = data.settings.stockManagement === true && !currentSettings.stockManagement;
+
+      const turningOnPurchase =
+        data.settings.purchaseOrderManagement === true && !currentSettings.purchaseOrderManagement;
+
+      if (turningOnStock && !(await storeHasFeature(storeId, 'stockManagement'))) {
+        throw new ApiError(403, 'Stock Management is not available in your plan', [
+          { source: 'plan', field: 'stockManagement', message: 'FEATURE_LOCKED' },
+        ]);
+      }
+
+      if (turningOnPurchase && !(await storeHasFeature(storeId, 'purchaseManagement'))) {
+        throw new ApiError(403, 'Purchase Management is not available in your plan', [
+          { source: 'plan', field: 'purchaseManagement', message: 'FEATURE_LOCKED' },
+        ]);
+      }
     }
 
     // file uploads

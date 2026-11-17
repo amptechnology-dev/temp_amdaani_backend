@@ -11,6 +11,13 @@ const SubscriptionSchema = new mongoose.Schema(
       invoices: { type: Number, default: 0 },
       unlimited: { type: Boolean, default: false },
     },
+     enabledFeatures: {
+      manageStaff: Boolean,
+      stockManagement: Boolean,
+      orders: Boolean,
+      reports: Boolean,
+      purchaseManagement: Boolean,
+    },
     topUps: [
       {
         plan: {

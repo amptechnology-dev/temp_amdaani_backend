@@ -112,9 +112,26 @@ export const updateStaffDetails = asyncHandler(async (req, res) => {
 });
 
 export const sendAuthOtp = asyncHandler(async (req, res) => {
-  const { phone } = req.body;
-  await sendOtp(phone);
-  return new ApiResponse(200, null, 'OTP sent successfully!').send(res);
+  const { phone, email } = req.body;
+  const result = await sendOtp(phone, email);
+
+  if (result.channel === 'email_required') {
+    return new ApiResponse(
+      200,
+      { channel: 'email_required' },
+      'SMS service is currently unavailable. Please enter your email to receive the OTP.'
+    ).send(res);
+  }
+
+  if (result.channel === 'email') {
+    return new ApiResponse(
+      200,
+      { channel: 'email', maskedEmail: result.maskedEmail },
+      `SMS could not be delivered. OTP has been sent to your registered email (${result.maskedEmail}). Please check your email.`
+    ).send(res);
+  }
+
+  return new ApiResponse(200, { channel: 'sms' }, 'OTP sent successfully!').send(res);
 });
 
 export const verifyAuthOtp = asyncHandler(async (req, res) => {

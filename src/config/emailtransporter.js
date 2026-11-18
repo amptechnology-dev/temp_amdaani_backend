@@ -32,6 +32,11 @@ const transporter = nodemailer.createTransport({
   tls: {
     rejectUnauthorized: false,
   },
+  pool: true, // connection reuse, 2nd request theke fast
+  maxConnections: 3,
+  connectionTimeout: 8000,
+  greetingTimeout: 8000,
+  socketTimeout: 10000,
 });
 
 export default transporter;

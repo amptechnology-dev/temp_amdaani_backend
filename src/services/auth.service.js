@@ -32,71 +32,130 @@ import { UserTracking } from '../models/userTracking.model.js';
 import { UserStore } from '../models/UserStore.model.js';
 import { Staff } from '../models/staff.model.js';
 import jwt from 'jsonwebtoken';
+import { sendOtpEmail, maskEmail } from '../utils/otpEmail.js';
 
-export const sendOtp = async (phone) => {
+const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
+const hashOtp = (otp) => crypto.createHash('sha256').update(otp).digest('hex');
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// SMS pathay. Je kono karone fail hole (network, timeout, non-success) false return kore, throw kore na.
+const trySendSms = async (phone, otp) => {
+  try {
+    const message = `${otp} is your OTP to login into AMDANI. Please do not share this OTP with anyone.- AMPTECH`;
+
+    const params = {
+      username: 'MTECHTRANS',
+      apikey: '38892-B2424',
+      apirequest: 'Text',
+      sender: 'AMPTCH',
+      mobile: phone,
+      message,
+      route: 'TRANS',
+      TemplateID: '1407172715834228636',
+      format: 'JSON',
+    };
+
+    const smsResponse = await axios.get('http://text.mboxsolution.com/sms-panel/api/http/index.php', {
+      params,
+      timeout: 4000,
+    });
+
+    if (smsResponse.data?.status !== 'success') {
+      console.error('Failed to send SMS:', smsResponse.data);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('SMS gateway error:', err.message);
+    return false;
+  }
+};
+
+/**
+ * @returns {{channel: 'sms'|'email'|'email_required', maskedEmail?: string}}
+ */
+export const sendOtp = async (phone, email) => {
   if (!phone) {
     throw new ApiError(400, 'Phone number is required', [
-      {
-        source: 'body',
-        field: 'phone',
-        message: 'Phone is required',
-      },
+      { source: 'body', field: 'phone', message: 'Phone is required' },
     ]);
   }
+
   const user = await User.findOne({ phone });
   if (user && !user.isActive) {
     throw new ApiError(403, 'You are not an active user', [
-      {
-        source: 'body',
-        field: 'user',
-        message: 'Your account is not active. OTP cannot be sent.',
-      },
+      { source: 'body', field: 'user', message: 'Your account is not active. OTP cannot be sent.' },
     ]);
   }
 
   if (phone === '9999999999') {
-    return true;
+    return { channel: 'sms' };
   }
 
-  // Generate OTP
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const smsFailedKey = `otpSmsFailed:${phone}`;
 
-  // Hash OTP
-  const hash = crypto.createHash('sha256').update(otp).digest('hex');
+  // ── NEW USER + email diyeche: shudhu tokhon-i allow jodi ager SMS sotti fail hoye thake ──
+  if (!user && email) {
+    const cleanEmail = String(email).trim().toLowerCase();
 
-  // Store OTP in Redis (5 min expiry)
-  await redis.set(`otp:${phone}`, hash, 'EX', 60 * 5);
+    if (!EMAIL_REGEX.test(cleanEmail)) {
+      throw new ApiError(400, 'Enter a valid email address', [
+        { source: 'body', field: 'email', message: 'Invalid email' },
+      ]);
+    }
 
-  // SMS message
-  const message = `${otp} is your OTP to login into AMDANI. Please do not share this OTP with anyone.- AMPTECH`;
+    const smsFailed = await redis.get(smsFailedKey);
+    if (!smsFailed) {
+      throw new ApiError(400, 'Email verification is not available. Please request OTP on your mobile number.');
+    }
 
-  const params = {
-    username: 'MTECHTRANS',
-    apikey: '38892-B2424',
-    apirequest: 'Text',
-    sender: 'AMPTCH',
-    mobile: phone,
-    message,
-    route: 'TRANS',
-    TemplateID: '1407172715834228636',
-    format: 'JSON',
-  };
+    const otp = generateOtp();
+    await redis.set(`otp:${phone}`, hashOtp(otp), 'EX', 60 * 5);
 
-  // Send SMS
-  const smsResponse = await axios.get('http://text.mboxsolution.com/sms-panel/api/http/index.php', { params });
+    try {
+      await sendOtpEmail(cleanEmail, otp);
+    } catch (err) {
+      console.error('OTP email failed:', err.message);
+      await redis.del(`otp:${phone}`);
+      throw new ApiError(500, 'Failed to send OTP email. Please try again.');
+    }
 
-  // SMS failed
-  if (smsResponse.data.status !== 'success') {
-    console.error('Failed to send SMS:', smsResponse.data);
-
-    throw new ApiError(500, 'Failed to send SMS.', [
-      {
-        message: 'Failed to send SMS',
-      },
-    ]);
+    return { channel: 'email', maskedEmail: maskEmail(cleanEmail) };
   }
 
-  return true;
+  // ── Normal flow: age SMS ──
+  const otp = generateOtp();
+  await redis.set(`otp:${phone}`, hashOtp(otp), 'EX', 60 * 5);
+
+  const smsOk = await trySendSms(phone, otp);
+  if (smsOk) {
+    return { channel: 'sms' };
+  }
+
+  // ── SMS fail → fallback ──
+
+  // EXISTING USER: DB er registered email e pathao
+  if (user) {
+    if (!user.email) {
+      await redis.del(`otp:${phone}`);
+      throw new ApiError(500, 'Failed to send SMS and no registered email found for this account.');
+    }
+
+    try {
+      await sendOtpEmail(user.email, otp);
+    } catch (err) {
+      console.error('OTP email failed:', err.message);
+      await redis.del(`otp:${phone}`);
+      throw new ApiError(500, 'Failed to send OTP. Please try again later.');
+    }
+
+    return { channel: 'email', maskedEmail: maskEmail(user.email) };
+  }
+
+  // NEW USER: email lagbe. SMS OTP bad, flag set (10 min)
+  await redis.del(`otp:${phone}`);
+  await redis.set(smsFailedKey, '1', 'EX', 60 * 10);
+  return { channel: 'email_required' };
 };
 
 export const verifyOtp = async (phone, otp, req) => {
@@ -122,14 +181,13 @@ export const verifyOtp = async (phone, otp, req) => {
 
   const user = await User.findOne({ phone });
 
-  // নতুন user — registration flow
   if (!user) {
     const tempToken = await generateRegistrationToken(phone);
     await redis.del(`otp:${phone}`);
+    await redis.del(`otpSmsFailed:${phone}`);
     return { status: 'new_user', tempToken };
   }
 
-  // existing user — এখন কয়টা store membership আছে চেক করো
   const memberships = await UserStore.find({ user: user._id, isActive: true })
     .populate('store', 'name logoUrl isActive')
     .populate('role', 'name');

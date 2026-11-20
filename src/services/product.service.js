@@ -515,11 +515,6 @@ export const adjustProductStock = async (data, session = null) => {
     saleId = null,
 
     purchasePrice,
-    salePrice,
-
-    discountPrice,
-    discountType,
-    discountPercentage,
 
     purchaseDiscount,
     purchaseDiscountType,
@@ -529,12 +524,9 @@ export const adjustProductStock = async (data, session = null) => {
     remarks = '',
 
     hsn,
-    isTaxInclusive = false,
-    isPurchaseTaxInclusive = false,
+    isPurchaseTaxInclusive,
     gstRate,
   } = data;
-
-  console.log('Adjusting stock for product', JSON.stringify(productId), 'with quantity', JSON.stringify(quantity));
 
   // ==========================
   // FIND PRODUCT
@@ -548,34 +540,19 @@ export const adjustProductStock = async (data, session = null) => {
   // ==========================
   // UPDATE CURRENT STOCK
   // ==========================
-
   product.currentStock += quantity;
 
   // ==========================
-  // UPDATE PRODUCT INFO
+  // UPDATE PURCHASE-SIDE PRODUCT INFO ONLY
+  // Sale-side fields (sellingPrice, discount*, isTaxInclusive, gstRate)
+  // kokhono ekhane touch kora hobe na.
   // ==========================
   if (purchasePrice !== undefined) {
     product.costPrice = purchasePrice;
   }
 
-  if(mrp !== undefined) {
+  if (mrp !== undefined) {
     product.mrp = mrp;
-  }
-
-  if (salePrice !== undefined) {
-    product.sellingPrice = salePrice;
-  }
-
-  if (discountPrice !== undefined) {
-    product.discountPrice = discountPrice;
-  }
-
-  if (discountType !== undefined) {
-    product.discountType = discountType;
-  }
-
-  if (discountPercentage !== undefined) {
-    product.discountPercentage = discountPercentage;
   }
 
   if (purchaseDiscount !== undefined) {
@@ -594,60 +571,39 @@ export const adjustProductStock = async (data, session = null) => {
     product.hsn = hsn;
   }
 
-  if (isTaxInclusive !== undefined) {
-    product.isTaxInclusive = isTaxInclusive;
-  }
-
   if (isPurchaseTaxInclusive !== undefined) {
     product.isPurchaseTaxInclusive = isPurchaseTaxInclusive;
   }
 
+  // purchase er gstRate shudhu purchaseGstRate e jabe
   if (gstRate !== undefined) {
-    product.gstRate = gstRate;
     product.purchaseGstRate = gstRate;
   }
 
   // ==========================
   // SAVE PRODUCT
   // ==========================
-  await product.save({
-    session,
-  });
+  await product.save({ session });
 
   // ==========================
   // CREATE STOCK TRANSACTION
   // ==========================
   const stockTransaction = new StockTransaction({
     product: productId,
-
     store: product.store,
-
     batch: batchId,
-
     date,
-
     transactionType: transactionType || 'MANUAL',
-
     quantity: Math.abs(quantity),
-
     direction: quantity >= 0 ? 'IN' : 'OUT',
-
     rate,
-
     purchaseId,
     saleId,
-
     totalAmount: rate * Math.abs(quantity),
-
     remarks,
   });
 
-  // ==========================
-  // SAVE TRANSACTION
-  // ==========================
-  return await stockTransaction.save({
-    session,
-  });
+  return await stockTransaction.save({ session });
 };
 
 export const forRemoveadjustProductStock = async (data, session = null) => {
@@ -664,11 +620,6 @@ export const forRemoveadjustProductStock = async (data, session = null) => {
     saleId = null,
 
     purchasePrice,
-    salePrice,
-
-    discountPrice,
-    discountType,
-    discountPercentage,
 
     purchaseDiscount,
     purchaseDiscountType,
@@ -677,12 +628,9 @@ export const forRemoveadjustProductStock = async (data, session = null) => {
     remarks = '',
 
     hsn,
-    isTaxInclusive = false,
-    isPurchaseTaxInclusive = false,
+    isPurchaseTaxInclusive,
     gstRate,
   } = data;
-
-  console.log('Adjusting stock for product', JSON.stringify(productId), 'with quantity', JSON.stringify(quantity));
 
   // ==========================
   // FIND PRODUCT
@@ -703,26 +651,10 @@ export const forRemoveadjustProductStock = async (data, session = null) => {
   product.currentStock += quantity;
 
   // ==========================
-  // UPDATE PRODUCT INFO
+  // UPDATE PURCHASE-SIDE PRODUCT INFO ONLY
   // ==========================
   if (purchasePrice !== undefined) {
     product.costPrice = purchasePrice;
-  }
-
-  if (salePrice !== undefined) {
-    product.sellingPrice = salePrice;
-  }
-
-  if (discountPrice !== undefined) {
-    product.discountPrice = discountPrice;
-  }
-
-  if (discountType !== undefined) {
-    product.discountType = discountType;
-  }
-
-  if (discountPercentage !== undefined) {
-    product.discountPercentage = discountPercentage;
   }
 
   if (purchaseDiscount !== undefined) {
@@ -741,60 +673,38 @@ export const forRemoveadjustProductStock = async (data, session = null) => {
     product.hsn = hsn;
   }
 
-  if (isTaxInclusive !== undefined) {
-    product.isTaxInclusive = isTaxInclusive;
-  }
-
   if (isPurchaseTaxInclusive !== undefined) {
     product.isPurchaseTaxInclusive = isPurchaseTaxInclusive;
   }
 
   if (gstRate !== undefined) {
-    product.gstRate = gstRate;
     product.purchaseGstRate = gstRate;
   }
 
   // ==========================
   // SAVE PRODUCT
   // ==========================
-  await product.save({
-    session,
-  });
+  await product.save({ session });
 
   // ==========================
   // CREATE STOCK TRANSACTION
   // ==========================
   const stockTransaction = new StockTransaction({
     product: productId,
-
     store: product.store,
-
     batch: batchId,
-
     date,
-
     transactionType: transactionType || 'MANUAL',
-
     quantity: Math.abs(quantity),
-
     direction: quantity >= 0 ? 'IN' : 'OUT',
-
     rate,
-
     purchaseId,
     saleId,
-
     totalAmount: rate * Math.abs(quantity),
-
     remarks,
   });
 
-  // ==========================
-  // SAVE TRANSACTION
-  // ==========================
-  return await stockTransaction.save({
-    session,
-  });
+  return await stockTransaction.save({ session });
 };
 
 export const getStockTransactionsByProduct = async (productId, filters = {}, options = {}) => {
@@ -851,8 +761,6 @@ export const updateStockAfterPurchase = async (purchase, session = null) => {
   const { items = [], date } = purchase;
   if (!items.length) return;
 
-  console.log('update stock ===> ', JSON.stringify(items));
-
   for (const item of items) {
     await adjustProductStock(
       {
@@ -866,17 +774,12 @@ export const updateStockAfterPurchase = async (purchase, session = null) => {
         purchaseId: purchase._id,
         purchasePrice: item.rate,
         remarks: `Purchase added for ${item.quantity} units`,
-        salePrice: item.sellingPrice,
-        discountPrice: item.discountPrice,
-        discountType: item.discountType,
-        discountPercentage: item.discountPercentage,
         purchaseDiscount: item.purchaseDiscount,
         purchaseDiscountType: item.purchaseDiscountType,
         purchaseDiscountPercentage: item.purchaseDiscountPercentage,
-        isTaxInclusive: item.isTaxInclusive,
         isPurchaseTaxInclusive: item.isPurchaseTaxInclusive,
         hsn: item.hsn,
-        gstRate: item.gstRate,
+        gstRate: item.gstRate, // purchase GST, product e purchaseGstRate hishebe jabe
       },
       session
     );
